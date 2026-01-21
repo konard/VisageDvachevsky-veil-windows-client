@@ -1,0 +1,471 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v1.0.0
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.0.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Create as prerelease'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  VERSION: ${{ github.event.inputs.version || github.ref_name }}
+
+jobs:
+  # ============================================================================
+  # Build Windows
+  # ============================================================================
+  build-windows:
+    name: Build Windows (x64)
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for changelog
+
+      - name: Get version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.6.*'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2019_64'
+          modules: 'qtnetworkauth'
+          cache: true
+
+      - name: Install Ninja
+        run: choco install ninja -y
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/vcpkg
+            !${{ github.workspace }}/vcpkg/buildtrees
+            !${{ github.workspace }}/vcpkg/packages
+            !${{ github.workspace }}/vcpkg/downloads
+          key: vcpkg-windows-x64-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-windows-x64-
+
+      - name: Setup vcpkg
+        run: |
+          if (!(Test-Path vcpkg)) {
+            git clone https://github.com/microsoft/vcpkg.git
+            ./vcpkg/bootstrap-vcpkg.bat
+          }
+          echo "${{ github.workspace }}/vcpkg" >> $env:GITHUB_PATH
+
+      - name: Install dependencies via vcpkg
+        run: |
+          ./vcpkg/vcpkg install libsodium:x64-windows
+          ./vcpkg/vcpkg install spdlog:x64-windows
+          ./vcpkg/vcpkg install fmt:x64-windows
+          ./vcpkg/vcpkg install cli11:x64-windows
+          ./vcpkg/vcpkg install nlohmann-json:x64-windows
+
+      - name: Download Wintun
+        run: |
+          $wintunUrl = "https://www.wintun.net/builds/wintun-0.14.1.zip"
+          $wintunZip = "${{ github.workspace }}/wintun.zip"
+          $wintunDir = "${{ github.workspace }}/wintun"
+
+          Invoke-WebRequest -Uri $wintunUrl -OutFile $wintunZip
+          Expand-Archive -Path $wintunZip -DestinationPath $wintunDir -Force
+
+          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/driver"
+          Copy-Item "$wintunDir/wintun/bin/amd64/wintun.dll" "${{ github.workspace }}/driver/"
+
+      - name: Configure CMake
+        run: |
+          $version = "${{ steps.version.outputs.version }}".Split('.')
+          $major = if ($version.Length -gt 0) { $version[0] } else { "1" }
+          $minor = if ($version.Length -gt 1) { $version[1] } else { "0" }
+          $patch = if ($version.Length -gt 2) { $version[2].Split('-')[0] } else { "0" }
+
+          cmake -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DVEIL_BUILD_TESTS=OFF `
+            -DVEIL_BUILD_GUI=ON `
+            -DVEIL_BUILD_SERVER=OFF `
+            -DVEIL_VERSION_MAJOR=$major `
+            -DVEIL_VERSION_MINOR=$minor `
+            -DVEIL_VERSION_PATCH=$patch
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Prepare artifacts
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts/bin
+
+          # Copy executables
+          Copy-Item build/src/veil-client.exe artifacts/bin/ -ErrorAction SilentlyContinue
+          Copy-Item build/src/gui-client/veil-client-gui.exe artifacts/bin/ -ErrorAction SilentlyContinue
+
+          # Copy Wintun driver
+          New-Item -ItemType Directory -Force -Path artifacts/driver
+          Copy-Item driver/wintun.dll artifacts/driver/
+
+          # Copy Qt dependencies
+          if (Test-Path "build/src/gui-client/veil-client-gui.exe") {
+            windeployqt --no-translations --no-opengl-sw artifacts/bin/veil-client-gui.exe
+          }
+
+          # Create version file
+          Set-Content -Path "artifacts/VERSION.txt" -Value "Version: ${{ steps.version.outputs.version }}`nBuild: ${{ github.sha }}`nDate: $(Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ')"
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: veil-vpn-windows-x64
+          path: artifacts/
+          retention-days: 14
+
+  # ============================================================================
+  # Create Windows Installer
+  # ============================================================================
+  create-windows-installer:
+    name: Create Windows Installer
+    runs-on: windows-latest
+    needs: build-windows
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: veil-vpn-windows-x64
+          path: installer/
+
+      - name: Install NSIS
+        run: |
+          $maxRetries = 3
+          $retryCount = 0
+          $success = $false
+
+          while (-not $success -and $retryCount -lt $maxRetries) {
+            try {
+              choco install nsis -y --no-progress
+              $success = $true
+            } catch {
+              $retryCount++
+              if ($retryCount -lt $maxRetries) {
+                $waitTime = [math]::Pow(2, $retryCount) * 5
+                Write-Host "NSIS installation failed. Retrying in $waitTime seconds..."
+                Start-Sleep -Seconds $waitTime
+              } else {
+                throw "Failed to install NSIS after $maxRetries attempts"
+              }
+            }
+          }
+
+      - name: Build installer
+        run: |
+          cd installer
+          # Prepare directory structure
+          New-Item -ItemType Directory -Force -Path docs
+          Copy-Item ../README.md docs/ -ErrorAction SilentlyContinue
+
+          # Update version in NSIS script
+          $version = "${{ needs.build-windows.outputs.version }}"
+          $nsiContent = Get-Content veil-vpn.nsi -Raw
+          $nsiContent = $nsiContent -replace '!define PRODUCT_VERSION ".*"', "!define PRODUCT_VERSION `"$version`""
+          Set-Content veil-vpn.nsi $nsiContent
+
+          # Build the installer
+          & 'C:\Program Files (x86)\NSIS\makensis.exe' veil-vpn.nsi
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: veil-vpn-installer
+          path: installer/*.exe
+          retention-days: 14
+
+  # ============================================================================
+  # Build Linux
+  # ============================================================================
+  build-linux:
+    name: Build Linux (Ubuntu 22.04)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            clang \
+            lld \
+            pkg-config \
+            libsodium-dev \
+            libspdlog-dev \
+            libfmt-dev \
+            nlohmann-json3-dev \
+            qt6-base-dev \
+            qt6-networkauth-dev \
+            libgl1-mesa-dev \
+            dpkg-dev
+
+      - name: Configure CMake
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "${VERSION%%-*}"
+
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DVEIL_BUILD_TESTS=OFF \
+            -DVEIL_BUILD_GUI=ON \
+            -DVEIL_BUILD_SERVER=ON \
+            -DVEIL_VERSION_MAJOR=${MAJOR:-1} \
+            -DVEIL_VERSION_MINOR=${MINOR:-0} \
+            -DVEIL_VERSION_PATCH=${PATCH:-0}
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p artifacts/bin
+
+          # Copy executables
+          cp build/src/veil-client artifacts/bin/ 2>/dev/null || true
+          cp build/src/veil-server artifacts/bin/ 2>/dev/null || true
+          cp build/src/gui-client/veil-client-gui artifacts/bin/ 2>/dev/null || true
+
+          # Strip binaries
+          strip artifacts/bin/* 2>/dev/null || true
+
+          # Create version file
+          echo "Version: ${{ steps.version.outputs.version }}" > artifacts/VERSION.txt
+          echo "Build: ${{ github.sha }}" >> artifacts/VERSION.txt
+          echo "Date: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> artifacts/VERSION.txt
+
+      - name: Create DEB package
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          mkdir -p deb/DEBIAN
+          mkdir -p deb/usr/bin
+          mkdir -p deb/usr/share/applications
+          mkdir -p deb/usr/share/icons/hicolor/64x64/apps
+          mkdir -p deb/usr/share/doc/veil-vpn
+
+          # Copy binaries
+          cp artifacts/bin/veil-client deb/usr/bin/ 2>/dev/null || true
+          cp artifacts/bin/veil-server deb/usr/bin/ 2>/dev/null || true
+          cp artifacts/bin/veil-client-gui deb/usr/bin/ 2>/dev/null || true
+          chmod 755 deb/usr/bin/*
+
+          # Create control file
+          cat > deb/DEBIAN/control << EOF
+          Package: veil-vpn
+          Version: $VERSION
+          Section: net
+          Priority: optional
+          Architecture: amd64
+          Depends: libsodium23, libqt6widgets6, libqt6network6
+          Maintainer: VEIL VPN Team
+          Description: Secure UDP-based VPN client with DPI evasion
+           VEIL VPN is a secure UDP-based VPN client featuring
+           modern cryptography (X25519, ChaCha20-Poly1305) and
+           advanced traffic morphing techniques for DPI evasion.
+          EOF
+
+          # Create desktop file
+          cat > deb/usr/share/applications/veil-vpn.desktop << EOF
+          [Desktop Entry]
+          Name=VEIL VPN
+          Comment=Secure VPN Client with DPI Evasion
+          Exec=veil-client-gui
+          Icon=veil-vpn
+          Terminal=false
+          Type=Application
+          Categories=Network;Security;
+          EOF
+
+          # Copy icon
+          cp src/gui-client/resources/icon_connected.svg deb/usr/share/icons/hicolor/64x64/apps/veil-vpn.svg 2>/dev/null || true
+
+          # Build DEB
+          dpkg-deb --build deb veil-vpn_${VERSION}_amd64.deb
+
+      - name: Create tarball
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          tar -czvf veil-vpn-${VERSION}-linux-x64.tar.gz -C artifacts .
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: veil-vpn-linux-x64
+          path: |
+            artifacts/
+            *.deb
+            *.tar.gz
+          retention-days: 14
+
+  # ============================================================================
+  # Create GitHub Release
+  # ============================================================================
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-windows, create-windows-installer, build-linux]
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts/
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release-files
+          VERSION="${{ needs.build-windows.outputs.version }}"
+
+          # Windows installer
+          cp release-artifacts/veil-vpn-installer/*.exe release-files/ 2>/dev/null || true
+
+          # Windows portable zip
+          cd release-artifacts/veil-vpn-windows-x64
+          zip -r "../../release-files/veil-vpn-v${VERSION}-windows-x64-portable.zip" .
+          cd ../..
+
+          # Linux DEB and tarball
+          cp release-artifacts/veil-vpn-linux-x64/*.deb release-files/ 2>/dev/null || true
+          cp release-artifacts/veil-vpn-linux-x64/*.tar.gz release-files/ 2>/dev/null || true
+
+          ls -la release-files/
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get the previous tag
+          PREV_TAG=$(git describe --abbrev=0 --tags HEAD^ 2>/dev/null || echo "")
+
+          if [ -n "$PREV_TAG" ]; then
+            echo "Previous tag: $PREV_TAG"
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" $PREV_TAG..HEAD 2>/dev/null | head -30)
+          else
+            echo "No previous tag found, using recent commits"
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" -30)
+          fi
+
+          # Write to file for multiline output
+          echo "$CHANGELOG" > CHANGELOG.md
+
+          # Also output for use in release body
+          {
+            echo 'changelog<<EOF'
+            echo "$CHANGELOG"
+            echo 'EOF'
+          } >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.build-windows.outputs.version }}
+          name: VEIL VPN v${{ needs.build-windows.outputs.version }}
+          files: release-files/*
+          draft: true
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+          generate_release_notes: false
+          body: |
+            ## VEIL VPN v${{ needs.build-windows.outputs.version }}
+
+            ### Downloads
+
+            | Platform | Type | Download |
+            |----------|------|----------|
+            | Windows | Installer (Recommended) | `veil-vpn-${{ needs.build-windows.outputs.version }}-setup.exe` |
+            | Windows | Portable | `veil-vpn-v${{ needs.build-windows.outputs.version }}-windows-x64-portable.zip` |
+            | Linux | DEB Package | `veil-vpn_${{ needs.build-windows.outputs.version }}_amd64.deb` |
+            | Linux | Portable | `veil-vpn-${{ needs.build-windows.outputs.version }}-linux-x64.tar.gz` |
+
+            ### System Requirements
+
+            **Windows:**
+            - Windows 10 or later (64-bit)
+            - Administrator privileges for VPN functionality
+
+            **Linux:**
+            - Ubuntu 22.04+ or compatible distribution
+            - libsodium23, Qt6 libraries
+
+            ### What's Included
+
+            - GUI client with modern interface and system tray integration
+            - Smooth page transitions and animations
+            - TUN interface configuration
+            - Auto-update checking
+            - Keyboard shortcuts for power users
+
+            ### Recent Changes
+
+            ${{ steps.changelog.outputs.changelog }}
+
+            ---
+
+            **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ github.event.before && format('...{0}', github.sha) || github.sha }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

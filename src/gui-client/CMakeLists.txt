@@ -24,6 +24,8 @@ add_executable(veil-client-gui
   diagnostics_widget.h
   ipc_client_manager.cpp
   ipc_client_manager.h
+  update_checker.cpp
+  update_checker.h
   resources/resources.qrc
 )
 

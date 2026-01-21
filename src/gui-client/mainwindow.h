@@ -12,6 +12,8 @@
 #include <QGraphicsOpacityEffect>
 #include <memory>
 
+#include "update_checker.h"
+
 namespace veil::gui {
 
 class ConnectionWidget;
@@ -68,12 +70,17 @@ class MainWindow : public QMainWindow {
   void onTrayIconActivated(QSystemTrayIcon::ActivationReason reason);
   void onQuickConnect();
   void onQuickDisconnect();
+  void checkForUpdates();
+  void onUpdateAvailable(const UpdateInfo& info);
+  void onNoUpdateAvailable();
+  void onUpdateCheckFailed(const QString& error);
 
  private:
   void setupUi();
   void setupMenuBar();
   void setupStatusBar();
   void setupSystemTray();
+  void setupUpdateChecker();
   void applyDarkTheme();
 
   AnimatedStackedWidget* stackedWidget_;
@@ -89,6 +96,9 @@ class MainWindow : public QMainWindow {
   QAction* trayDisconnectAction_;
   bool minimizeToTray_{true};
   TrayConnectionState currentTrayState_{TrayConnectionState::kDisconnected};
+
+  // Update checker
+  std::unique_ptr<UpdateChecker> updateChecker_;
 };
 
 }  // namespace veil::gui

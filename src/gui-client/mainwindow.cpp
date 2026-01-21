@@ -10,12 +10,17 @@
 #include <QPropertyAnimation>
 #include <QParallelAnimationGroup>
 #include <QGraphicsOpacityEffect>
+#include <QDesktopServices>
+#include <QUrl>
+#include <QTimer>
 
 #include "common/gui/theme.h"
+#include "common/version.h"
 #include "connection_widget.h"
 #include "diagnostics_widget.h"
 #include "ipc_client_manager.h"
 #include "settings_widget.h"
+#include "update_checker.h"
 
 namespace veil::gui {
 
@@ -97,15 +102,20 @@ MainWindow::MainWindow(QWidget* parent)
       trayIcon_(nullptr),
       trayMenu_(nullptr),
       trayConnectAction_(nullptr),
-      trayDisconnectAction_(nullptr) {
+      trayDisconnectAction_(nullptr),
+      updateChecker_(std::make_unique<UpdateChecker>(this)) {
   setupUi();
   setupMenuBar();
   setupStatusBar();
   setupSystemTray();
+  setupUpdateChecker();
   applyDarkTheme();
 
   // Connect to daemon
   ipcManager_->connectToDaemon();
+
+  // Check for updates on startup (delayed)
+  QTimer::singleShot(3000, this, &MainWindow::checkForUpdates);
 }
 
 MainWindow::~MainWindow() = default;
@@ -206,9 +216,7 @@ void MainWindow::setupMenuBar() {
   aboutAction->setShortcut(QKeySequence(Qt::Key_F1));
   connect(aboutAction, &QAction::triggered, this, &MainWindow::showAboutDialog);
 
-  helpMenu->addAction(tr("Check for &Updates"), []() {
-    // TODO: Implement update check
-  });
+  helpMenu->addAction(tr("Check for &Updates"), this, &MainWindow::checkForUpdates);
 
   // Global shortcuts for quick connect/disconnect
   auto* quickConnectShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Return), this);
@@ -328,7 +336,7 @@ void MainWindow::showAboutDialog() {
   titleLabel->setAlignment(Qt::AlignCenter);
   layout->addWidget(titleLabel);
 
-  auto* versionLabel = new QLabel("Version 1.0.0", dialog);
+  auto* versionLabel = new QLabel(QString("Version %1").arg(veil::kVersionString), dialog);
   versionLabel->setStyleSheet(R"(
     color: #8b949e;
     font-size: 14px;
@@ -556,6 +564,128 @@ void MainWindow::closeEvent(QCloseEvent* event) {
   } else {
     event->accept();
   }
+}
+
+void MainWindow::setupUpdateChecker() {
+  connect(updateChecker_.get(), &UpdateChecker::updateAvailable,
+          this, &MainWindow::onUpdateAvailable);
+  connect(updateChecker_.get(), &UpdateChecker::noUpdateAvailable,
+          this, &MainWindow::onNoUpdateAvailable);
+  connect(updateChecker_.get(), &UpdateChecker::checkFailed,
+          this, &MainWindow::onUpdateCheckFailed);
+}
+
+void MainWindow::checkForUpdates() {
+  statusBar()->showMessage(tr("Checking for updates..."));
+  updateChecker_->checkForUpdates();
+}
+
+void MainWindow::onUpdateAvailable(const UpdateInfo& info) {
+  statusBar()->showMessage(tr("Update available: v%1").arg(info.version), 5000);
+
+  // Show update notification dialog
+  auto* dialog = new QDialog(this);
+  dialog->setWindowTitle(tr("Update Available"));
+  dialog->setModal(true);
+  dialog->setFixedSize(450, 300);
+
+  dialog->setStyleSheet(R"(
+    QDialog {
+      background-color: #0d1117;
+      color: #f0f6fc;
+    }
+    QLabel {
+      color: #f0f6fc;
+    }
+    QPushButton {
+      border: none;
+      border-radius: 10px;
+      padding: 12px 24px;
+      color: white;
+      font-weight: 600;
+      font-size: 13px;
+    }
+    QPushButton#downloadBtn {
+      background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                  stop:0 #238636, stop:1 #2ea043);
+    }
+    QPushButton#downloadBtn:hover {
+      background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                  stop:0 #2ea043, stop:1 #3fb950);
+    }
+    QPushButton#laterBtn {
+      background: rgba(255, 255, 255, 0.08);
+      color: #8b949e;
+    }
+    QPushButton#laterBtn:hover {
+      background: rgba(255, 255, 255, 0.12);
+    }
+  )");
+
+  auto* layout = new QVBoxLayout(dialog);
+  layout->setSpacing(16);
+  layout->setContentsMargins(32, 32, 32, 32);
+
+  // Title
+  auto* titleLabel = new QLabel(tr("A new version is available!"), dialog);
+  titleLabel->setStyleSheet("font-size: 18px; font-weight: 700; color: #f0f6fc;");
+  titleLabel->setAlignment(Qt::AlignCenter);
+  layout->addWidget(titleLabel);
+
+  // Version info
+  auto* versionLabel = new QLabel(
+      QString("Current version: %1\nNew version: %2")
+          .arg(UpdateChecker::currentVersion(), info.version),
+      dialog);
+  versionLabel->setStyleSheet("font-size: 14px; color: #8b949e; line-height: 1.6;");
+  versionLabel->setAlignment(Qt::AlignCenter);
+  layout->addWidget(versionLabel);
+
+  // Release notes (if available)
+  if (!info.releaseNotes.isEmpty()) {
+    auto* notesLabel = new QLabel(info.releaseNotes.left(200) + "...", dialog);
+    notesLabel->setStyleSheet(R"(
+      font-size: 12px;
+      color: #8b949e;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 8px;
+    )");
+    notesLabel->setWordWrap(true);
+    layout->addWidget(notesLabel);
+  }
+
+  layout->addStretch();
+
+  // Buttons
+  auto* buttonLayout = new QHBoxLayout();
+  buttonLayout->setSpacing(12);
+
+  auto* laterBtn = new QPushButton(tr("Later"), dialog);
+  laterBtn->setObjectName("laterBtn");
+  connect(laterBtn, &QPushButton::clicked, dialog, &QDialog::reject);
+  buttonLayout->addWidget(laterBtn);
+
+  auto* downloadBtn = new QPushButton(tr("Download Update"), dialog);
+  downloadBtn->setObjectName("downloadBtn");
+  connect(downloadBtn, &QPushButton::clicked, dialog, [info, dialog]() {
+    QDesktopServices::openUrl(QUrl(info.downloadUrl));
+    dialog->accept();
+  });
+  buttonLayout->addWidget(downloadBtn);
+
+  layout->addLayout(buttonLayout);
+
+  dialog->exec();
+  dialog->deleteLater();
+}
+
+void MainWindow::onNoUpdateAvailable() {
+  statusBar()->showMessage(tr("You have the latest version"), 3000);
+}
+
+void MainWindow::onUpdateCheckFailed(const QString& error) {
+  statusBar()->showMessage(tr("Update check failed: %1").arg(error), 5000);
 }
 
 }  // namespace veil::gui
