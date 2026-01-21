@@ -7,6 +7,10 @@
 #include <QRegularExpression>
 #include <QMessageBox>
 #include <QTimer>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QSettings>
+#include <QStandardPaths>
 
 #include "common/gui/theme.h"
 
@@ -68,6 +72,7 @@ void SettingsWidget::setupUi() {
 
   // Create sections
   createServerSection(scrollWidget);
+  createCryptoSection(scrollWidget);
   createRoutingSection(scrollWidget);
   createConnectionSection(scrollWidget);
   createDpiBypassSection(scrollWidget);
@@ -162,6 +167,106 @@ void SettingsWidget::createServerSection(QWidget* parent) {
   portRow->addWidget(portSpinBox_);
 
   layout->addLayout(portRow);
+
+  parent->layout()->addWidget(group);
+}
+
+void SettingsWidget::createCryptoSection(QWidget* parent) {
+  auto* group = new QGroupBox("Cryptographic Settings", parent);
+  auto* layout = new QVBoxLayout(group);
+  layout->setSpacing(12);
+
+  // Pre-shared Key File
+  auto* keyFileLabel = new QLabel("Pre-shared Key File (client.key)", group);
+  keyFileLabel->setProperty("textStyle", "secondary");
+  layout->addWidget(keyFileLabel);
+
+  auto* keyFileRow = new QHBoxLayout();
+  keyFileEdit_ = new QLineEdit(group);
+  keyFileEdit_->setPlaceholderText("Path to client.key file");
+  keyFileEdit_->setReadOnly(false);
+  connect(keyFileEdit_, &QLineEdit::textChanged, [this]() {
+    validateSettings();
+    hasUnsavedChanges_ = true;
+  });
+  keyFileRow->addWidget(keyFileEdit_, 1);
+
+  browseKeyFileButton_ = new QPushButton("\U0001F4C2", group);  // Folder icon
+  browseKeyFileButton_->setFixedSize(40, 40);
+  browseKeyFileButton_->setCursor(Qt::PointingHandCursor);
+  browseKeyFileButton_->setToolTip("Browse for key file");
+  browseKeyFileButton_->setStyleSheet(R"(
+    QPushButton {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      font-size: 16px;
+    }
+    QPushButton:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+  )");
+  connect(browseKeyFileButton_, &QPushButton::clicked, this, &SettingsWidget::onBrowseKeyFile);
+  keyFileRow->addWidget(browseKeyFileButton_);
+  layout->addLayout(keyFileRow);
+
+  keyFileValidationLabel_ = new QLabel(group);
+  keyFileValidationLabel_->setStyleSheet(QString("color: %1; font-size: 12px;").arg(colors::dark::kAccentError));
+  keyFileValidationLabel_->hide();
+  layout->addWidget(keyFileValidationLabel_);
+
+  // Obfuscation Seed File
+  auto* obfuscationSeedLabel = new QLabel("Obfuscation Seed File (obfuscation.seed)", group);
+  obfuscationSeedLabel->setProperty("textStyle", "secondary");
+  layout->addWidget(obfuscationSeedLabel);
+
+  auto* obfuscationRow = new QHBoxLayout();
+  obfuscationSeedEdit_ = new QLineEdit(group);
+  obfuscationSeedEdit_->setPlaceholderText("Path to obfuscation.seed file (optional)");
+  connect(obfuscationSeedEdit_, &QLineEdit::textChanged, [this]() {
+    validateSettings();
+    hasUnsavedChanges_ = true;
+  });
+  obfuscationRow->addWidget(obfuscationSeedEdit_, 1);
+
+  browseObfuscationSeedButton_ = new QPushButton("\U0001F4C2", group);  // Folder icon
+  browseObfuscationSeedButton_->setFixedSize(40, 40);
+  browseObfuscationSeedButton_->setCursor(Qt::PointingHandCursor);
+  browseObfuscationSeedButton_->setToolTip("Browse for obfuscation seed file");
+  browseObfuscationSeedButton_->setStyleSheet(R"(
+    QPushButton {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      font-size: 16px;
+    }
+    QPushButton:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+  )");
+  connect(browseObfuscationSeedButton_, &QPushButton::clicked, this, &SettingsWidget::onBrowseObfuscationSeed);
+  obfuscationRow->addWidget(browseObfuscationSeedButton_);
+  layout->addLayout(obfuscationRow);
+
+  obfuscationSeedValidationLabel_ = new QLabel(group);
+  obfuscationSeedValidationLabel_->setStyleSheet(QString("color: %1; font-size: 12px;").arg(colors::dark::kAccentError));
+  obfuscationSeedValidationLabel_->hide();
+  layout->addWidget(obfuscationSeedValidationLabel_);
+
+  // Info text
+  auto* infoLabel = new QLabel(
+      "The pre-shared key is required for secure handshake authentication.\n"
+      "The obfuscation seed enables traffic morphing to evade DPI detection.",
+      group);
+  infoLabel->setWordWrap(true);
+  infoLabel->setStyleSheet(QString("color: %1; font-size: 12px; padding: 12px; "
+                                   "background: rgba(88, 166, 255, 0.08); "
+                                   "border: 1px solid rgba(88, 166, 255, 0.2); "
+                                   "border-radius: 10px;")
+                               .arg(colors::dark::kAccentPrimary));
+  layout->addWidget(infoLabel);
 
   parent->layout()->addWidget(group);
 }
@@ -332,20 +437,92 @@ void SettingsWidget::onDpiModeChanged(int index) {
   hasUnsavedChanges_ = true;
 }
 
-void SettingsWidget::validateSettings() {
-  QString address = serverAddressEdit_->text().trimmed();
-  bool isValid = address.isEmpty() || isValidHostname(address) || isValidIpAddress(address);
+void SettingsWidget::onBrowseKeyFile() {
+  QString dir = keyFileEdit_->text().isEmpty()
+      ? QStandardPaths::writableLocation(QStandardPaths::HomeLocation)
+      : QFileInfo(keyFileEdit_->text()).absolutePath();
 
-  if (!isValid && !address.isEmpty()) {
+  QString fileName = QFileDialog::getOpenFileName(
+      this,
+      tr("Select Pre-shared Key File"),
+      dir,
+      tr("Key Files (*.key *.pem *.bin);;All Files (*)")
+  );
+
+  if (!fileName.isEmpty()) {
+    keyFileEdit_->setText(fileName);
+    hasUnsavedChanges_ = true;
+    validateSettings();
+  }
+}
+
+void SettingsWidget::onBrowseObfuscationSeed() {
+  QString dir = obfuscationSeedEdit_->text().isEmpty()
+      ? QStandardPaths::writableLocation(QStandardPaths::HomeLocation)
+      : QFileInfo(obfuscationSeedEdit_->text()).absolutePath();
+
+  QString fileName = QFileDialog::getOpenFileName(
+      this,
+      tr("Select Obfuscation Seed File"),
+      dir,
+      tr("Seed Files (*.seed *.bin);;All Files (*)")
+  );
+
+  if (!fileName.isEmpty()) {
+    obfuscationSeedEdit_->setText(fileName);
+    hasUnsavedChanges_ = true;
+    validateSettings();
+  }
+}
+
+void SettingsWidget::validateSettings() {
+  bool allValid = true;
+
+  // Validate server address
+  QString address = serverAddressEdit_->text().trimmed();
+  bool addressValid = address.isEmpty() || isValidHostname(address) || isValidIpAddress(address);
+
+  if (!addressValid && !address.isEmpty()) {
     serverValidationLabel_->setText("Invalid server address format");
     serverValidationLabel_->show();
     serverAddressEdit_->setStyleSheet(QString("border-color: %1;").arg(colors::dark::kAccentError));
+    allValid = false;
   } else {
     serverValidationLabel_->hide();
     serverAddressEdit_->setStyleSheet("");
   }
 
-  saveButton_->setEnabled(isValid || address.isEmpty());
+  // Validate key file
+  QString keyPath = keyFileEdit_->text().trimmed();
+  if (!keyPath.isEmpty() && !isValidFilePath(keyPath)) {
+    keyFileValidationLabel_->setText("Key file not found");
+    keyFileValidationLabel_->show();
+    keyFileEdit_->setStyleSheet(QString("border-color: %1;").arg(colors::dark::kAccentError));
+    allValid = false;
+  } else {
+    keyFileValidationLabel_->hide();
+    keyFileEdit_->setStyleSheet("");
+  }
+
+  // Validate obfuscation seed file (optional, but check if path is set)
+  QString seedPath = obfuscationSeedEdit_->text().trimmed();
+  if (!seedPath.isEmpty() && !isValidFilePath(seedPath)) {
+    obfuscationSeedValidationLabel_->setText("Seed file not found");
+    obfuscationSeedValidationLabel_->show();
+    obfuscationSeedEdit_->setStyleSheet(QString("border-color: %1;").arg(colors::dark::kAccentError));
+    allValid = false;
+  } else {
+    obfuscationSeedValidationLabel_->hide();
+    obfuscationSeedEdit_->setStyleSheet("");
+  }
+
+  saveButton_->setEnabled(allValid);
+}
+
+bool SettingsWidget::isValidFilePath(const QString& path) const {
+  if (path.isEmpty()) return true;
+  QFileInfo fileInfo(path);
+  return fileInfo.exists() && fileInfo.isFile() && fileInfo.isReadable();
 }
 
 bool SettingsWidget::isValidHostname(const QString& hostname) const {
@@ -363,21 +540,37 @@ bool SettingsWidget::isValidIpAddress(const QString& ip) const {
 }
 
 void SettingsWidget::loadSettings() {
-  // Load default settings (in real implementation, load from config file)
-  serverAddressEdit_->setText("vpn.example.com");
-  portSpinBox_->setValue(4433);
-  routeAllTrafficCheck_->setChecked(true);
-  splitTunnelCheck_->setChecked(false);
-  customRoutesEdit_->clear();
-  autoReconnectCheck_->setChecked(true);
-  reconnectIntervalSpinBox_->setValue(5);
-  maxReconnectAttemptsSpinBox_->setValue(5);
-  dpiModeCombo_->setCurrentIndex(0);
-  obfuscationCheck_->setChecked(true);
-  verboseLoggingCheck_->setChecked(false);
-  developerModeCheck_->setChecked(false);
+  // Load settings from QSettings
+  QSettings settings("VEIL", "VPN Client");
+
+  // Server Configuration
+  serverAddressEdit_->setText(settings.value("server/address", "vpn.example.com").toString());
+  portSpinBox_->setValue(settings.value("server/port", 4433).toInt());
+
+  // Crypto Configuration
+  keyFileEdit_->setText(settings.value("crypto/keyFile", "").toString());
+  obfuscationSeedEdit_->setText(settings.value("crypto/obfuscationSeedFile", "").toString());
+
+  // Routing
+  routeAllTrafficCheck_->setChecked(settings.value("routing/routeAllTraffic", true).toBool());
+  splitTunnelCheck_->setChecked(settings.value("routing/splitTunnel", false).toBool());
+  customRoutesEdit_->setText(settings.value("routing/customRoutes", "").toString());
+
+  // Connection
+  autoReconnectCheck_->setChecked(settings.value("connection/autoReconnect", true).toBool());
+  reconnectIntervalSpinBox_->setValue(settings.value("connection/reconnectInterval", 5).toInt());
+  maxReconnectAttemptsSpinBox_->setValue(settings.value("connection/maxReconnectAttempts", 5).toInt());
+
+  // DPI Bypass
+  dpiModeCombo_->setCurrentIndex(settings.value("dpi/mode", 0).toInt());
+
+  // Advanced
+  obfuscationCheck_->setChecked(settings.value("advanced/obfuscation", true).toBool());
+  verboseLoggingCheck_->setChecked(settings.value("advanced/verboseLogging", false).toBool());
+  developerModeCheck_->setChecked(settings.value("advanced/developerMode", false).toBool());
 
   hasUnsavedChanges_ = false;
+  validateSettings();
 }
 
 void SettingsWidget::saveSettings() {
@@ -390,8 +583,36 @@ void SettingsWidget::saveSettings() {
     return;
   }
 
-  // In real implementation, save to config file
-  // For now, just emit signal and show confirmation
+  // Save settings to QSettings
+  QSettings settings("VEIL", "VPN Client");
+
+  // Server Configuration
+  settings.setValue("server/address", serverAddressEdit_->text().trimmed());
+  settings.setValue("server/port", portSpinBox_->value());
+
+  // Crypto Configuration
+  settings.setValue("crypto/keyFile", keyFileEdit_->text().trimmed());
+  settings.setValue("crypto/obfuscationSeedFile", obfuscationSeedEdit_->text().trimmed());
+
+  // Routing
+  settings.setValue("routing/routeAllTraffic", routeAllTrafficCheck_->isChecked());
+  settings.setValue("routing/splitTunnel", splitTunnelCheck_->isChecked());
+  settings.setValue("routing/customRoutes", customRoutesEdit_->text().trimmed());
+
+  // Connection
+  settings.setValue("connection/autoReconnect", autoReconnectCheck_->isChecked());
+  settings.setValue("connection/reconnectInterval", reconnectIntervalSpinBox_->value());
+  settings.setValue("connection/maxReconnectAttempts", maxReconnectAttemptsSpinBox_->value());
+
+  // DPI Bypass
+  settings.setValue("dpi/mode", dpiModeCombo_->currentIndex());
+
+  // Advanced
+  settings.setValue("advanced/obfuscation", obfuscationCheck_->isChecked());
+  settings.setValue("advanced/verboseLogging", verboseLoggingCheck_->isChecked());
+  settings.setValue("advanced/developerMode", developerModeCheck_->isChecked());
+
+  settings.sync();
   hasUnsavedChanges_ = false;
 
   // Show brief confirmation
@@ -409,6 +630,22 @@ void SettingsWidget::saveSettings() {
   });
 
   emit settingsSaved();
+}
+
+QString SettingsWidget::serverAddress() const {
+  return serverAddressEdit_->text().trimmed();
+}
+
+uint16_t SettingsWidget::serverPort() const {
+  return static_cast<uint16_t>(portSpinBox_->value());
+}
+
+QString SettingsWidget::keyFilePath() const {
+  return keyFileEdit_->text().trimmed();
+}
+
+QString SettingsWidget::obfuscationSeedPath() const {
+  return obfuscationSeedEdit_->text().trimmed();
 }
 
 }  // namespace veil::gui

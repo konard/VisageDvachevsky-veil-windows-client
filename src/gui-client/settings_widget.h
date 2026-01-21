@@ -30,15 +30,24 @@ class SettingsWidget : public QWidget {
   /// Save current settings
   void saveSettings();
 
+  /// Get current settings values
+  QString serverAddress() const;
+  uint16_t serverPort() const;
+  QString keyFilePath() const;
+  QString obfuscationSeedPath() const;
+
  private slots:
   void onServerAddressChanged();
   void onPortChanged();
   void onDpiModeChanged(int index);
+  void onBrowseKeyFile();
+  void onBrowseObfuscationSeed();
   void validateSettings();
 
  private:
   void setupUi();
   void createServerSection(QWidget* parent);
+  void createCryptoSection(QWidget* parent);
   void createRoutingSection(QWidget* parent);
   void createConnectionSection(QWidget* parent);
   void createDpiBypassSection(QWidget* parent);
@@ -46,11 +55,20 @@ class SettingsWidget : public QWidget {
 
   bool isValidHostname(const QString& hostname) const;
   bool isValidIpAddress(const QString& ip) const;
+  bool isValidFilePath(const QString& path) const;
 
   // Server Configuration
   QLineEdit* serverAddressEdit_;
   QSpinBox* portSpinBox_;
   QLabel* serverValidationLabel_;
+
+  // Crypto Configuration
+  QLineEdit* keyFileEdit_;
+  QPushButton* browseKeyFileButton_;
+  QLabel* keyFileValidationLabel_;
+  QLineEdit* obfuscationSeedEdit_;
+  QPushButton* browseObfuscationSeedButton_;
+  QLabel* obfuscationSeedValidationLabel_;
 
   // Routing
   QCheckBox* routeAllTrafficCheck_;
