@@ -1,6 +1,6 @@
 # VEIL Client GUI Application (Qt/C++)
 
-find_package(Qt6 COMPONENTS Core Widgets Network QUIET)
+find_package(Qt6 COMPONENTS Core Widgets Network Svg QUIET)
 
 if(NOT Qt6_FOUND)
   message(STATUS "Qt6 not found, client GUI will not be built")
@@ -24,6 +24,7 @@ add_executable(veil-client-gui
   diagnostics_widget.h
   ipc_client_manager.cpp
   ipc_client_manager.h
+  resources/resources.qrc
 )
 
 target_link_libraries(veil-client-gui
@@ -32,6 +33,7 @@ target_link_libraries(veil-client-gui
     Qt6::Core
     Qt6::Widgets
     Qt6::Network
+    $<$<TARGET_EXISTS:Qt6::Svg>:Qt6::Svg>
 )
 
 veil_set_warnings(veil-client-gui)

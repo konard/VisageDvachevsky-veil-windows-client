@@ -4,6 +4,7 @@
 #include <QStatusBar>
 #include <QVBoxLayout>
 #include <QApplication>
+#include <QIcon>
 
 #include "common/gui/theme.h"
 #include "connection_widget.h"
@@ -35,6 +36,9 @@ void MainWindow::setupUi() {
   setWindowTitle("VEIL VPN Client");
   setMinimumSize(480, 720);
   resize(480, 720);
+
+  // Set window icon from embedded resources
+  setWindowIcon(QIcon(":/icons/icon_disconnected.svg"));
 
   // Set window flags for modern appearance
   setWindowFlags(windowFlags() | Qt::WindowMinMaxButtonsHint);

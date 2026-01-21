@@ -1,0 +1,9 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/icons">
+        <file>icon_disconnected.svg</file>
+        <file>icon_connecting.svg</file>
+        <file>icon_connected.svg</file>
+        <file>icon_error.svg</file>
+    </qresource>
+</RCC>

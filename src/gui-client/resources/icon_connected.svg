@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- VEIL VPN Connected Icon - Filled shield (green) -->
+  <defs>
+    <linearGradient id="grad_active" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#238636;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#3fb950;stop-opacity:1" />
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <!-- Shield shape - filled -->
+  <path d="M32 4 L56 14 L56 30 Q56 50 32 60 Q8 50 8 30 L8 14 Z"
+        fill="url(#grad_active)"
+        stroke="#3fb950"
+        stroke-width="2"
+        stroke-linejoin="round"
+        filter="url(#glow)"/>
+  <!-- V for VEIL - white -->
+  <path d="M22 22 L32 42 L42 22"
+        fill="none"
+        stroke="white"
+        stroke-width="4"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+  <!-- Checkmark indicator -->
+  <circle cx="48" cy="48" r="10" fill="#0d1117"/>
+  <circle cx="48" cy="48" r="8" fill="#3fb950"/>
+  <path d="M43 48 L46 51 L53 44"
+        fill="none"
+        stroke="white"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+</svg>
