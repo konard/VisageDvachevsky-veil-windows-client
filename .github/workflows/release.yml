@@ -254,7 +254,6 @@ jobs:
             libfmt-dev \
             nlohmann-json3-dev \
             qt6-base-dev \
-            qt6-networkauth-dev \
             libgl1-mesa-dev \
             dpkg-dev
 

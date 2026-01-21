@@ -168,9 +168,12 @@ class ScopedThreadCheck {
 /**
  * Convenience macros for thread checking.
  *
- * VEIL_THREAD_CHECKER(name) - Declare a ThreadChecker member variable
+ * VEIL_THREAD_CHECKER(name) - Declare a ThreadChecker member variable (debug only)
  * VEIL_DCHECK_THREAD(checker) - Assert current thread owns the checker (debug only)
  * VEIL_DCHECK_THREAD_SCOPE(checker) - Create scoped thread check (debug only)
+ *
+ * In release builds (NDEBUG defined), VEIL_THREAD_CHECKER expands to nothing,
+ * avoiding unused private field warnings from -Wunused-private-field.
  */
 #ifndef NDEBUG
 #define VEIL_THREAD_CHECKER(name) ::veil::utils::ThreadChecker name
@@ -178,7 +181,8 @@ class ScopedThreadCheck {
 #define VEIL_DCHECK_THREAD_SCOPE(checker) \
   ::veil::utils::ScopedThreadCheck veil_scoped_thread_check_##__LINE__(checker)
 #else
-#define VEIL_THREAD_CHECKER(name) ::veil::utils::ThreadChecker name
+// In release builds, don't declare the member to avoid unused field warnings
+#define VEIL_THREAD_CHECKER(name) static_assert(true, "")
 #define VEIL_DCHECK_THREAD(checker) ((void)0)
 #define VEIL_DCHECK_THREAD_SCOPE(checker) ((void)0)
 #endif
