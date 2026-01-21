@@ -400,6 +400,7 @@ bool RouteManager::save_routes(std::error_code& ec) {
 
 bool RouteManager::restore_routes(std::error_code& ec) {
   // Remove added routes in reverse order.
+  // NOLINTNEXTLINE(modernize-loop-convert) - std::ranges::reverse_view has compatibility issues with clang
   for (auto it = added_routes_.rbegin(); it != added_routes_.rend(); ++it) {
     std::error_code ignored;
     remove_route(*it, ignored);
