@@ -1,0 +1,190 @@
+name: Linux Build
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'  # Trigger on version tags like v1.0.0
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - '.clang-tidy'
+      - '.github/workflows/linux-build.yml'
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  build-linux:
+    name: Build Linux (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+        include:
+          - os: ubuntu-22.04
+            name: focal
+          - os: ubuntu-24.04
+            name: noble
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            clang \
+            clang-tidy \
+            lld \
+            pkg-config \
+            libsodium-dev \
+            libspdlog-dev \
+            libfmt-dev \
+            nlohmann-json3-dev \
+            libgtest-dev \
+            qt6-base-dev \
+            qt6-networkauth-dev \
+            libgl1-mesa-dev
+
+      - name: Configure CMake (Release)
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DVEIL_BUILD_TESTS=ON \
+            -DVEIL_BUILD_GUI=ON \
+            -DVEIL_BUILD_SERVER=ON \
+            -DVEIL_VERSION_MAJOR=1 \
+            -DVEIL_VERSION_MINOR=0 \
+            -DVEIL_VERSION_PATCH=0
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Run unit tests
+        run: |
+          cd build
+          ctest -C Release --output-on-failure --timeout 120 -E "integration|network"
+        env:
+          VEIL_SKIP_NETEM: 1
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p artifacts/bin
+
+          # Copy executables
+          cp build/src/veil-client artifacts/bin/ 2>/dev/null || true
+          cp build/src/veil-server artifacts/bin/ 2>/dev/null || true
+          cp build/src/gui-client/veil-client-gui artifacts/bin/ 2>/dev/null || true
+
+          # Strip binaries for smaller size
+          strip artifacts/bin/* 2>/dev/null || true
+
+          # Create version file
+          echo "Version: 1.0.0" > artifacts/VERSION
+          echo "Build: ${{ github.sha }}" >> artifacts/VERSION
+          echo "Date: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> artifacts/VERSION
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: veil-vpn-linux-${{ matrix.name }}
+          path: artifacts/
+          retention-days: 7
+
+  create-linux-package:
+    name: Create Linux Package
+    runs-on: ubuntu-22.04
+    needs: build-linux
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: veil-vpn-linux-focal
+          path: package/
+
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev
+
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION_NUM="${VERSION#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version_num=$VERSION_NUM" >> $GITHUB_OUTPUT
+
+      - name: Create DEB package structure
+        run: |
+          mkdir -p deb/DEBIAN
+          mkdir -p deb/usr/bin
+          mkdir -p deb/usr/share/applications
+          mkdir -p deb/usr/share/icons/hicolor/64x64/apps
+          mkdir -p deb/usr/share/doc/veil-vpn
+
+          # Copy binaries
+          cp package/bin/veil-client deb/usr/bin/ 2>/dev/null || true
+          cp package/bin/veil-server deb/usr/bin/ 2>/dev/null || true
+          cp package/bin/veil-client-gui deb/usr/bin/ 2>/dev/null || true
+          chmod 755 deb/usr/bin/*
+
+          # Create control file
+          cat > deb/DEBIAN/control << EOF
+          Package: veil-vpn
+          Version: ${{ steps.version.outputs.version_num }}
+          Section: net
+          Priority: optional
+          Architecture: amd64
+          Depends: libsodium23, libqt6widgets6, libqt6network6
+          Maintainer: VEIL VPN Team
+          Description: Secure UDP-based VPN client with DPI evasion
+           VEIL VPN is a secure UDP-based VPN client featuring
+           modern cryptography (X25519, ChaCha20-Poly1305) and
+           advanced traffic morphing techniques for DPI evasion.
+          EOF
+
+          # Create desktop file
+          cat > deb/usr/share/applications/veil-vpn.desktop << EOF
+          [Desktop Entry]
+          Name=VEIL VPN
+          Comment=Secure VPN Client with DPI Evasion
+          Exec=veil-client-gui
+          Icon=veil-vpn
+          Terminal=false
+          Type=Application
+          Categories=Network;Security;
+          EOF
+
+          # Copy icon
+          cp src/gui-client/resources/icon_connected.svg deb/usr/share/icons/hicolor/64x64/apps/veil-vpn.svg 2>/dev/null || true
+
+      - name: Build DEB package
+        run: |
+          dpkg-deb --build deb veil-vpn_${{ steps.version.outputs.version_num }}_amd64.deb
+
+      - name: Create tarball
+        run: |
+          tar -czvf veil-vpn-${{ steps.version.outputs.version }}-linux-x64.tar.gz -C package .
+
+      - name: Upload Linux packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: veil-vpn-linux-packages
+          path: |
+            *.deb
+            *.tar.gz
+          retention-days: 14

@@ -1,39 +1,56 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <!-- VEIL VPN Connected Icon - Filled shield (green) -->
+  <!-- VEIL VPN Connected Icon - Filled shield with glow (green) -->
   <defs>
     <linearGradient id="grad_active" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" style="stop-color:#238636;stop-opacity:1" />
       <stop offset="100%" style="stop-color:#3fb950;stop-opacity:1" />
     </linearGradient>
-    <filter id="glow">
-      <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+    <linearGradient id="grad_inner" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#4fca60;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#238636;stop-opacity:1" />
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
       <feMerge>
         <feMergeNode in="coloredBlur"/>
         <feMergeNode in="SourceGraphic"/>
       </feMerge>
     </filter>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#238636" flood-opacity="0.5"/>
+    </filter>
   </defs>
-  <!-- Shield shape - filled -->
-  <path d="M32 4 L56 14 L56 30 Q56 50 32 60 Q8 50 8 30 L8 14 Z"
+  <!-- Outer glow ring -->
+  <circle cx="32" cy="32" r="28" fill="none" stroke="#3fb950" stroke-width="1" opacity="0.3"/>
+  <!-- Shield shape - filled with gradient -->
+  <path d="M32 6 L54 15 L54 29 Q54 48 32 58 Q10 48 10 29 L10 15 Z"
         fill="url(#grad_active)"
-        stroke="#3fb950"
-        stroke-width="2"
+        stroke="#4fca60"
+        stroke-width="1.5"
         stroke-linejoin="round"
         filter="url(#glow)"/>
-  <!-- V for VEIL - white -->
-  <path d="M22 22 L32 42 L42 22"
+  <!-- Inner highlight -->
+  <path d="M32 10 L50 18 L50 29 Q50 45 32 54"
+        fill="none"
+        stroke="rgba(255,255,255,0.2)"
+        stroke-width="2"
+        stroke-linecap="round"/>
+  <!-- V for VEIL - white with shadow -->
+  <path d="M22 22 L32 40 L42 22"
         fill="none"
         stroke="white"
         stroke-width="4"
         stroke-linecap="round"
-        stroke-linejoin="round"/>
-  <!-- Checkmark indicator -->
-  <circle cx="48" cy="48" r="10" fill="#0d1117"/>
-  <circle cx="48" cy="48" r="8" fill="#3fb950"/>
+        stroke-linejoin="round"
+        filter="url(#shadow)"/>
+  <!-- Checkmark badge background -->
+  <circle cx="48" cy="48" r="11" fill="#0d1117"/>
+  <circle cx="48" cy="48" r="9" fill="url(#grad_inner)"/>
+  <!-- Checkmark -->
   <path d="M43 48 L46 51 L53 44"
         fill="none"
         stroke="white"
-        stroke-width="2"
+        stroke-width="2.5"
         stroke-linecap="round"
         stroke-linejoin="round"/>
 </svg>

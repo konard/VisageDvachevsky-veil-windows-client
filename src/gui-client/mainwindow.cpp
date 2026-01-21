@@ -7,6 +7,9 @@
 #include <QIcon>
 #include <QMessageBox>
 #include <QShortcut>
+#include <QPropertyAnimation>
+#include <QParallelAnimationGroup>
+#include <QGraphicsOpacityEffect>
 
 #include "common/gui/theme.h"
 #include "connection_widget.h"
@@ -16,9 +19,77 @@
 
 namespace veil::gui {
 
+// ===================== AnimatedStackedWidget Implementation =====================
+
+AnimatedStackedWidget::AnimatedStackedWidget(QWidget* parent)
+    : QStackedWidget(parent) {
+}
+
+void AnimatedStackedWidget::setCurrentWidgetAnimated(int index) {
+  if (index == currentIndex() || isAnimating_) {
+    return;
+  }
+
+  isAnimating_ = true;
+
+  QWidget* currentW = currentWidget();
+  QWidget* nextW = widget(index);
+
+  if (!currentW || !nextW) {
+    setCurrentIndex(index);
+    isAnimating_ = false;
+    return;
+  }
+
+  // Prepare the next widget
+  nextW->setGeometry(0, 0, width(), height());
+  nextW->show();
+  nextW->raise();
+
+  // Create opacity effects
+  auto* currentEffect = new QGraphicsOpacityEffect(currentW);
+  auto* nextEffect = new QGraphicsOpacityEffect(nextW);
+  currentW->setGraphicsEffect(currentEffect);
+  nextW->setGraphicsEffect(nextEffect);
+
+  // Animation group for parallel execution
+  auto* group = new QParallelAnimationGroup(this);
+
+  // Fade out current widget
+  auto* fadeOut = new QPropertyAnimation(currentEffect, "opacity", this);
+  fadeOut->setDuration(animationDuration_);
+  fadeOut->setStartValue(1.0);
+  fadeOut->setEndValue(0.0);
+  fadeOut->setEasingCurve(QEasingCurve::OutCubic);
+  group->addAnimation(fadeOut);
+
+  // Fade in next widget
+  auto* fadeIn = new QPropertyAnimation(nextEffect, "opacity", this);
+  fadeIn->setDuration(animationDuration_);
+  fadeIn->setStartValue(0.0);
+  fadeIn->setEndValue(1.0);
+  fadeIn->setEasingCurve(QEasingCurve::InCubic);
+  group->addAnimation(fadeIn);
+
+  // Connect completion handler
+  connect(group, &QParallelAnimationGroup::finished, this, [this, currentW, nextW, index]() {
+    // Clean up effects
+    currentW->setGraphicsEffect(nullptr);
+    nextW->setGraphicsEffect(nullptr);
+
+    // Actually switch to the new widget
+    setCurrentIndex(index);
+    isAnimating_ = false;
+  });
+
+  group->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+// ===================== MainWindow Implementation =====================
+
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent),
-      stackedWidget_(new QStackedWidget(this)),
+      stackedWidget_(new AnimatedStackedWidget(this)),
       connectionWidget_(new ConnectionWidget(this)),
       settingsWidget_(new SettingsWidget(this)),
       diagnosticsWidget_(new DiagnosticsWidget(this)),
@@ -193,17 +264,17 @@ void MainWindow::applyDarkTheme() {
 }
 
 void MainWindow::showConnectionView() {
-  stackedWidget_->setCurrentWidget(connectionWidget_);
+  stackedWidget_->setCurrentWidgetAnimated(stackedWidget_->indexOf(connectionWidget_));
   statusBar()->showMessage(tr("Connection"));
 }
 
 void MainWindow::showSettingsView() {
-  stackedWidget_->setCurrentWidget(settingsWidget_);
+  stackedWidget_->setCurrentWidgetAnimated(stackedWidget_->indexOf(settingsWidget_));
   statusBar()->showMessage(tr("Settings"));
 }
 
 void MainWindow::showDiagnosticsView() {
-  stackedWidget_->setCurrentWidget(diagnosticsWidget_);
+  stackedWidget_->setCurrentWidgetAnimated(stackedWidget_->indexOf(diagnosticsWidget_));
   statusBar()->showMessage(tr("Diagnostics"));
 }
 

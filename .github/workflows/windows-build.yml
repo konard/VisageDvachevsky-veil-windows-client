@@ -209,6 +209,9 @@ jobs:
       (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -228,6 +231,20 @@ jobs:
         run: |
           cd release-artifacts/veil-vpn-windows-x64
           zip -r ../veil-vpn-${{ steps.version.outputs.version }}-windows-x64.zip .
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get commit messages since last tag
+          PREV_TAG=$(git describe --abbrev=0 --tags HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            CHANGELOG=$(git log --pretty=format:"- %s" $PREV_TAG..HEAD 2>/dev/null | head -20)
+          else
+            CHANGELOG=$(git log --pretty=format:"- %s" -20)
+          fi
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -256,8 +273,12 @@ jobs:
             - Administrator privileges for VPN functionality
 
             ### What's Included
-            - GUI client application
+            - GUI client application with smooth animations and modern UI
             - Wintun network driver
             - Qt runtime dependencies
+            - System tray integration with quick connect/disconnect
+
+            ### Recent Changes
+            ${{ steps.changelog.outputs.changelog }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

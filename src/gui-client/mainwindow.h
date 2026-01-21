@@ -7,6 +7,9 @@
 #include <QSystemTrayIcon>
 #include <QMenu>
 #include <QCloseEvent>
+#include <QPropertyAnimation>
+#include <QParallelAnimationGroup>
+#include <QGraphicsOpacityEffect>
 #include <memory>
 
 namespace veil::gui {
@@ -22,6 +25,24 @@ enum class TrayConnectionState {
   kConnecting,
   kConnected,
   kError
+};
+
+/// Animated stacked widget with smooth fade/slide transitions
+class AnimatedStackedWidget : public QStackedWidget {
+  Q_OBJECT
+
+ public:
+  explicit AnimatedStackedWidget(QWidget* parent = nullptr);
+
+  /// Set the current widget with animation
+  void setCurrentWidgetAnimated(int index);
+
+  /// Animation duration in milliseconds
+  void setAnimationDuration(int duration) { animationDuration_ = duration; }
+
+ private:
+  int animationDuration_{250};
+  bool isAnimating_{false};
 };
 
 class MainWindow : public QMainWindow {
@@ -55,7 +76,7 @@ class MainWindow : public QMainWindow {
   void setupSystemTray();
   void applyDarkTheme();
 
-  QStackedWidget* stackedWidget_;
+  AnimatedStackedWidget* stackedWidget_;
   ConnectionWidget* connectionWidget_;
   SettingsWidget* settingsWidget_;
   DiagnosticsWidget* diagnosticsWidget_;

@@ -1,22 +1,34 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <!-- VEIL VPN Disconnected Icon - Shield outline (gray) -->
+  <!-- VEIL VPN Disconnected Icon - Shield outline (gray) with subtle depth -->
   <defs>
     <linearGradient id="grad_disc" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" style="stop-color:#6e7681;stop-opacity:1" />
       <stop offset="100%" style="stop-color:#484f58;stop-opacity:1" />
     </linearGradient>
+    <linearGradient id="grad_disc_inner" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#21262d;stop-opacity:0.5" />
+      <stop offset="100%" style="stop-color:#0d1117;stop-opacity:0.8" />
+    </linearGradient>
   </defs>
-  <!-- Shield shape -->
-  <path d="M32 4 L56 14 L56 30 Q56 50 32 60 Q8 50 8 30 L8 14 Z"
-        fill="none"
+  <!-- Subtle background fill -->
+  <path d="M32 6 L54 15 L54 29 Q54 48 32 58 Q10 48 10 29 L10 15 Z"
+        fill="url(#grad_disc_inner)"
         stroke="url(#grad_disc)"
-        stroke-width="4"
+        stroke-width="3"
         stroke-linejoin="round"/>
-  <!-- V for VEIL -->
-  <path d="M22 22 L32 42 L42 22"
+  <!-- Inner edge highlight -->
+  <path d="M32 10 L50 18 L50 29 Q50 45 32 54"
         fill="none"
-        stroke="#8b949e"
+        stroke="rgba(255,255,255,0.05)"
+        stroke-width="1.5"
+        stroke-linecap="round"/>
+  <!-- V for VEIL -->
+  <path d="M22 22 L32 40 L42 22"
+        fill="none"
+        stroke="#6e7681"
         stroke-width="4"
         stroke-linecap="round"
         stroke-linejoin="round"/>
+  <!-- Connection indicator (empty circle) -->
+  <circle cx="32" cy="52" r="3" fill="none" stroke="#484f58" stroke-width="1.5"/>
 </svg>
