@@ -17,6 +17,8 @@ class DiagnosticsWidget : public QWidget {
 
  signals:
   void backRequested();
+  /// Emitted when diagnostics data should be requested from daemon
+  void diagnosticsRequested();
 
  public slots:
   /// Update protocol metrics
@@ -40,10 +42,13 @@ class DiagnosticsWidget : public QWidget {
   /// Clear log
   void clearLog();
 
+  /// Set daemon connection state (starts/stops auto-refresh)
+  void setDaemonConnected(bool connected);
+
  private slots:
   void onExportClicked();
   void onClearLogClicked();
-  void onSimulateUpdates();
+  void onRequestDiagnostics();
 
  private:
   void setupUi();
@@ -82,10 +87,8 @@ class DiagnosticsWidget : public QWidget {
   QPushButton* clearLogButton_;
   QPushButton* exportButton_;
 
-  // Demo timer
+  // Refresh timer (requests data from daemon)
   QTimer* updateTimer_;
-  uint64_t demoPacketsSent_{0};
-  uint64_t demoPacketsReceived_{0};
 };
 
 }  // namespace veil::gui

@@ -412,25 +412,15 @@ void ConnectionWidget::onConnectClicked() {
   if (state_ == ConnectionState::kConnected ||
       state_ == ConnectionState::kConnecting ||
       state_ == ConnectionState::kReconnecting) {
-    // Disconnect
+    // Disconnect - emit signal for IPC manager to handle
     emit disconnectRequested();
-
-    // For demo purposes, immediately update state
-    setConnectionState(ConnectionState::kDisconnected);
+    // State will be updated when we receive response from daemon
   } else {
-    // Connect
+    // Connect - emit signal for IPC manager to handle
     emit connectRequested();
-
-    // For demo purposes, simulate connection flow
+    // Set connecting state immediately for user feedback
+    // Actual state will be updated when we receive response from daemon
     setConnectionState(ConnectionState::kConnecting);
-
-    // Simulate successful connection after 2 seconds (for demo)
-    QTimer::singleShot(2000, this, [this]() {
-      if (state_ == ConnectionState::kConnecting) {
-        setConnectionState(ConnectionState::kConnected);
-        setSessionId("0x9abc123def456789");
-      }
-    });
   }
 }
 
@@ -665,13 +655,7 @@ void ConnectionWidget::onUptimeUpdate() {
   if (state_ == ConnectionState::kConnected && uptimeCounter_.isValid()) {
     int seconds = static_cast<int>(uptimeCounter_.elapsed() / 1000);
     uptimeLabel_->setText(formatUptime(seconds));
-
-    // Demo: Update metrics with simulated values
-    updateMetrics(
-        25 + QRandomGenerator::global()->bounded(20),  // 25-45ms latency
-        1200000 + static_cast<uint64_t>(QRandomGenerator::global()->bounded(800000)),  // 1.2-2.0 MB/s TX
-        3400000 + static_cast<uint64_t>(QRandomGenerator::global()->bounded(1000000))  // 3.4-4.4 MB/s RX
-    );
+    // Metrics are updated via IPC from the daemon, not simulated here
   }
 }
 

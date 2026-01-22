@@ -20,13 +20,13 @@ namespace veil::gui {
 DiagnosticsWidget::DiagnosticsWidget(QWidget* parent) : QWidget(parent) {
   setupUi();
 
-  // Setup demo update timer
+  // Timer for periodic diagnostics refresh (requests data from daemon)
   updateTimer_ = new QTimer(this);
   updateTimer_->setInterval(1000);
-  connect(updateTimer_, &QTimer::timeout, this, &DiagnosticsWidget::onSimulateUpdates);
-  updateTimer_->start();
+  connect(updateTimer_, &QTimer::timeout, this, &DiagnosticsWidget::onRequestDiagnostics);
+  // Timer will be started when we're connected to the daemon
 
-  // Initial demo values
+  // Initial log entry
   addLogEntry(QDateTime::currentDateTime().toString("hh:mm:ss"),
               "Diagnostics view opened", "info");
 }
@@ -415,52 +415,21 @@ void DiagnosticsWidget::onClearLogClicked() {
               "Log cleared", "info");
 }
 
-void DiagnosticsWidget::onSimulateUpdates() {
-  // Simulate increasing packet counts
-  demoPacketsSent_ += 10 + static_cast<uint64_t>(QRandomGenerator::global()->bounded(20));
-  demoPacketsReceived_ += 10 + static_cast<uint64_t>(QRandomGenerator::global()->bounded(20));
+void DiagnosticsWidget::onRequestDiagnostics() {
+  // This slot is called periodically to request updated diagnostics from daemon
+  // The actual request is sent via IPC by the main window / IPC manager
+  emit diagnosticsRequested();
+}
 
-  uint64_t lost = demoPacketsReceived_ / 2500;  // ~0.04% loss rate
-  uint64_t retransmitted = demoPacketsSent_ / 3333;  // ~0.03% retransmit rate
-
-  updateProtocolMetrics(
-      0x000000012345 + demoPacketsSent_,
-      0x000000012300 + demoPacketsSent_,
-      0x000000012400 + demoPacketsReceived_,
-      demoPacketsSent_,
-      demoPacketsReceived_,
-      lost,
-      retransmitted
-  );
-
-  updateReassemblyStats(
-      static_cast<uint32_t>(demoPacketsReceived_ / 50),
-      static_cast<uint32_t>(demoPacketsReceived_ / 52),
-      static_cast<uint32_t>(QRandomGenerator::global()->bounded(10)),
-      static_cast<uint32_t>(lost / 10)
-  );
-
-  updateObfuscationProfile(
-      true,
-      128 + static_cast<uint32_t>(QRandomGenerator::global()->bounded(256)),
-      QString("Poisson (lambda=0.%1)").arg(3 + QRandomGenerator::global()->bounded(4)),
-      "IoT Sensor",
-      static_cast<double>(QRandomGenerator::global()->bounded(50)) / 10.0
-  );
-
-  // Occasionally add log entries
-  if (QRandomGenerator::global()->bounded(5) == 0) {
-    QString timestamp = QDateTime::currentDateTime().toString("hh:mm:ss");
-    static const char* events[] = {
-        "Data packet sent",
-        "ACK received",
-        "Heartbeat sent",
-        "Session ID rotated",
-        "RTT measurement: 25ms"
-    };
-    static const char* levels[] = {"info", "info", "debug", "success", "info"};
-    int idx = QRandomGenerator::global()->bounded(5);
-    addLogEntry(timestamp, events[idx], levels[idx]);
+void DiagnosticsWidget::setDaemonConnected(bool connected) {
+  if (connected) {
+    updateTimer_->start();
+    addLogEntry(QDateTime::currentDateTime().toString("hh:mm:ss"),
+                "Connected to daemon", "success");
+  } else {
+    updateTimer_->stop();
+    addLogEntry(QDateTime::currentDateTime().toString("hh:mm:ss"),
+                "Disconnected from daemon", "warning");
   }
 }
 

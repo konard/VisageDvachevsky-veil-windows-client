@@ -77,6 +77,7 @@ class MainWindow : public QMainWindow {
 
  private:
   void setupUi();
+  void setupIpcConnections();
   void setupMenuBar();
   void setupStatusBar();
   void setupSystemTray();

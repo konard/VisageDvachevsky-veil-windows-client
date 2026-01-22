@@ -13,8 +13,11 @@
 #include <QDesktopServices>
 #include <QUrl>
 #include <QTimer>
+#include <QSettings>
+#include <QDateTime>
 
 #include "common/gui/theme.h"
+#include "common/ipc/ipc_protocol.h"
 #include "common/version.h"
 #include "connection_widget.h"
 #include "diagnostics_widget.h"
@@ -98,21 +101,24 @@ MainWindow::MainWindow(QWidget* parent)
       connectionWidget_(new ConnectionWidget(this)),
       settingsWidget_(new SettingsWidget(this)),
       diagnosticsWidget_(new DiagnosticsWidget(this)),
-      ipcManager_(std::make_unique<IpcClientManager>()),
+      ipcManager_(std::make_unique<IpcClientManager>(this)),
       trayIcon_(nullptr),
       trayMenu_(nullptr),
       trayConnectAction_(nullptr),
       trayDisconnectAction_(nullptr),
       updateChecker_(std::make_unique<UpdateChecker>(this)) {
   setupUi();
+  setupIpcConnections();
   setupMenuBar();
   setupStatusBar();
   setupSystemTray();
   setupUpdateChecker();
   applyDarkTheme();
 
-  // Connect to daemon
-  ipcManager_->connectToDaemon();
+  // Attempt to connect to daemon
+  if (!ipcManager_->connectToDaemon()) {
+    statusBar()->showMessage(tr("Daemon not running - start veil-client first"), 5000);
+  }
 
   // Check for updates on startup (delayed)
   QTimer::singleShot(3000, this, &MainWindow::checkForUpdates);
@@ -150,6 +156,134 @@ void MainWindow::setupUi() {
   // Update connection widget when settings are saved
   connect(settingsWidget_, &SettingsWidget::settingsSaved,
           connectionWidget_, &ConnectionWidget::loadServerSettings);
+}
+
+void MainWindow::setupIpcConnections() {
+  // Connect connection widget signals to IPC manager
+  connect(connectionWidget_, &ConnectionWidget::connectRequested, this, [this]() {
+    // Get server address and port from settings
+    QSettings settings("VEIL", "VPN Client");
+    QString serverAddress = settings.value("server/address", "vpn.example.com").toString();
+    uint16_t serverPort = static_cast<uint16_t>(settings.value("server/port", 4433).toInt());
+
+    ipcManager_->sendConnect(serverAddress, serverPort);
+  });
+
+  connect(connectionWidget_, &ConnectionWidget::disconnectRequested, this, [this]() {
+    ipcManager_->sendDisconnect();
+  });
+
+  // Connect IPC manager signals to UI widgets
+  connect(ipcManager_.get(), &IpcClientManager::connectionStateChanged,
+          this, [this](ipc::ConnectionState state) {
+    // Convert IPC state to GUI state
+    ConnectionState guiState;
+    switch (state) {
+      case ipc::ConnectionState::kDisconnected:
+        guiState = ConnectionState::kDisconnected;
+        updateTrayIcon(TrayConnectionState::kDisconnected);
+        break;
+      case ipc::ConnectionState::kConnecting:
+        guiState = ConnectionState::kConnecting;
+        updateTrayIcon(TrayConnectionState::kConnecting);
+        break;
+      case ipc::ConnectionState::kConnected:
+        guiState = ConnectionState::kConnected;
+        updateTrayIcon(TrayConnectionState::kConnected);
+        break;
+      case ipc::ConnectionState::kReconnecting:
+        guiState = ConnectionState::kReconnecting;
+        updateTrayIcon(TrayConnectionState::kConnecting);
+        break;
+      case ipc::ConnectionState::kError:
+        guiState = ConnectionState::kError;
+        updateTrayIcon(TrayConnectionState::kError);
+        break;
+    }
+    connectionWidget_->setConnectionState(guiState);
+  });
+
+  connect(ipcManager_.get(), &IpcClientManager::statusUpdated,
+          this, [this](const ipc::ConnectionStatus& status) {
+    if (!status.session_id.empty()) {
+      connectionWidget_->setSessionId(QString::fromStdString(status.session_id));
+    }
+    if (!status.server_address.empty()) {
+      connectionWidget_->setServerAddress(
+          QString::fromStdString(status.server_address), status.server_port);
+    }
+    if (!status.error_message.empty()) {
+      connectionWidget_->setErrorMessage(QString::fromStdString(status.error_message));
+    }
+  });
+
+  connect(ipcManager_.get(), &IpcClientManager::metricsUpdated,
+          this, [this](const ipc::ConnectionMetrics& metrics) {
+    connectionWidget_->updateMetrics(
+        static_cast<int>(metrics.latency_ms),
+        metrics.tx_bytes_per_sec,
+        metrics.rx_bytes_per_sec);
+  });
+
+  connect(ipcManager_.get(), &IpcClientManager::diagnosticsReceived,
+          this, [this](const ipc::DiagnosticsData& diag) {
+    diagnosticsWidget_->updateProtocolMetrics(
+        diag.protocol.send_sequence,  // Using send_sequence as counter
+        diag.protocol.send_sequence,
+        diag.protocol.recv_sequence,
+        diag.protocol.packets_sent,
+        diag.protocol.packets_received,
+        diag.protocol.packets_lost,
+        diag.protocol.packets_retransmitted);
+
+    diagnosticsWidget_->updateReassemblyStats(
+        static_cast<uint32_t>(diag.reassembly.fragments_received),
+        static_cast<uint32_t>(diag.reassembly.messages_reassembled),
+        static_cast<uint32_t>(diag.reassembly.fragments_pending),
+        static_cast<uint32_t>(diag.reassembly.reassembly_timeouts));
+
+    diagnosticsWidget_->updateObfuscationProfile(
+        diag.obfuscation.padding_enabled,
+        diag.obfuscation.current_padding_size,
+        QString::fromStdString(diag.obfuscation.timing_jitter_model),
+        QString::fromStdString(diag.obfuscation.heartbeat_mode),
+        diag.obfuscation.last_heartbeat_sec);
+  });
+
+  connect(ipcManager_.get(), &IpcClientManager::logEventReceived,
+          this, [this](const ipc::LogEvent& event) {
+    QString timestamp = QDateTime::fromMSecsSinceEpoch(
+        static_cast<qint64>(event.timestamp_ms)).toString("hh:mm:ss");
+    diagnosticsWidget_->addLogEntry(
+        timestamp,
+        QString::fromStdString(event.message),
+        QString::fromStdString(event.level));
+  });
+
+  connect(ipcManager_.get(), &IpcClientManager::errorOccurred,
+          this, [this](const QString& error, const QString& details) {
+    connectionWidget_->setErrorMessage(error);
+    statusBar()->showMessage(error + ": " + details, 5000);
+  });
+
+  connect(ipcManager_.get(), &IpcClientManager::daemonConnectionChanged,
+          this, [this](bool connected) {
+    diagnosticsWidget_->setDaemonConnected(connected);
+    if (connected) {
+      statusBar()->showMessage(tr("Connected to daemon"), 3000);
+    } else {
+      statusBar()->showMessage(tr("Disconnected from daemon"), 3000);
+      // Reset UI to disconnected state
+      connectionWidget_->setConnectionState(ConnectionState::kDisconnected);
+      updateTrayIcon(TrayConnectionState::kDisconnected);
+    }
+  });
+
+  // Connect diagnostics widget request to IPC manager
+  connect(diagnosticsWidget_, &DiagnosticsWidget::diagnosticsRequested,
+          this, [this]() {
+    ipcManager_->requestDiagnostics();
+  });
 }
 
 void MainWindow::setupMenuBar() {
