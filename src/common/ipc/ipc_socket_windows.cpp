@@ -399,7 +399,13 @@ bool IpcClient::connect(std::error_code& ec) {
 
     if (impl_->pipe == INVALID_HANDLE_VALUE) {
       ec = last_error();
-      LOG_ERROR("Failed to connect to named pipe '{}': {}", socket_path_, ec.message());
+      // Use DEBUG level for expected failures (pipe doesn't exist = daemon not running)
+      // This avoids log spam when GUI client is waiting for daemon to start
+      if (error == ERROR_FILE_NOT_FOUND) {
+        LOG_DEBUG("Daemon not running, pipe '{}' does not exist", socket_path_);
+      } else {
+        LOG_ERROR("Failed to connect to named pipe '{}': {}", socket_path_, ec.message());
+      }
       return false;
     }
   }

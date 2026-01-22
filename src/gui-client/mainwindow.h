@@ -84,6 +84,11 @@ class MainWindow : public QMainWindow {
   void setupUpdateChecker();
   void applyDarkTheme();
 
+#ifdef _WIN32
+  /// Ensure the Windows service is running, starting it if necessary
+  bool ensureServiceRunning();
+#endif
+
   AnimatedStackedWidget* stackedWidget_;
   ConnectionWidget* connectionWidget_;
   SettingsWidget* settingsWidget_;

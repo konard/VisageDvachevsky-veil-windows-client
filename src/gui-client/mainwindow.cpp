@@ -25,6 +25,10 @@
 #include "settings_widget.h"
 #include "update_checker.h"
 
+#ifdef _WIN32
+#include "windows/service_manager.h"
+#endif
+
 namespace veil::gui {
 
 // ===================== AnimatedStackedWidget Implementation =====================
@@ -115,9 +119,23 @@ MainWindow::MainWindow(QWidget* parent)
   setupUpdateChecker();
   applyDarkTheme();
 
-  // Attempt to connect to daemon
+  // Attempt to connect to daemon, auto-start service on Windows if not running
   if (!ipcManager_->connectToDaemon()) {
+#ifdef _WIN32
+    // On Windows, automatically start the service if not running
+    if (ensureServiceRunning()) {
+      // Service started, retry connection after a brief delay
+      QTimer::singleShot(2000, this, [this]() {
+        if (!ipcManager_->connectToDaemon()) {
+          statusBar()->showMessage(tr("Failed to connect to daemon after service start"), 5000);
+        }
+      });
+    } else {
+      statusBar()->showMessage(tr("Failed to start VEIL service - run as administrator"), 5000);
+    }
+#else
     statusBar()->showMessage(tr("Daemon not running - start veil-client first"), 5000);
+#endif
   }
 
   // Check for updates on startup (delayed)
@@ -164,15 +182,40 @@ void MainWindow::setupIpcConnections() {
     // First check if daemon is connected, try to reconnect if not
     if (!ipcManager_->isConnected()) {
       if (!ipcManager_->connectToDaemon()) {
+#ifdef _WIN32
+        // On Windows, try to auto-start the service
+        if (!ensureServiceRunning()) {
+          connectionWidget_->setConnectionState(ConnectionState::kError);
+          updateTrayIcon(TrayConnectionState::kError);
+          return;
+        }
+        // Wait for service to start, then retry connection
+        connectionWidget_->setConnectionState(ConnectionState::kConnecting);
+        updateTrayIcon(TrayConnectionState::kConnecting);
+        QTimer::singleShot(2000, this, [this]() {
+          if (!ipcManager_->connectToDaemon()) {
+            connectionWidget_->setErrorMessage(
+                tr("Failed to connect to daemon after service start."));
+            connectionWidget_->setConnectionState(ConnectionState::kError);
+            updateTrayIcon(TrayConnectionState::kError);
+          } else {
+            // Now that we're connected, send the connect command
+            QSettings settings("VEIL", "VPN Client");
+            QString serverAddress = settings.value("server/address", "vpn.example.com").toString();
+            uint16_t serverPort = static_cast<uint16_t>(settings.value("server/port", 4433).toInt());
+            ipcManager_->sendConnect(serverAddress, serverPort);
+          }
+        });
+        return;
+#else
         // Failed to connect to daemon - show error
         connectionWidget_->setErrorMessage(
             tr("Cannot connect: VEIL daemon is not running.\n"
-               "Please start the VEIL service first:\n"
-               "  - Run 'veil-service.exe --start' as administrator, or\n"
-               "  - Start 'VEIL VPN Service' in Windows Services."));
+               "Please start the daemon first."));
         connectionWidget_->setConnectionState(ConnectionState::kError);
         updateTrayIcon(TrayConnectionState::kError);
         return;
+#endif
       }
     }
 
@@ -846,5 +889,57 @@ void MainWindow::onNoUpdateAvailable() {
 void MainWindow::onUpdateCheckFailed(const QString& error) {
   statusBar()->showMessage(tr("Update check failed: %1").arg(error), 5000);
 }
+
+#ifdef _WIN32
+bool MainWindow::ensureServiceRunning() {
+  using namespace veil::windows;
+
+  // Check if service is already running
+  if (ServiceManager::is_running()) {
+    return true;
+  }
+
+  // Check if service is installed
+  if (!ServiceManager::is_installed()) {
+    // Service not installed - show message to user
+    QMessageBox::warning(
+        this,
+        tr("VEIL Service Not Installed"),
+        tr("The VEIL VPN service is not installed.\n\n"
+           "Please install the service first by running:\n"
+           "  veil-service.exe --install\n\n"
+           "as Administrator."));
+    return false;
+  }
+
+  // Service is installed but not running - try to start it
+  statusBar()->showMessage(tr("Starting VEIL service..."));
+
+  std::string error;
+  if (ServiceManager::start(error)) {
+    statusBar()->showMessage(tr("VEIL service started successfully"), 3000);
+    return true;
+  }
+
+  // Failed to start - might need elevation
+  if (error.find("Access is denied") != std::string::npos ||
+      error.find("5") != std::string::npos) {  // ERROR_ACCESS_DENIED = 5
+    // Need admin rights to start service - inform user
+    QMessageBox::warning(
+        this,
+        tr("Administrator Rights Required"),
+        tr("Failed to start the VEIL service.\n\n"
+           "Please run this application as Administrator,\n"
+           "or start the service manually from Windows Services."));
+  } else {
+    QMessageBox::warning(
+        this,
+        tr("Service Start Failed"),
+        tr("Failed to start the VEIL service:\n%1").arg(QString::fromStdString(error)));
+  }
+
+  return false;
+}
+#endif
 
 }  // namespace veil::gui
