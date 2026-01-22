@@ -148,12 +148,15 @@ if(VEIL_BUILD_GUI)
   endif()
 endif()
 
-# Windows Service executable (Windows only, optional)
-option(VEIL_BUILD_SERVICE "Build Windows service executable" OFF)
+# Windows Service executable (Windows only)
+# The service provides IPC communication with the GUI and service management.
+# Note: VPN tunnel functionality is not yet available (transport layer needs porting).
+option(VEIL_BUILD_SERVICE "Build Windows service executable" ON)
 
 if(WIN32 AND VEIL_BUILD_SERVICE)
   add_executable(veil-service
     windows/service_main.cpp
+    windows/service_manager.cpp
   )
   target_link_libraries(veil-service PRIVATE veil_common)
   veil_set_warnings(veil-service)
