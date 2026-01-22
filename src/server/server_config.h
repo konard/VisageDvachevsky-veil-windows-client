@@ -51,4 +51,8 @@ bool load_config_file(const std::string& path, ServerConfig& config, std::error_
 // Validate configuration.
 bool validate_config(const ServerConfig& config, std::string& error);
 
+// Finalize configuration (auto-detect interfaces, etc.).
+// Call this after parsing but before validation.
+bool finalize_config(ServerConfig& config, std::error_code& ec);
+
 }  // namespace veil::server

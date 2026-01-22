@@ -201,12 +201,22 @@ std::size_t SessionTable::cleanup_expired() {
   return expired.size();
 }
 
-std::vector<ClientSession*> SessionTable::get_all_sessions() {
+std::vector<SessionSnapshot> SessionTable::get_all_sessions() {
   std::lock_guard<std::mutex> lock(mutex_);
-  std::vector<ClientSession*> result;
+  std::vector<SessionSnapshot> result;
   result.reserve(sessions_.size());
-  for (auto& [id, session] : sessions_) {
-    result.push_back(session.get());
+  for (const auto& [id, session] : sessions_) {
+    SessionSnapshot snapshot;
+    snapshot.session_id = session->session_id;
+    snapshot.endpoint = session->endpoint;
+    snapshot.tunnel_ip = session->tunnel_ip;
+    snapshot.connected_at = session->connected_at;
+    snapshot.last_activity = session->last_activity;
+    snapshot.bytes_received = session->bytes_received;
+    snapshot.bytes_sent = session->bytes_sent;
+    snapshot.packets_received = session->packets_received;
+    snapshot.packets_sent = session->packets_sent;
+    result.push_back(std::move(snapshot));
   }
   return result;
 }

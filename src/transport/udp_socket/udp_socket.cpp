@@ -60,7 +60,11 @@ void fill_endpoint(const sockaddr_in& addr, veil::transport::UdpEndpoint& endpoi
 namespace veil::transport {
 
 UdpSocket::UdpSocket() = default;
-UdpSocket::~UdpSocket() { close(); }
+
+UdpSocket::~UdpSocket() {
+  close_epoll();
+  close();
+}
 
 bool UdpSocket::configure_socket(bool reuse_port, std::error_code& ec) {
   const int enable = 1;
@@ -185,32 +189,57 @@ fallback:
   return true;
 }
 
-bool UdpSocket::poll(const ReceiveHandler& handler, int timeout_ms, std::error_code& ec) {
-  int ep = epoll_create1(0);
-  if (ep < 0) {
+bool UdpSocket::ensure_epoll(std::error_code& ec) {
+  if (epoll_fd_ >= 0) {
+    return true;  // Already initialized.
+  }
+
+  epoll_fd_ = epoll_create1(EPOLL_CLOEXEC);
+  if (epoll_fd_ < 0) {
     ec = last_error();
     return false;
   }
+
   epoll_event ev{};
   ev.events = EPOLLIN;
   ev.data.fd = fd_;
-  if (epoll_ctl(ep, EPOLL_CTL_ADD, fd_, &ev) != 0) {
+  if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, fd_, &ev) != 0) {
     ec = last_error();
-    ::close(ep);
+    ::close(epoll_fd_);
+    epoll_fd_ = -1;
+    return false;
+  }
+
+  return true;
+}
+
+void UdpSocket::close_epoll() {
+  if (epoll_fd_ >= 0) {
+    ::close(epoll_fd_);
+    epoll_fd_ = -1;
+  }
+}
+
+bool UdpSocket::poll(const ReceiveHandler& handler, int timeout_ms, std::error_code& ec) {
+  // Ensure epoll FD is initialized (lazy initialization).
+  // This reuses the same epoll FD across all poll() calls to avoid resource leaks.
+  if (!ensure_epoll(ec)) {
     return false;
   }
 
   std::array<epoll_event, 4> events{};
-  const int n = epoll_wait(ep, events.data(), static_cast<int>(events.size()), timeout_ms);
+  const int n = epoll_wait(epoll_fd_, events.data(), static_cast<int>(events.size()), timeout_ms);
   if (n < 0) {
+    // On EINTR, just return true (no data, but not an error).
+    if (errno == EINTR) {
+      return true;
+    }
     ec = last_error();
-    ::close(ep);
     return false;
   }
 
   if (n == 0) {
-    ::close(ep);
-    return true;
+    return true;  // Timeout, no data.
   }
 
   std::array<std::uint8_t, 65535> buffer{};
@@ -230,11 +259,12 @@ bool UdpSocket::poll(const ReceiveHandler& handler, int timeout_ms, std::error_c
     handler(UdpPacket{std::vector<std::uint8_t>(buffer.begin(), buffer.begin() + read), remote});
   }
 
-  ::close(ep);
   return true;
 }
 
 void UdpSocket::close() {
+  // Close epoll FD first (it references the socket FD).
+  close_epoll();
   if (fd_ >= 0) {
     ::close(fd_);
     fd_ = -1;

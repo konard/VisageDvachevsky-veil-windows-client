@@ -45,6 +45,11 @@ struct SystemState {
   std::string default_gateway;
 };
 
+// Auto-detect the external (default) network interface.
+// Returns the interface name used for the default route, or nullopt if detection fails.
+// This is useful for NAT configuration when the user doesn't specify an external interface.
+std::optional<std::string> detect_external_interface(std::error_code& ec);
+
 // Manages routing table entries and NAT configuration.
 // Uses system commands (ip route, iptables) for configuration.
 class RouteManager {

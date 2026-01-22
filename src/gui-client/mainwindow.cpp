@@ -161,12 +161,33 @@ void MainWindow::setupUi() {
 void MainWindow::setupIpcConnections() {
   // Connect connection widget signals to IPC manager
   connect(connectionWidget_, &ConnectionWidget::connectRequested, this, [this]() {
+    // First check if daemon is connected, try to reconnect if not
+    if (!ipcManager_->isConnected()) {
+      if (!ipcManager_->connectToDaemon()) {
+        // Failed to connect to daemon - show error
+        connectionWidget_->setErrorMessage(
+            tr("Cannot connect: VEIL daemon is not running.\n"
+               "Please start the VEIL service first:\n"
+               "  - Run 'veil-service.exe --start' as administrator, or\n"
+               "  - Start 'VEIL VPN Service' in Windows Services."));
+        connectionWidget_->setConnectionState(ConnectionState::kError);
+        updateTrayIcon(TrayConnectionState::kError);
+        return;
+      }
+    }
+
     // Get server address and port from settings
     QSettings settings("VEIL", "VPN Client");
     QString serverAddress = settings.value("server/address", "vpn.example.com").toString();
     uint16_t serverPort = static_cast<uint16_t>(settings.value("server/port", 4433).toInt());
 
-    ipcManager_->sendConnect(serverAddress, serverPort);
+    if (!ipcManager_->sendConnect(serverAddress, serverPort)) {
+      // Failed to send connect command
+      connectionWidget_->setErrorMessage(
+          tr("Failed to send connect command to daemon."));
+      connectionWidget_->setConnectionState(ConnectionState::kError);
+      updateTrayIcon(TrayConnectionState::kError);
+    }
   });
 
   connect(connectionWidget_, &ConnectionWidget::disconnectRequested, this, [this]() {

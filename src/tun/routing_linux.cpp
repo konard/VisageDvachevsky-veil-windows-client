@@ -439,4 +439,53 @@ void RouteManager::cleanup() {
   restore_routes(ec);
 }
 
+std::optional<std::string> detect_external_interface(std::error_code& ec) {
+  // Use ip route to find the default route interface.
+  // Command: ip route show default
+  // Output example: "default via 192.168.1.1 dev eth0 proto dhcp metric 100"
+
+  FILE* pipe = popen("ip route show default 2>/dev/null", "r");
+  if (pipe == nullptr) {
+    ec = std::error_code(errno, std::generic_category());
+    LOG_ERROR("Failed to execute 'ip route show default': {}", ec.message());
+    return std::nullopt;
+  }
+
+  std::array<char, 256> buffer{};
+  std::string result;
+  while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr) {
+    result += buffer.data();
+  }
+
+  int status = pclose(pipe);
+  if (status != 0) {
+    ec = std::error_code(status, std::generic_category());
+    LOG_WARN("'ip route show default' returned non-zero status: {}", status);
+  }
+
+  if (result.empty()) {
+    ec = std::make_error_code(std::errc::no_such_device);
+    LOG_ERROR("No default route found. Is the network configured?");
+    return std::nullopt;
+  }
+
+  // Parse the output to find the device name.
+  // Format: "default via GATEWAY dev INTERFACE ..."
+  std::istringstream iss(result);
+  std::string token;
+  while (iss >> token) {
+    if (token == "dev") {
+      std::string interface;
+      if (iss >> interface) {
+        LOG_INFO("Auto-detected external interface: {}", interface);
+        return interface;
+      }
+    }
+  }
+
+  ec = std::make_error_code(std::errc::no_such_device);
+  LOG_ERROR("Could not parse default route to find interface");
+  return std::nullopt;
+}
+
 }  // namespace veil::tun

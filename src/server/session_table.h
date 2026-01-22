@@ -48,6 +48,20 @@ struct SessionTableStats {
   std::size_t sessions_rejected_full{0};
 };
 
+// Snapshot of session information for safe iteration.
+// This is a copy of the session data, safe to use after the original session is removed.
+struct SessionSnapshot {
+  std::uint64_t session_id{0};
+  transport::UdpEndpoint endpoint;
+  std::string tunnel_ip;
+  std::chrono::steady_clock::time_point connected_at;
+  std::chrono::steady_clock::time_point last_activity;
+  std::uint64_t bytes_received{0};
+  std::uint64_t bytes_sent{0};
+  std::uint64_t packets_received{0};
+  std::uint64_t packets_sent{0};
+};
+
 // Manages client sessions and IP address allocation.
 class SessionTable {
  public:
@@ -82,8 +96,21 @@ class SessionTable {
   // Returns number of sessions removed.
   std::size_t cleanup_expired();
 
-  // Get all active sessions.
-  std::vector<ClientSession*> get_all_sessions();
+  // Get all active sessions (returns snapshots to avoid use-after-free).
+  // NOTE: The returned snapshots are copies of the session data at the time of the call.
+  // They are safe to use even if the original sessions are removed.
+  std::vector<SessionSnapshot> get_all_sessions();
+
+  // Execute a function on each session while holding the lock.
+  // Use this for operations that need to access the actual session (e.g., transport).
+  // The callback receives a non-owning pointer; do NOT store or use it after the callback returns.
+  template <typename Func>
+  void for_each_session(Func&& func) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& [id, session] : sessions_) {
+      func(session.get());
+    }
+  }
 
   // Get statistics.
   const SessionTableStats& stats() const { return stats_; }

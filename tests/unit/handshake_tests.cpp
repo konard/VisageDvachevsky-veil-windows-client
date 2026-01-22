@@ -101,16 +101,13 @@ TEST(HandshakeTests, InitPacketDoesNotContainPlaintextMagicBytes) {
   handshake::HandshakeInitiator initiator(make_psk(), std::chrono::milliseconds(1000), now_fn);
   const auto init_bytes = initiator.create_init();
 
-  // Check that the plaintext "HS" magic bytes are NOT present in the encrypted packet
-  // The magic bytes would be 0x48, 0x53 ('H', 'S')
-  bool found_magic = false;
-  for (std::size_t i = 0; i + 1 < init_bytes.size(); ++i) {
-    if (init_bytes[i] == 0x48 && init_bytes[i + 1] == 0x53) {
-      found_magic = true;
-      break;
-    }
-  }
-  EXPECT_FALSE(found_magic) << "Plaintext magic bytes 'HS' found in encrypted handshake packet";
+  // DPI resistance: verify magic bytes are NOT at the start of the packet.
+  // The packet should start with a 12-byte random nonce, not plaintext magic bytes.
+  // Note: We don't check the entire packet because encrypted data is pseudo-random,
+  // and "HS" (0x48, 0x53) could appear by chance with probability ~1/65536 per position.
+  ASSERT_GE(init_bytes.size(), 2u) << "Packet too small";
+  bool magic_at_start = (init_bytes[0] == 0x48 && init_bytes[1] == 0x53);
+  EXPECT_FALSE(magic_at_start) << "Plaintext magic bytes 'HS' found at start of packet - should start with random nonce";
 
   // The encrypted packet should be larger due to nonce (12 bytes), AEAD tag (16 bytes), and padding
   // Original INIT size: 2 + 1 + 1 + 8 + 32 + 32 = 76 bytes
@@ -138,15 +135,13 @@ TEST(HandshakeTests, ResponsePacketDoesNotContainPlaintextMagicBytes) {
 
   const auto& response_bytes = resp->response;
 
-  // Check that the plaintext "HS" magic bytes are NOT present in the response
-  bool found_magic = false;
-  for (std::size_t i = 0; i + 1 < response_bytes.size(); ++i) {
-    if (response_bytes[i] == 0x48 && response_bytes[i + 1] == 0x53) {
-      found_magic = true;
-      break;
-    }
-  }
-  EXPECT_FALSE(found_magic) << "Plaintext magic bytes 'HS' found in encrypted response packet";
+  // DPI resistance: verify magic bytes are NOT at the start of the packet.
+  // The packet should start with a 12-byte random nonce, not plaintext magic bytes.
+  // Note: We don't check the entire packet because encrypted data is pseudo-random,
+  // and "HS" (0x48, 0x53) could appear by chance with probability ~1/65536 per position.
+  ASSERT_GE(response_bytes.size(), 2u) << "Packet too small";
+  bool magic_at_start = (response_bytes[0] == 0x48 && response_bytes[1] == 0x53);
+  EXPECT_FALSE(magic_at_start) << "Plaintext magic bytes 'HS' found at start of response packet - should start with random nonce";
 
   // Original RESPONSE size: 2 + 1 + 1 + 8 + 8 + 8 + 32 + 32 = 92 bytes
   // With padding: 92 + 2 (padding length) + 32-400 (padding) = 126-494 bytes

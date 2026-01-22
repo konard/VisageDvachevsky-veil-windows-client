@@ -1,15 +1,78 @@
 #include "server/server_config.h"
 
+#include <arpa/inet.h>
+
 #include <fstream>
+#include <limits>
 #include <sstream>
+#include <stdexcept>
+#include <type_traits>
 
 #include <CLI/CLI.hpp>
 
 #include "common/logging/logger.h"
+#include "tun/routing.h"
 
 namespace veil::server {
 
 namespace {
+// Helper to safely parse integer with validation
+template <typename T>
+bool safe_parse_int(const std::string& value, T& out, const std::string& field_name,
+                    std::error_code& ec) {
+  try {
+    if constexpr (std::is_unsigned_v<T>) {
+      // For unsigned types, use stoull and check for negative values
+      if (!value.empty() && value[0] == '-') {
+        LOG_ERROR("Configuration error: {} value '{}' cannot be negative", field_name, value);
+        ec = std::make_error_code(std::errc::result_out_of_range);
+        return false;
+      }
+      unsigned long long parsed = std::stoull(value);
+      if (parsed > std::numeric_limits<T>::max()) {
+        LOG_ERROR("Configuration error: {} value '{}' is out of range", field_name, value);
+        ec = std::make_error_code(std::errc::result_out_of_range);
+        return false;
+      }
+      out = static_cast<T>(parsed);
+    } else {
+      // For signed types, use stoll
+      long long parsed = std::stoll(value);
+      if (parsed < std::numeric_limits<T>::min() || parsed > std::numeric_limits<T>::max()) {
+        LOG_ERROR("Configuration error: {} value '{}' is out of range", field_name, value);
+        ec = std::make_error_code(std::errc::result_out_of_range);
+        return false;
+      }
+      out = static_cast<T>(parsed);
+    }
+    return true;
+  } catch (const std::invalid_argument&) {
+    LOG_ERROR("Configuration error: {} value '{}' is not a valid number", field_name, value);
+    ec = std::make_error_code(std::errc::invalid_argument);
+    return false;
+  } catch (const std::out_of_range&) {
+    LOG_ERROR("Configuration error: {} value '{}' is out of range", field_name, value);
+    ec = std::make_error_code(std::errc::result_out_of_range);
+    return false;
+  }
+}
+
+// Helper to validate IPv4 address format
+bool is_valid_ipv4(const std::string& ip) {
+  struct in_addr addr;
+  return inet_pton(AF_INET, ip.c_str(), &addr) == 1;
+}
+
+// Convert IPv4 string to uint32_t (network byte order -> host byte order)
+std::uint32_t ipv4_to_uint(const std::string& ip) {
+  struct in_addr addr;
+  if (inet_pton(AF_INET, ip.c_str(), &addr) != 1) {
+    return 0;
+  }
+  return ntohl(addr.s_addr);
+}
+}  // namespace
+
 bool parse_ini_value(const std::string& line, std::string& key, std::string& value) {
   if (line.empty() || line[0] == '#' || line[0] == ';') {
     return false;
@@ -48,7 +111,6 @@ std::string get_current_section(const std::string& line) {
   }
   return "";
 }
-}  // namespace
 
 bool parse_args(int argc, char* argv[], ServerConfig& config, std::error_code& ec) {
   CLI::App app{"VEIL VPN Server"};
@@ -151,7 +213,11 @@ bool load_config_file(const std::string& path, ServerConfig& config, std::error_
       if (key == "listen_address") {
         config.listen_address = value;
       } else if (key == "listen_port") {
-        config.listen_port = static_cast<std::uint16_t>(std::stoi(value));
+        std::uint16_t port;
+        if (!safe_parse_int(value, port, "listen_port", ec)) {
+          return false;
+        }
+        config.listen_port = port;
       } else if (key == "daemon") {
         config.daemon_mode = (value == "true" || value == "1" || value == "yes");
       } else if (key == "verbose") {
@@ -165,7 +231,11 @@ bool load_config_file(const std::string& path, ServerConfig& config, std::error_
       } else if (key == "netmask") {
         config.tunnel.tun.netmask = value;
       } else if (key == "mtu") {
-        config.tunnel.tun.mtu = std::stoi(value);
+        int mtu;
+        if (!safe_parse_int(value, mtu, "mtu", ec)) {
+          return false;
+        }
+        config.tunnel.tun.mtu = mtu;
       }
     } else if (section == "crypto") {
       if (key == "preshared_key_file") {
@@ -187,11 +257,23 @@ bool load_config_file(const std::string& path, ServerConfig& config, std::error_
       }
     } else if (section == "sessions") {
       if (key == "max_clients") {
-        config.max_clients = std::stoul(value);
+        std::size_t max_clients;
+        if (!safe_parse_int(value, max_clients, "max_clients", ec)) {
+          return false;
+        }
+        config.max_clients = max_clients;
       } else if (key == "session_timeout") {
-        config.session_timeout = std::chrono::seconds(std::stoi(value));
+        int timeout;
+        if (!safe_parse_int(value, timeout, "session_timeout", ec)) {
+          return false;
+        }
+        config.session_timeout = std::chrono::seconds(timeout);
       } else if (key == "cleanup_interval") {
-        config.cleanup_interval = std::chrono::seconds(std::stoi(value));
+        int interval;
+        if (!safe_parse_int(value, interval, "cleanup_interval", ec)) {
+          return false;
+        }
+        config.cleanup_interval = std::chrono::seconds(interval);
       }
     } else if (section == "ip_pool") {
       if (key == "start") {
@@ -227,6 +309,11 @@ bool validate_config(const ServerConfig& config, std::string& error) {
     return false;
   }
 
+  if (!is_valid_ipv4(config.tunnel.tun.ip_address)) {
+    error = "TUN IP address is not a valid IPv4 address: " + config.tunnel.tun.ip_address;
+    return false;
+  }
+
   if (config.tunnel.tun.mtu < 576 || config.tunnel.tun.mtu > 65535) {
     error = "MTU must be between 576 and 65535";
     return false;
@@ -235,6 +322,99 @@ bool validate_config(const ServerConfig& config, std::string& error) {
   if (config.max_clients == 0) {
     error = "Max clients must be greater than 0";
     return false;
+  }
+
+  // Limit max_clients to prevent resource exhaustion
+  constexpr std::size_t kMaxClientsLimit = 10000;
+  if (config.max_clients > kMaxClientsLimit) {
+    error = "Max clients cannot exceed " + std::to_string(kMaxClientsLimit);
+    return false;
+  }
+
+  // Validate IP pool
+  if (config.ip_pool_start.empty()) {
+    error = "IP pool start address is required";
+    return false;
+  }
+
+  if (config.ip_pool_end.empty()) {
+    error = "IP pool end address is required";
+    return false;
+  }
+
+  if (!is_valid_ipv4(config.ip_pool_start)) {
+    error = "IP pool start is not a valid IPv4 address: " + config.ip_pool_start;
+    return false;
+  }
+
+  if (!is_valid_ipv4(config.ip_pool_end)) {
+    error = "IP pool end is not a valid IPv4 address: " + config.ip_pool_end;
+    return false;
+  }
+
+  std::uint32_t pool_start = ipv4_to_uint(config.ip_pool_start);
+  std::uint32_t pool_end = ipv4_to_uint(config.ip_pool_end);
+
+  if (pool_start == 0 || pool_end == 0) {
+    error = "IP pool addresses cannot be 0.0.0.0";
+    return false;
+  }
+
+  if (pool_start > pool_end) {
+    error = "IP pool start (" + config.ip_pool_start + ") must be <= IP pool end (" +
+            config.ip_pool_end + ")";
+    return false;
+  }
+
+  // Check that the IP pool has enough addresses for max_clients
+  std::uint32_t pool_size = pool_end - pool_start + 1;
+  if (pool_size < config.max_clients) {
+    error = "IP pool size (" + std::to_string(pool_size) + ") is smaller than max_clients (" +
+            std::to_string(config.max_clients) + ")";
+    return false;
+  }
+
+  // Validate NAT external interface is not empty if NAT is enabled
+  if (config.nat.enable_forwarding && config.nat.external_interface.empty()) {
+    error = "NAT external interface is required when NAT is enabled. "
+            "Use --external-interface to specify it, or enable auto-detection.";
+    return false;
+  }
+
+  return true;
+}
+
+bool finalize_config(ServerConfig& config, std::error_code& ec) {
+  // Auto-detect external interface if using default "eth0" or empty
+  // and NAT is enabled.
+  if (config.nat.enable_forwarding) {
+    // Check if the interface exists, and if not, try to auto-detect.
+    bool need_detection = config.nat.external_interface.empty() ||
+                          config.nat.external_interface == "eth0";
+
+    if (need_detection) {
+      auto detected = tun::detect_external_interface(ec);
+      if (detected) {
+        // Only replace if we detected something different or if it was empty.
+        if (config.nat.external_interface.empty() ||
+            (config.nat.external_interface == "eth0" && *detected != "eth0")) {
+          LOG_INFO("Auto-detected external interface: {} (was: {})", *detected,
+                   config.nat.external_interface.empty() ? "(empty)"
+                                                         : config.nat.external_interface);
+          config.nat.external_interface = *detected;
+        }
+      } else if (config.nat.external_interface.empty()) {
+        // Detection failed and no fallback specified.
+        LOG_ERROR("Failed to auto-detect external interface for NAT. "
+                  "Please specify --external-interface explicitly.");
+        return false;
+      } else {
+        // Detection failed but we have a fallback (eth0), log a warning.
+        LOG_WARN("Could not auto-detect external interface; using default '{}'. "
+                 "If NAT doesn't work, specify --external-interface explicitly.",
+                 config.nat.external_interface);
+      }
+    }
   }
 
   return true;

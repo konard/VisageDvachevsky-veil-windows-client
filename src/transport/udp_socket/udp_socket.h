@@ -28,6 +28,12 @@ class UdpSocket {
   UdpSocket();
   ~UdpSocket();
 
+  // Non-copyable, non-movable to prevent epoll_fd_ resource issues.
+  UdpSocket(const UdpSocket&) = delete;
+  UdpSocket& operator=(const UdpSocket&) = delete;
+  UdpSocket(UdpSocket&&) = delete;
+  UdpSocket& operator=(UdpSocket&&) = delete;
+
   bool open(std::uint16_t bind_port, bool reuse_port, std::error_code& ec);
   bool connect(const UdpEndpoint& remote, std::error_code& ec);
   bool send(std::span<const std::uint8_t> data, const UdpEndpoint& remote, std::error_code& ec);
@@ -39,9 +45,12 @@ class UdpSocket {
 
  private:
   int fd_{-1};
+  int epoll_fd_{-1};  // Persistent epoll FD to avoid creating/destroying on every poll() call.
   UdpEndpoint connected_;
 
   bool configure_socket(bool reuse_port, std::error_code& ec);
+  bool ensure_epoll(std::error_code& ec);  // Lazy initialization of epoll FD.
+  void close_epoll();  // Helper to close epoll FD.
 };
 
 }  // namespace veil::transport

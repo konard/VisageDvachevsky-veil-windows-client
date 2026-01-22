@@ -15,6 +15,24 @@ namespace veil::tunnel {
 namespace {
 constexpr std::size_t kMaxPacketSize = 65535;
 
+// Helper to provide actionable error message for key file issues.
+std::string format_key_error(const std::string& key_type, const std::string& path,
+                             const std::error_code& ec) {
+  std::string msg = key_type + " file '" + path + "' error: " + ec.message() + "\n";
+  if (ec == std::errc::no_such_file_or_directory) {
+    msg += "  To generate a new key, run:\n";
+    msg += "    head -c 32 /dev/urandom > " + path + "\n";
+    msg += "  Then copy this file securely to both server and client.";
+  } else if (ec == std::errc::permission_denied) {
+    msg += "  Check file permissions with: ls -la " + path + "\n";
+    msg += "  Ensure the file is readable by the current user.";
+  } else if (ec == std::errc::io_error) {
+    msg += "  The key file must be exactly 32 bytes.\n";
+    msg += "  Regenerate with: head -c 32 /dev/urandom > " + path;
+  }
+  return msg;
+}
+
 bool load_key_from_file(const std::string& path, std::vector<std::uint8_t>& key,
                         std::error_code& ec) {
   std::ifstream file(path, std::ios::binary);
@@ -45,7 +63,8 @@ bool Tunnel::initialize(std::error_code& ec) {
   // Load pre-shared key if specified.
   if (!config_.key_file.empty()) {
     if (!load_key_from_file(config_.key_file, config_.psk, ec)) {
-      LOG_ERROR("Failed to load key file {}: {}", config_.key_file, ec.message());
+      std::string error_msg = format_key_error("Pre-shared key", config_.key_file, ec);
+      LOG_ERROR("{}", error_msg);
       return false;
     }
     LOG_DEBUG("Loaded pre-shared key from {}", config_.key_file);

@@ -403,6 +403,12 @@ void ConnectionWidget::setupAnimations() {
   uptimeTimer_->setInterval(1000);  // Update every second
   connect(uptimeTimer_, &QTimer::timeout, this, &ConnectionWidget::onUptimeUpdate);
 
+  // Setup connection timeout timer
+  connectionTimeoutTimer_ = new QTimer(this);
+  connectionTimeoutTimer_->setSingleShot(true);
+  connectionTimeoutTimer_->setInterval(kConnectionTimeoutMs);
+  connect(connectionTimeoutTimer_, &QTimer::timeout, this, &ConnectionWidget::onConnectionTimeout);
+
   // Setup opacity effect for status indicator
   statusOpacity_ = new QGraphicsOpacityEffect(this);
   statusOpacity_->setOpacity(1.0);
@@ -435,8 +441,12 @@ void ConnectionWidget::setConnectionState(ConnectionState state) {
   // Handle state transitions
   if (state == ConnectionState::kConnecting || state == ConnectionState::kReconnecting) {
     startPulseAnimation();
+    // Start connection timeout timer
+    connectionTimeoutTimer_->start();
   } else {
     stopPulseAnimation();
+    // Stop connection timeout timer (connection succeeded, failed, or cancelled)
+    connectionTimeoutTimer_->stop();
   }
 
   if (state == ConnectionState::kConnected) {
@@ -656,6 +666,15 @@ void ConnectionWidget::onUptimeUpdate() {
     int seconds = static_cast<int>(uptimeCounter_.elapsed() / 1000);
     uptimeLabel_->setText(formatUptime(seconds));
     // Metrics are updated via IPC from the daemon, not simulated here
+  }
+}
+
+void ConnectionWidget::onConnectionTimeout() {
+  // Connection attempt timed out - transition to error state
+  if (state_ == ConnectionState::kConnecting || state_ == ConnectionState::kReconnecting) {
+    setErrorMessage(tr("Connection timed out. The VEIL daemon may not be running.\n"
+                       "Please ensure the VEIL service is started before connecting."));
+    setConnectionState(ConnectionState::kError);
   }
 }
 

@@ -27,6 +27,13 @@ using namespace veil;
 namespace {
 constexpr std::size_t kMaxPacketSize = 65535;
 
+// Minimum expected packet size for both data and handshake packets.
+// This is the absolute minimum to filter out obviously malformed packets
+// before any cryptographic processing. Actual validation happens in the
+// handshake processor and transport session.
+// Value: nonce (12 bytes) + min ciphertext (1 byte) + AEAD tag (16 bytes) = 29 bytes
+constexpr std::size_t kMinPacketSize = 29;
+
 // Statistics for display
 struct ServerStats {
   std::atomic<uint64_t> total_bytes_sent{0};
@@ -48,7 +55,29 @@ bool load_key_from_file(const std::string& path, std::array<std::uint8_t, 32>& k
     return false;
   }
   file.read(reinterpret_cast<char*>(key.data()), static_cast<std::streamsize>(key.size()));
-  return file.gcount() == static_cast<std::streamsize>(key.size());
+  if (file.gcount() != static_cast<std::streamsize>(key.size())) {
+    ec = std::make_error_code(std::errc::io_error);
+    return false;
+  }
+  return true;
+}
+
+// Helper to provide actionable error message for key file issues.
+std::string format_key_error(const std::string& key_type, const std::string& path,
+                             const std::error_code& ec) {
+  std::string msg = key_type + " file '" + path + "' error: " + ec.message();
+  if (ec == std::errc::no_such_file_or_directory) {
+    msg += "\n  To generate a new key, run:\n";
+    msg += "    head -c 32 /dev/urandom > " + path + "\n";
+    msg += "  Then copy this file securely to both server and client.";
+  } else if (ec == std::errc::permission_denied) {
+    msg += "\n  Check file permissions with: ls -la " + path + "\n";
+    msg += "  Ensure the file is readable by the current user.";
+  } else if (ec == std::errc::io_error) {
+    msg += "\n  The key file must be exactly 32 bytes.\n";
+    msg += "  Regenerate with: head -c 32 /dev/urandom > " + path;
+  }
+  return msg;
 }
 
 // Helper functions for logging
@@ -181,6 +210,12 @@ int main(int argc, char* argv[]) {
     return EXIT_FAILURE;
   }
 
+  // Finalize configuration (auto-detect interfaces, etc.)
+  if (!server::finalize_config(config, ec)) {
+    cli::print_error("Configuration finalization failed: " + ec.message());
+    return EXIT_FAILURE;
+  }
+
   // Validate configuration
   std::string validation_error;
   if (!server::validate_config(config, validation_error)) {
@@ -240,8 +275,10 @@ int main(int argc, char* argv[]) {
       psk.assign(psk_arr.begin(), psk_arr.end());
       cli::print_success("Pre-shared key loaded");
     } else {
-      cli::print_warning("Failed to load key file: " + ec.message());
-      LOG_WARN("Failed to load key file: {}", ec.message());
+      std::string error_msg = format_key_error("Pre-shared key", config.tunnel.key_file, ec);
+      cli::print_error(error_msg);
+      LOG_ERROR("{}", error_msg);
+      return EXIT_FAILURE;
     }
   }
 
@@ -340,6 +377,14 @@ int main(int argc, char* argv[]) {
     // Poll UDP socket
     udp_socket.poll(
         [&](const transport::UdpPacket& pkt) {
+          // Early rejection of obviously malformed packets (DoS prevention).
+          // This filters out undersized packets before any crypto processing.
+          if (pkt.data.size() < kMinPacketSize || pkt.data.size() > kMaxPacketSize) {
+            LOG_DEBUG("Dropping packet with invalid size {} from {}:{}",
+                      pkt.data.size(), pkt.remote.host, pkt.remote.port);
+            return;
+          }
+
           log_packet_received(pkt.data.size(), pkt.remote.host, pkt.remote.port);
 
           // Check if this is from an existing session
@@ -447,8 +492,8 @@ int main(int argc, char* argv[]) {
       last_stats = now;
     }
 
-    // Process retransmits for all sessions
-    for (auto* session : session_table.get_all_sessions()) {
+    // Process retransmits for all sessions (use for_each_session to avoid use-after-free)
+    session_table.for_each_session([&](server::ClientSession* session) {
       if (session->transport) {
         auto retransmits = session->transport->get_retransmit_packets();
         for (const auto& pkt : retransmits) {
@@ -457,7 +502,7 @@ int main(int argc, char* argv[]) {
           }
         }
       }
-    }
+    });
   }
 
   // Cleanup

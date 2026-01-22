@@ -1,7 +1,12 @@
 #include "client/client_config.h"
 
+#include <arpa/inet.h>
+
 #include <fstream>
+#include <limits>
 #include <sstream>
+#include <stdexcept>
+#include <type_traits>
 
 #include <CLI/CLI.hpp>
 
@@ -10,6 +15,53 @@
 namespace veil::client {
 
 namespace {
+// Helper to safely parse integer with validation
+template <typename T>
+bool safe_parse_int(const std::string& value, T& out, const std::string& field_name,
+                    std::error_code& ec) {
+  try {
+    if constexpr (std::is_unsigned_v<T>) {
+      // For unsigned types, use stoull and check for negative values
+      if (!value.empty() && value[0] == '-') {
+        LOG_ERROR("Configuration error: {} value '{}' cannot be negative", field_name, value);
+        ec = std::make_error_code(std::errc::result_out_of_range);
+        return false;
+      }
+      unsigned long long parsed = std::stoull(value);
+      if (parsed > std::numeric_limits<T>::max()) {
+        LOG_ERROR("Configuration error: {} value '{}' is out of range", field_name, value);
+        ec = std::make_error_code(std::errc::result_out_of_range);
+        return false;
+      }
+      out = static_cast<T>(parsed);
+    } else {
+      // For signed types, use stoll
+      long long parsed = std::stoll(value);
+      if (parsed < std::numeric_limits<T>::min() || parsed > std::numeric_limits<T>::max()) {
+        LOG_ERROR("Configuration error: {} value '{}' is out of range", field_name, value);
+        ec = std::make_error_code(std::errc::result_out_of_range);
+        return false;
+      }
+      out = static_cast<T>(parsed);
+    }
+    return true;
+  } catch (const std::invalid_argument&) {
+    LOG_ERROR("Configuration error: {} value '{}' is not a valid number", field_name, value);
+    ec = std::make_error_code(std::errc::invalid_argument);
+    return false;
+  } catch (const std::out_of_range&) {
+    LOG_ERROR("Configuration error: {} value '{}' is out of range", field_name, value);
+    ec = std::make_error_code(std::errc::result_out_of_range);
+    return false;
+  }
+}
+
+// Helper to validate IPv4 address format
+bool is_valid_ipv4(const std::string& ip) {
+  struct in_addr addr;
+  return inet_pton(AF_INET, ip.c_str(), &addr) == 1;
+}
+
 // Simple INI parser for configuration files.
 bool parse_ini_value(const std::string& line, std::string& key, std::string& value) {
   // Skip comments and empty lines.
@@ -142,7 +194,11 @@ bool load_config_file(const std::string& path, ClientConfig& config, std::error_
       if (key == "server_address") {
         config.tunnel.server_address = value;
       } else if (key == "server_port") {
-        config.tunnel.server_port = static_cast<std::uint16_t>(std::stoi(value));
+        std::uint16_t port;
+        if (!safe_parse_int(value, port, "server_port", ec)) {
+          return false;
+        }
+        config.tunnel.server_port = port;
       } else if (key == "daemon") {
         config.daemon_mode = (value == "true" || value == "1" || value == "yes");
       } else if (key == "verbose") {
@@ -156,7 +212,11 @@ bool load_config_file(const std::string& path, ClientConfig& config, std::error_
       } else if (key == "netmask") {
         config.tunnel.tun.netmask = value;
       } else if (key == "mtu") {
-        config.tunnel.tun.mtu = std::stoi(value);
+        int mtu;
+        if (!safe_parse_int(value, mtu, "mtu", ec)) {
+          return false;
+        }
+        config.tunnel.tun.mtu = mtu;
       }
     } else if (section == "crypto") {
       if (key == "preshared_key_file") {
@@ -187,7 +247,11 @@ bool load_config_file(const std::string& path, ClientConfig& config, std::error_
       }
     } else if (section == "connection") {
       if (key == "reconnect_interval_ms") {
-        config.tunnel.reconnect_delay = std::chrono::milliseconds(std::stoi(value));
+        int interval;
+        if (!safe_parse_int(value, interval, "reconnect_interval_ms", ec)) {
+          return false;
+        }
+        config.tunnel.reconnect_delay = std::chrono::milliseconds(interval);
       } else if (key == "auto_reconnect") {
         config.tunnel.auto_reconnect = (value == "true" || value == "1" || value == "yes");
       }
@@ -221,6 +285,11 @@ bool validate_config(const ClientConfig& config, std::string& error) {
 
   if (config.tunnel.tun.ip_address.empty()) {
     error = "TUN IP address is required";
+    return false;
+  }
+
+  if (!is_valid_ipv4(config.tunnel.tun.ip_address)) {
+    error = "TUN IP address is not a valid IPv4 address: " + config.tunnel.tun.ip_address;
     return false;
   }
 
