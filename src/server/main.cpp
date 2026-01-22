@@ -101,6 +101,10 @@ void log_handshake_send_error(const std::error_code& ec) {
   LOG_ERROR("Failed to send handshake response: {}", ec.message());
 }
 
+void log_retransmit_error(const std::error_code& ec) {
+  LOG_WARN("Failed to retransmit to client: {}", ec.message());
+}
+
 void log_new_client(const std::string& host, std::uint16_t port, std::uint64_t session_id) {
   LOG_INFO("New client connected from {}:{}, session {}", host, port, session_id);
 
@@ -498,7 +502,7 @@ int main(int argc, char* argv[]) {
         auto retransmits = session->transport->get_retransmit_packets();
         for (const auto& pkt : retransmits) {
           if (!udp_socket.send(pkt, session->endpoint, ec)) {
-            LOG_WARN("Failed to retransmit to client: {}", ec.message());
+            log_retransmit_error(ec);
           }
         }
       }
