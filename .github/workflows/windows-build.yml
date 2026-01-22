@@ -160,7 +160,7 @@ jobs:
           path: installer/
 
       - name: Install NSIS
-        uses: joncloud/makensis-action@v4.2
+        uses: joncloud/makensis-action@v5.0
 
       - name: Build installer
         run: |
