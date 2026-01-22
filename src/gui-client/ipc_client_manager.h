@@ -65,13 +65,24 @@ class IpcClientManager : public QObject {
   /// Poll for IPC messages
   void pollMessages();
 
+  /// Attempt to reconnect to daemon
+  void attemptReconnect();
+
  private:
   void handleMessage(const ipc::Message& msg);
   void handleConnectionChange(bool connected);
+  void startReconnectTimer();
+  void stopReconnectTimer();
 
   std::unique_ptr<ipc::IpcClient> client_;
   QTimer* pollTimer_;
+  QTimer* reconnectTimer_;
   bool daemonConnected_{false};
+  int reconnectAttempts_{0};
+
+  // Reconnection constants
+  static constexpr int kReconnectIntervalMs = 5000;  // 5 seconds
+  static constexpr int kMaxReconnectAttempts = 12;   // Try for 1 minute
 };
 
 }  // namespace veil::gui

@@ -54,6 +54,7 @@ class ConnectionWidget : public QWidget {
  private slots:
   void onPulseAnimation();
   void onUptimeUpdate();
+  void onConnectionTimeout();
 
  private:
   void setupUi();
@@ -100,11 +101,15 @@ class ConnectionWidget : public QWidget {
   // Animation
   QTimer* pulseTimer_;
   QTimer* uptimeTimer_;
+  QTimer* connectionTimeoutTimer_;
   QPropertyAnimation* pulseAnimation_;
   QGraphicsOpacityEffect* statusOpacity_;
   QElapsedTimer uptimeCounter_;
   bool pulseState_{false};
   qreal animationPhase_{0.0};
+
+  // Connection timeout (30 seconds default)
+  static constexpr int kConnectionTimeoutMs = 30000;
 };
 
 }  // namespace veil::gui

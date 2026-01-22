@@ -7,7 +7,8 @@ namespace veil::gui {
 IpcClientManager::IpcClientManager(QObject* parent)
     : QObject(parent),
       client_(std::make_unique<ipc::IpcClient>()),
-      pollTimer_(new QTimer(this)) {
+      pollTimer_(new QTimer(this)),
+      reconnectTimer_(new QTimer(this)) {
   // Set up IPC message handler
   client_->on_message([this](const ipc::Message& msg) {
     handleMessage(msg);
@@ -22,9 +23,14 @@ IpcClientManager::IpcClientManager(QObject* parent)
   // This is necessary because the IPC client uses non-blocking I/O
   connect(pollTimer_, &QTimer::timeout, this, &IpcClientManager::pollMessages);
   pollTimer_->setInterval(50);  // Poll every 50ms for responsive UI
+
+  // Set up reconnection timer
+  connect(reconnectTimer_, &QTimer::timeout, this, &IpcClientManager::attemptReconnect);
+  reconnectTimer_->setInterval(kReconnectIntervalMs);
 }
 
 IpcClientManager::~IpcClientManager() {
+  stopReconnectTimer();
   disconnect();
 }
 
@@ -32,12 +38,16 @@ bool IpcClientManager::connectToDaemon() {
   std::error_code ec;
   if (!client_->connect(ec)) {
     // Failed to connect - daemon may not be running
+    // Start reconnection timer in background
+    startReconnectTimer();
     emit errorOccurred(
         tr("Failed to connect to daemon"),
         tr("The VEIL client daemon may not be running. Please start veil-client first."));
     return false;
   }
 
+  // Successfully connected - stop reconnection timer
+  stopReconnectTimer();
   daemonConnected_ = true;
   pollTimer_->start();
   emit daemonConnectionChanged(true);
@@ -200,7 +210,48 @@ void IpcClientManager::handleConnectionChange(bool connected) {
 
   if (!connected) {
     pollTimer_->stop();
+    // Start trying to reconnect in background
+    startReconnectTimer();
+  } else {
+    // Stop reconnection timer on successful connection
+    stopReconnectTimer();
   }
+}
+
+void IpcClientManager::attemptReconnect() {
+  if (daemonConnected_ || client_->is_connected()) {
+    // Already connected, stop reconnecting
+    stopReconnectTimer();
+    return;
+  }
+
+  reconnectAttempts_++;
+
+  // Try to connect
+  std::error_code ec;
+  if (client_->connect(ec)) {
+    // Successfully reconnected
+    stopReconnectTimer();
+    daemonConnected_ = true;
+    pollTimer_->start();
+    emit daemonConnectionChanged(true);
+  } else if (reconnectAttempts_ >= kMaxReconnectAttempts) {
+    // Give up after max attempts
+    stopReconnectTimer();
+  }
+  // Otherwise, timer will fire again and we'll retry
+}
+
+void IpcClientManager::startReconnectTimer() {
+  if (!reconnectTimer_->isActive()) {
+    reconnectAttempts_ = 0;
+    reconnectTimer_->start();
+  }
+}
+
+void IpcClientManager::stopReconnectTimer() {
+  reconnectTimer_->stop();
+  reconnectAttempts_ = 0;
 }
 
 }  // namespace veil::gui
