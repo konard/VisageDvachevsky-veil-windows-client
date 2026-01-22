@@ -161,25 +161,24 @@ jobs:
 
       - name: Install NSIS
         run: |
-          # Retry choco install up to 3 times with exponential backoff
-          $maxRetries = 3
-          $retryCount = 0
-          $success = $false
+          # Download NSIS directly from SourceForge to avoid chocolatey timeouts
+          $nsisVersion = "3.10"
+          $nsisUrl = "https://downloads.sourceforge.net/project/nsis/NSIS%203/$nsisVersion/nsis-$nsisVersion-setup.exe"
+          $nsisInstaller = "$env:TEMP\nsis-setup.exe"
 
-          while (-not $success -and $retryCount -lt $maxRetries) {
-            try {
-              choco install nsis -y --no-progress
-              $success = $true
-            } catch {
-              $retryCount++
-              if ($retryCount -lt $maxRetries) {
-                $waitTime = [math]::Pow(2, $retryCount) * 5
-                Write-Host "NSIS installation failed. Retrying in $waitTime seconds..."
-                Start-Sleep -Seconds $waitTime
-              } else {
-                throw "Failed to install NSIS after $maxRetries attempts"
-              }
-            }
+          Write-Host "Downloading NSIS from SourceForge..."
+          Invoke-WebRequest -Uri $nsisUrl -OutFile $nsisInstaller -UseBasicParsing
+
+          Write-Host "Installing NSIS silently..."
+          Start-Process -FilePath $nsisInstaller -ArgumentList "/S" -Wait -NoNewWindow
+
+          # Verify installation
+          $nsisPath = "C:\Program Files (x86)\NSIS\makensis.exe"
+          if (Test-Path $nsisPath) {
+            Write-Host "NSIS installed successfully at $nsisPath"
+            & $nsisPath /VERSION
+          } else {
+            throw "NSIS installation failed - makensis.exe not found at $nsisPath"
           }
 
       - name: Build installer
