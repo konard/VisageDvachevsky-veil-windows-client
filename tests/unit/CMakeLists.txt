@@ -1,6 +1,17 @@
 # Platform-specific test sources
 if(WIN32)
-  set(VEIL_PLATFORM_TEST_SOURCES)
+  # Transport layer tests are now available on Windows
+  set(VEIL_PLATFORM_TEST_SOURCES
+    udp_socket_tests.cpp
+    ack_bitmap_tests.cpp
+    reorder_buffer_tests.cpp
+    fragment_reassembly_tests.cpp
+    mux_codec_tests.cpp
+    retransmit_buffer_tests.cpp
+    ack_scheduler_tests.cpp
+    transport_session_tests.cpp
+    session_migration_tests.cpp
+  )
 else()
   set(VEIL_PLATFORM_TEST_SOURCES
     config_tests.cpp

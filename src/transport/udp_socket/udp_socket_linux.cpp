@@ -1,17 +1,18 @@
+// Linux UDP socket implementation using epoll
+// This file is only compiled on Linux/Unix platforms
+
+#ifndef _WIN32
+
 #include "transport/udp_socket/udp_socket.h"
 
-#ifdef _WIN32
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#else
 #include <arpa/inet.h>
 #include <cerrno>
+#include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#endif
 
 #include <array>
 #include <chrono>
@@ -32,11 +33,7 @@
 
 namespace {
 std::error_code last_error() {
-#ifdef _WIN32
-  return std::error_code(WSAGetLastError(), std::system_category());
-#else
   return std::error_code(errno, std::generic_category());
-#endif
 }
 
 bool resolve(const veil::transport::UdpEndpoint& endpoint, sockaddr_in& addr) {
@@ -79,6 +76,8 @@ bool UdpSocket::configure_socket(bool reuse_port, std::error_code& ec) {
       return false;
     }
   }
+#else
+  (void)reuse_port;
 #endif
   return true;
 }
@@ -272,3 +271,5 @@ void UdpSocket::close() {
 }
 
 }  // namespace veil::transport
+
+#endif  // !_WIN32
