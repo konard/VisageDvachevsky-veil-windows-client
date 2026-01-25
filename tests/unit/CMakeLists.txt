@@ -1,6 +1,9 @@
 # Platform-specific test sources
 if(WIN32)
-  set(VEIL_PLATFORM_TEST_SOURCES)
+  # UDP socket tests now work on Windows (ported from epoll to WSAPoll).
+  set(VEIL_PLATFORM_TEST_SOURCES
+    udp_socket_tests.cpp
+  )
 else()
   set(VEIL_PLATFORM_TEST_SOURCES
     config_tests.cpp

@@ -7,10 +7,13 @@ if(WIN32)
     windows/service_manager.cpp
     windows/system_tray.cpp
   )
-  # Windows doesn't use POSIX signals, daemonization, epoll-based transport, tunnel, or CLI config
+  # Windows doesn't use POSIX signals, daemonization, epoll-based event_loop, tunnel, or CLI config.
+  # UDP socket now supports Windows via WSAPoll (ported from Linux epoll).
   set(VEIL_SIGNAL_SOURCES)
   set(VEIL_DAEMON_SOURCES)
-  set(VEIL_TRANSPORT_SOURCES)
+  set(VEIL_TRANSPORT_SOURCES
+    transport/udp_socket/udp_socket.cpp
+  )
   set(VEIL_TUNNEL_SOURCES)
   set(VEIL_SERVER_SOURCES)
   set(VEIL_CLI_CONFIG_SOURCES)

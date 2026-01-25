@@ -41,16 +41,31 @@ class UdpSocket {
   bool poll(const ReceiveHandler& handler, int timeout_ms, std::error_code& ec);
   void close();
 
+#ifdef _WIN32
+  // On Windows, returns the socket handle cast to int for compatibility.
+  // Note: Use native_handle() for Windows-specific operations.
+  int fd() const { return static_cast<int>(fd_); }
+  std::uintptr_t native_handle() const { return fd_; }
+#else
   int fd() const { return fd_; }
+#endif
 
  private:
+#ifdef _WIN32
+  // On Windows, we use SOCKET type (unsigned __int64 on 64-bit, unsigned int on 32-bit).
+  // Using uintptr_t provides a portable representation that works with INVALID_SOCKET.
+  std::uintptr_t fd_{static_cast<std::uintptr_t>(~0ULL)};  // INVALID_SOCKET
+#else
   int fd_{-1};
   int epoll_fd_{-1};  // Persistent epoll FD to avoid creating/destroying on every poll() call.
+#endif
   UdpEndpoint connected_;
 
   bool configure_socket(bool reuse_port, std::error_code& ec);
-  bool ensure_epoll(std::error_code& ec);  // Lazy initialization of epoll FD.
-  void close_epoll();  // Helper to close epoll FD.
+#ifndef _WIN32
+  bool ensure_epoll(std::error_code& ec);  // Lazy initialization of epoll FD (Linux only).
+  void close_epoll();  // Helper to close epoll FD (Linux only).
+#endif
 };
 
 }  // namespace veil::transport
