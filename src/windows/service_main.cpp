@@ -2,30 +2,49 @@
 
 // Windows Service entry point for VEIL VPN daemon
 // This executable runs as a Windows service and manages the VPN connection.
+//
+// NOTE: The full VPN tunnel functionality is not yet available on Windows.
+// The transport layer (UDP socket, event loop) needs to be ported from Linux.
+// Currently, this service provides the framework for:
+// - Windows service installation/uninstallation
+// - Service start/stop/status management
+// - IPC communication with the GUI client
+//
+// When the transport layer is ported, the tunnel functionality can be enabled.
 
 #include <windows.h>
 
 #include <atomic>
 #include <csignal>
+#include <cstdint>
 #include <filesystem>
 #include <iostream>
+#include <map>
+#include <string>
 #include <thread>
+#include <type_traits>
 
-#include "../client/client_config.h"
-#include "../common/config/app_config.h"
 #include "../common/ipc/ipc_protocol.h"
 #include "../common/ipc/ipc_socket.h"
 #include "../common/logging/logger.h"
-#include "../tunnel/tunnel.h"
 #include "service_manager.h"
 
 using namespace veil;
 using namespace veil::windows;
 
+// Placeholder statistics until tunnel is available
+struct ServiceStats {
+  std::uint64_t bytes_sent{0};
+  std::uint64_t bytes_received{0};
+  std::uint64_t packets_sent{0};
+  std::uint64_t packets_received{0};
+};
+
 // Global state
 static std::atomic<bool> g_running{false};
-static std::unique_ptr<tunnel::Tunnel> g_tunnel;
+static std::atomic<bool> g_connected{false};
 static std::unique_ptr<ipc::IpcServer> g_ipc_server;
+static ServiceStats g_stats;
 
 // Forward declarations
 void WINAPI service_main(DWORD argc, LPSTR* argv);
@@ -123,7 +142,7 @@ int main(int argc, char* argv[]) {
                 << std::endl;
 
       // Initialize logging to console
-      logging::configure_logging(logging::LogLevel::kDebug, true);
+      logging::configure_logging(logging::LogLevel::debug, true);
 
       // Set up signal handler for Ctrl+C
       signal(SIGINT, [](int) {
@@ -192,7 +211,7 @@ void WINAPI service_main(DWORD /*argc*/, LPSTR* /*argv*/) {
   ServiceControlHandler::report_starting(1);
 
   // Initialize logging to Windows Event Log
-  logging::configure_logging(logging::LogLevel::kInfo, false);
+  logging::configure_logging(logging::LogLevel::info, false);
 
   // Set stop handler
   ServiceControlHandler::on_stop([]() { stop_service(); });
@@ -213,36 +232,7 @@ void WINAPI service_main(DWORD /*argc*/, LPSTR* /*argv*/) {
 
 void run_service() {
   g_running = true;
-
-  // Load configuration
-  std::filesystem::path config_path;
-
-  // Try common config locations
-  std::vector<std::filesystem::path> config_locations = {
-      std::filesystem::path(getenv("PROGRAMDATA") ? getenv("PROGRAMDATA") : "") /
-          "VEIL" / "client.json",
-      std::filesystem::path(getenv("APPDATA") ? getenv("APPDATA") : "") /
-          "VEIL" / "client.json",
-      std::filesystem::current_path() / "client.json",
-  };
-
-  for (const auto& path : config_locations) {
-    if (std::filesystem::exists(path)) {
-      config_path = path;
-      break;
-    }
-  }
-
-  client::ClientConfig config;
-  if (!config_path.empty()) {
-    std::error_code ec;
-    if (!client::load_config_file(config_path.string(), config, ec)) {
-      LOG_WARN("Failed to load config from {}: {}", config_path.string(),
-               ec.message());
-    } else {
-      LOG_INFO("Loaded configuration from {}", config_path.string());
-    }
-  }
+  g_connected = false;
 
   // Create IPC server for GUI communication
   g_ipc_server = std::make_unique<ipc::IpcServer>();
@@ -251,16 +241,17 @@ void run_service() {
   std::error_code ec;
   if (!g_ipc_server->start(ec)) {
     LOG_ERROR("Failed to start IPC server: {}", ec.message());
-    // Continue without IPC - the tunnel can still work
+    // Continue anyway - service can still run
+  } else {
+    LOG_INFO("IPC server started successfully");
   }
-
-  // Create tunnel (but don't connect yet - wait for GUI command)
-  g_tunnel = std::make_unique<tunnel::Tunnel>();
 
   // Report that we're running
   ServiceControlHandler::report_running();
 
   LOG_INFO("VEIL VPN Service started");
+  LOG_WARN("Note: VPN tunnel functionality is not yet available on Windows. "
+           "The transport layer needs to be ported from Linux.");
 
   // Main service loop
   while (g_running) {
@@ -270,22 +261,11 @@ void run_service() {
       g_ipc_server->poll(ipc_ec);
     }
 
-    // Poll tunnel if connected
-    if (g_tunnel && g_tunnel->is_connected()) {
-      std::error_code tunnel_ec;
-      g_tunnel->poll(tunnel_ec);
-    }
-
     // Small sleep to prevent busy-waiting
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 
   // Cleanup
-  if (g_tunnel) {
-    g_tunnel->disconnect();
-    g_tunnel.reset();
-  }
-
   if (g_ipc_server) {
     g_ipc_server->stop();
     g_ipc_server.reset();
@@ -310,122 +290,95 @@ void handle_ipc_message(const ipc::Message& msg, int client_fd) {
 
   const auto& cmd = std::get<ipc::Command>(msg.payload);
 
-  LOG_DEBUG("Received IPC command: {}", static_cast<int>(cmd.type));
+  // NOTE: VPN tunnel functionality is not yet available on Windows.
+  // These handlers provide the IPC framework but actual connection
+  // will fail until the transport layer is ported.
 
   ipc::Response response;
-  response.request_id = msg.request_id;
-
-  switch (cmd.type) {
-    case ipc::CommandType::kConnect: {
-      if (g_tunnel && g_tunnel->is_connected()) {
-        response.success = false;
-        response.error_message = "Already connected";
-      } else if (g_tunnel) {
-        // Get connection parameters from command
-        std::string server_host = "127.0.0.1";
-        uint16_t server_port = 4433;
-
-        auto it = cmd.parameters.find("host");
-        if (it != cmd.parameters.end()) {
-          server_host = it->second;
-        }
-
-        it = cmd.parameters.find("port");
-        if (it != cmd.parameters.end()) {
-          server_port = static_cast<uint16_t>(std::stoi(it->second));
-        }
-
-        std::error_code ec;
-        if (g_tunnel->connect(server_host, server_port, ec)) {
-          response.success = true;
-
-          // Broadcast connection event
-          ipc::Event event;
-          event.type = ipc::EventType::kConnectionStateChanged;
-          event.data["state"] = "connected";
-          event.data["server"] = server_host + ":" + std::to_string(server_port);
-
-          ipc::Message event_msg;
-          event_msg.payload = event;
-          g_ipc_server->broadcast_message(event_msg);
-        } else {
-          response.success = false;
-          response.error_message = ec.message();
-        }
-      } else {
-        response.success = false;
-        response.error_message = "Tunnel not initialized";
-      }
-      break;
-    }
-
-    case ipc::CommandType::kDisconnect: {
-      if (g_tunnel && g_tunnel->is_connected()) {
-        g_tunnel->disconnect();
-        response.success = true;
-
-        // Broadcast disconnection event
-        ipc::Event event;
-        event.type = ipc::EventType::kConnectionStateChanged;
-        event.data["state"] = "disconnected";
-
-        ipc::Message event_msg;
-        event_msg.payload = event;
-        g_ipc_server->broadcast_message(event_msg);
-      } else {
-        response.success = false;
-        response.error_message = "Not connected";
-      }
-      break;
-    }
-
-    case ipc::CommandType::kGetStatus: {
-      response.success = true;
-      if (g_tunnel) {
-        response.data["connected"] =
-            g_tunnel->is_connected() ? "true" : "false";
-        // Add more status info as needed
-      } else {
-        response.data["connected"] = "false";
-        response.data["error"] = "Tunnel not initialized";
-      }
-      break;
-    }
-
-    case ipc::CommandType::kGetStatistics: {
-      response.success = true;
-      if (g_tunnel) {
-        const auto& stats = g_tunnel->stats();
-        response.data["bytes_sent"] = std::to_string(stats.bytes_sent);
-        response.data["bytes_received"] = std::to_string(stats.bytes_received);
-        response.data["packets_sent"] = std::to_string(stats.packets_sent);
-        response.data["packets_received"] = std::to_string(stats.packets_received);
-      }
-      break;
-    }
-
-    case ipc::CommandType::kSetConfig: {
-      // Update configuration
-      response.success = true;
-      // TODO: Implement configuration updates
-      break;
-    }
-
-    case ipc::CommandType::kGetConfig: {
-      response.success = true;
-      // TODO: Return current configuration
-      break;
-    }
-
-    default:
-      response.success = false;
-      response.error_message = "Unknown command";
-      break;
-  }
-
-  // Send response
   ipc::Message response_msg;
-  response_msg.request_id = msg.request_id;
+  response_msg.type = ipc::MessageType::kResponse;
+  response_msg.id = msg.id;
+
+  // Use std::visit to handle the Command variant
+  std::visit(
+      [&response, &response_msg](const auto& command) {
+        using T = std::decay_t<decltype(command)>;
+
+        if constexpr (std::is_same_v<T, ipc::ConnectCommand>) {
+          LOG_DEBUG("Received ConnectCommand");
+          if (g_connected) {
+            response = ipc::ErrorResponse{"Already connected", ""};
+          } else {
+            // VPN tunnel not yet available on Windows
+            const char* error_msg =
+                "VPN tunnel functionality is not yet available on Windows. "
+                "The transport layer (UDP/event loop) needs to be ported from "
+                "Linux.";
+            LOG_WARN("{}", error_msg);
+            response = ipc::ErrorResponse{error_msg, ""};
+          }
+        } else if constexpr (std::is_same_v<T, ipc::DisconnectCommand>) {
+          LOG_DEBUG("Received DisconnectCommand");
+          if (g_connected) {
+            g_connected = false;
+            response = ipc::SuccessResponse{"Disconnected successfully"};
+
+            // Broadcast disconnection event
+            ipc::ConnectionStateChangeEvent event;
+            event.old_state = ipc::ConnectionState::kConnected;
+            event.new_state = ipc::ConnectionState::kDisconnected;
+            event.message = "Disconnected";
+
+            ipc::Message event_msg;
+            event_msg.type = ipc::MessageType::kEvent;
+            event_msg.payload = ipc::Event{event};
+            g_ipc_server->broadcast_message(event_msg);
+          } else {
+            response = ipc::ErrorResponse{"Not connected", ""};
+          }
+        } else if constexpr (std::is_same_v<T, ipc::GetStatusCommand>) {
+          LOG_DEBUG("Received GetStatusCommand");
+          ipc::StatusResponse status_resp;
+          status_resp.status.state = g_connected
+                                         ? ipc::ConnectionState::kConnected
+                                         : ipc::ConnectionState::kDisconnected;
+          status_resp.status.error_message =
+              "VPN tunnel not yet available on Windows. Service is running.";
+          response = status_resp;
+        } else if constexpr (std::is_same_v<T, ipc::GetMetricsCommand>) {
+          LOG_DEBUG("Received GetMetricsCommand");
+          ipc::MetricsResponse metrics_resp;
+          metrics_resp.metrics.total_tx_bytes = g_stats.bytes_sent;
+          metrics_resp.metrics.total_rx_bytes = g_stats.bytes_received;
+          response = metrics_resp;
+        } else if constexpr (std::is_same_v<T, ipc::GetDiagnosticsCommand>) {
+          LOG_DEBUG("Received GetDiagnosticsCommand");
+          ipc::DiagnosticsResponse diag_resp;
+          diag_resp.diagnostics.protocol.packets_sent = g_stats.packets_sent;
+          diag_resp.diagnostics.protocol.packets_received =
+              g_stats.packets_received;
+          response = diag_resp;
+        } else if constexpr (std::is_same_v<T, ipc::UpdateConfigCommand>) {
+          LOG_DEBUG("Received UpdateConfigCommand");
+          // Configuration updates accepted but tunnel not functional
+          response = ipc::SuccessResponse{
+              "Configuration accepted (tunnel not yet available)"};
+        } else if constexpr (std::is_same_v<T, ipc::ExportDiagnosticsCommand>) {
+          LOG_DEBUG("Received ExportDiagnosticsCommand");
+          response = ipc::ErrorResponse{
+              "Export diagnostics not yet implemented on Windows", ""};
+        } else if constexpr (std::is_same_v<T, ipc::GetClientListCommand>) {
+          LOG_DEBUG("Received GetClientListCommand");
+          ipc::ClientListResponse list_resp;
+          // Empty client list - we're not a server
+          response = list_resp;
+        } else {
+          LOG_WARN("Unknown command type received");
+          response = ipc::ErrorResponse{"Unknown command", ""};
+        }
+      },
+      cmd);
+
   response_msg.payload = response;
 
   std::error_code ec;

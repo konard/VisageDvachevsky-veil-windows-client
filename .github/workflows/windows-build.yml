@@ -106,6 +106,7 @@ jobs:
             -DVEIL_BUILD_TESTS=OFF `
             -DVEIL_BUILD_GUI=ON `
             -DVEIL_BUILD_SERVER=OFF `
+            -DVEIL_BUILD_SERVICE=ON `
             -DVEIL_VERSION_MAJOR=1 `
             -DVEIL_VERSION_MINOR=0 `
             -DVEIL_VERSION_PATCH=0
