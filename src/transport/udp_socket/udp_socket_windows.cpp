@@ -50,7 +50,6 @@ namespace veil::transport {
 UdpSocket::UdpSocket() = default;
 
 UdpSocket::~UdpSocket() {
-  close_epoll();
   close();
 }
 
@@ -79,7 +78,7 @@ bool UdpSocket::open(std::uint16_t bind_port, bool reuse_port, std::error_code& 
     ec = last_error();
     return false;
   }
-  fd_ = static_cast<int>(s);
+  fd_ = static_cast<std::uintptr_t>(s);
 
   // Set non-blocking mode.
   if (!set_nonblocking(s)) {
@@ -152,18 +151,6 @@ bool UdpSocket::send_batch(std::span<const UdpPacket> packets, std::error_code& 
   return true;
 }
 
-bool UdpSocket::ensure_epoll(std::error_code& /* ec */) {
-  // On Windows, we don't use epoll. The poll() method uses select directly.
-  // Just set the dummy flag to indicate initialization.
-  epoll_fd_ = 0;
-  return true;
-}
-
-void UdpSocket::close_epoll() {
-  // Nothing to close on Windows (no epoll FD).
-  epoll_fd_ = -1;
-}
-
 bool UdpSocket::poll(const ReceiveHandler& handler, int timeout_ms, std::error_code& ec) {
   SOCKET s = static_cast<SOCKET>(fd_);
   if (s == INVALID_SOCKET) {
@@ -223,11 +210,9 @@ bool UdpSocket::poll(const ReceiveHandler& handler, int timeout_ms, std::error_c
 }
 
 void UdpSocket::close() {
-  // Close epoll FD first (no-op on Windows).
-  close_epoll();
-  if (fd_ >= 0) {
+  if (fd_ != static_cast<std::uintptr_t>(~0ULL)) {  // Check if not INVALID_SOCKET
     ::closesocket(static_cast<SOCKET>(fd_));
-    fd_ = -1;
+    fd_ = static_cast<std::uintptr_t>(~0ULL);  // Set to INVALID_SOCKET
     WSACleanup();
   }
 }
