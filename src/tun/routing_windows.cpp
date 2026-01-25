@@ -486,6 +486,27 @@ std::string RouteManager::build_nat_command(const NatConfig& config, bool add) {
   return "";
 }
 
+std::optional<std::string> detect_external_interface(std::error_code& ec) {
+  // Use the helper function to get the default route info
+  std::string gateway;
+  std::string interface_name;
+
+  if (!get_default_route(gateway, interface_name)) {
+    ec = std::make_error_code(std::errc::no_such_device_or_address);
+    LOG_ERROR("No default route found. Is the network configured?");
+    return std::nullopt;
+  }
+
+  if (interface_name.empty()) {
+    ec = std::make_error_code(std::errc::no_such_device);
+    LOG_ERROR("Default route found but interface name is empty");
+    return std::nullopt;
+  }
+
+  LOG_INFO("Auto-detected external interface: {}", interface_name);
+  return interface_name;
+}
+
 }  // namespace veil::tun
 
 #endif  // _WIN32

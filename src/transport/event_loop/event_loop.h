@@ -29,9 +29,13 @@ using ErrorHandler = std::function<void(SessionId, std::error_code)>;
 
 // Configuration for the event loop.
 struct EventLoopConfig {
-  // Epoll timeout in milliseconds per iteration.
+  // Poll timeout in milliseconds per iteration.
+  // On Linux: used for epoll_wait timeout.
+  // On Windows: used for select timeout.
   int epoll_timeout_ms{10};
-  // Maximum events to process per epoll_wait.
+  // Maximum events to process per poll iteration.
+  // On Linux: max events from epoll_wait.
+  // On Windows: not used directly (select processes all ready sockets).
   int max_events{64};
   // Default ACK send interval.
   std::chrono::milliseconds ack_interval{50};
@@ -59,14 +63,18 @@ struct SocketInfo {
   utils::TimerId idle_timer_id{utils::kInvalidTimerId};
   // Last activity timestamp.
   std::chrono::steady_clock::time_point last_activity;
-  // Pending outgoing packets (for EPOLLOUT handling).
+  // Pending outgoing packets (for write-ready handling).
   std::vector<UdpPacket> pending_sends;
   bool writable{true};
 };
 
 /**
- * Event loop for managing UDP sockets with epoll and timers.
+ * Event loop for managing UDP sockets and timers.
  * Handles I/O events, timeouts, and session management.
+ *
+ * Platform Support:
+ *   - Linux: Uses epoll for efficient I/O multiplexing.
+ *   - Windows: Uses select for I/O multiplexing.
  *
  * Thread Safety:
  *   This class is designed for single-threaded operation. All methods except
@@ -139,6 +147,9 @@ class EventLoop {
 
   EventLoopConfig config_;
   std::function<TimePoint()> now_fn_;
+  // Platform-specific poll handle:
+  // - Linux: epoll file descriptor
+  // - Windows: dummy value (0 = initialized, -1 = not initialized)
   int epoll_fd_{-1};
   std::atomic<bool> running_{false};
   utils::TimerHeap timer_heap_;

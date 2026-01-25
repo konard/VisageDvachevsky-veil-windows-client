@@ -1,19 +1,18 @@
+// Linux UDP socket implementation using epoll
+// This file is only compiled on Linux/Unix platforms
+
+#ifndef _WIN32
+
 #include "transport/udp_socket/udp_socket.h"
 
-#ifdef _WIN32
-// Windows must include winsock2.h before windows.h to avoid conflicts.
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#pragma comment(lib, "ws2_32.lib")
-#else
 #include <arpa/inet.h>
 #include <cerrno>
+#include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#endif
 
 #include <array>
 #include <chrono>
@@ -34,53 +33,8 @@
 
 namespace {
 
-#ifdef _WIN32
-// WinSock initialization singleton.
-// Ensures WSAStartup is called before any socket operations and WSACleanup on exit.
-class WinSockInit {
- public:
-  WinSockInit() {
-    WSADATA wsaData;
-    const int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
-    if (result != 0) {
-      // WSAStartup failed - log but continue, individual socket ops will fail.
-      LOG_ERROR("WSAStartup failed with error: {}", result);
-      initialized_ = false;
-    } else {
-      initialized_ = true;
-    }
-  }
-
-  ~WinSockInit() {
-    if (initialized_) {
-      WSACleanup();
-    }
-  }
-
-  bool is_initialized() const { return initialized_; }
-
-  // Singleton accessor.
-  static WinSockInit& instance() {
-    static WinSockInit instance;
-    return instance;
-  }
-
- private:
-  bool initialized_{false};
-};
-
-// Helper to ensure WinSock is initialized before socket operations.
-inline bool ensure_winsock() {
-  return WinSockInit::instance().is_initialized();
-}
-#endif  // _WIN32
-
 std::error_code last_error() {
-#ifdef _WIN32
-  return std::error_code(WSAGetLastError(), std::system_category());
-#else
   return std::error_code(errno, std::generic_category());
-#endif
 }
 
 bool resolve(const veil::transport::UdpEndpoint& endpoint, sockaddr_in& addr) {
@@ -106,24 +60,11 @@ namespace veil::transport {
 UdpSocket::UdpSocket() = default;
 
 UdpSocket::~UdpSocket() {
-#ifndef _WIN32
   close_epoll();
-#endif
   close();
 }
 
 bool UdpSocket::configure_socket(bool reuse_port, std::error_code& ec) {
-#ifdef _WIN32
-  // On Windows, setsockopt takes const char* for the option value.
-  const char enable = 1;
-  if (setsockopt(static_cast<SOCKET>(fd_), SOL_SOCKET, SO_REUSEADDR, &enable,
-                 sizeof(enable)) == SOCKET_ERROR) {
-    ec = last_error();
-    return false;
-  }
-  // Windows doesn't have SO_REUSEPORT; SO_REUSEADDR provides similar behavior.
-  (void)reuse_port;
-#else
   const int enable = 1;
   if (setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) != 0) {
     ec = last_error();
@@ -139,40 +80,15 @@ bool UdpSocket::configure_socket(bool reuse_port, std::error_code& ec) {
 #else
   (void)reuse_port;
 #endif
-#endif
   return true;
 }
 
 bool UdpSocket::open(std::uint16_t bind_port, bool reuse_port, std::error_code& ec) {
-#ifdef _WIN32
-  // Ensure WinSock is initialized.
-  if (!ensure_winsock()) {
-    ec = std::make_error_code(std::errc::not_enough_memory);
-    return false;
-  }
-
-  // Create socket (Windows doesn't support SOCK_NONBLOCK in socket() call).
-  SOCKET sock = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-  if (sock == INVALID_SOCKET) {
-    ec = last_error();
-    return false;
-  }
-  fd_ = static_cast<std::uintptr_t>(sock);
-
-  // Set non-blocking mode using ioctlsocket.
-  u_long mode = 1;
-  if (ioctlsocket(sock, FIONBIO, &mode) == SOCKET_ERROR) {
-    ec = last_error();
-    close();
-    return false;
-  }
-#else
   fd_ = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0);
   if (fd_ < 0) {
     ec = last_error();
     return false;
   }
-#endif
 
   if (!configure_socket(reuse_port, ec)) {
     close();
@@ -184,20 +100,11 @@ bool UdpSocket::open(std::uint16_t bind_port, bool reuse_port, std::error_code& 
   addr.sin_port = htons(bind_port);
   addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-#ifdef _WIN32
-  if (::bind(static_cast<SOCKET>(fd_), reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) ==
-      SOCKET_ERROR) {
-    ec = last_error();
-    close();
-    return false;
-  }
-#else
   if (::bind(fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
     ec = last_error();
     close();
     return false;
   }
-#endif
   return true;
 }
 
@@ -208,18 +115,10 @@ bool UdpSocket::connect(const UdpEndpoint& remote, std::error_code& ec) {
     return false;
   }
 
-#ifdef _WIN32
-  if (::connect(static_cast<SOCKET>(fd_), reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) ==
-      SOCKET_ERROR) {
-    ec = last_error();
-    return false;
-  }
-#else
   if (::connect(fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
     ec = last_error();
     return false;
   }
-#endif
   connected_ = remote;
   return true;
 }
@@ -232,23 +131,12 @@ bool UdpSocket::send(std::span<const std::uint8_t> data, const UdpEndpoint& remo
     return false;
   }
 
-#ifdef _WIN32
-  const int sent = ::sendto(static_cast<SOCKET>(fd_),
-                            reinterpret_cast<const char*>(data.data()),
-                            static_cast<int>(data.size()), 0,
-                            reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
-  if (sent == SOCKET_ERROR || static_cast<std::size_t>(sent) != data.size()) {
-    ec = last_error();
-    return false;
-  }
-#else
   const auto sent =
       ::sendto(fd_, data.data(), data.size(), 0, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
   if (sent < 0 || static_cast<std::size_t>(sent) != data.size()) {
     ec = last_error();
     return false;
   }
-#endif
   return true;
 }
 
@@ -306,7 +194,6 @@ fallback:
   return true;
 }
 
-#ifndef _WIN32
 bool UdpSocket::ensure_epoll(std::error_code& ec) {
   if (epoll_fd_ >= 0) {
     return true;  // Already initialized.
@@ -337,68 +224,8 @@ void UdpSocket::close_epoll() {
     epoll_fd_ = -1;
   }
 }
-#endif  // !_WIN32
 
 bool UdpSocket::poll(const ReceiveHandler& handler, int timeout_ms, std::error_code& ec) {
-#ifdef _WIN32
-  // Use WSAPoll for Windows (available since Windows Vista).
-  WSAPOLLFD pfd{};
-  pfd.fd = static_cast<SOCKET>(fd_);
-  pfd.events = POLLIN;
-  pfd.revents = 0;
-
-  const int result = WSAPoll(&pfd, 1, timeout_ms);
-  if (result == SOCKET_ERROR) {
-    ec = last_error();
-    return false;
-  }
-
-  if (result == 0) {
-    return true;  // Timeout, no data.
-  }
-
-  // Check for errors on the socket.
-  if ((pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
-    ec = std::make_error_code(std::errc::connection_reset);
-    return false;
-  }
-
-  // Read available data.
-  if ((pfd.revents & POLLIN) != 0) {
-    std::array<char, 65535> buffer{};
-    sockaddr_in src{};
-    int src_len = sizeof(src);
-
-    // Read in a loop to drain all available packets (non-blocking socket).
-    while (true) {
-      const int read_bytes = ::recvfrom(static_cast<SOCKET>(fd_), buffer.data(),
-                                        static_cast<int>(buffer.size()), 0,
-                                        reinterpret_cast<sockaddr*>(&src), &src_len);
-      if (read_bytes == SOCKET_ERROR) {
-        const int err = WSAGetLastError();
-        if (err == WSAEWOULDBLOCK) {
-          // No more data available.
-          break;
-        }
-        // On other errors, continue (might be WSAECONNRESET for ICMP unreachable).
-        break;
-      }
-      if (read_bytes <= 0) {
-        break;
-      }
-
-      UdpEndpoint remote{};
-      fill_endpoint(src, remote);
-      handler(UdpPacket{std::vector<std::uint8_t>(
-                            reinterpret_cast<const std::uint8_t*>(buffer.data()),
-                            reinterpret_cast<const std::uint8_t*>(buffer.data()) + read_bytes),
-                        remote});
-    }
-  }
-
-  return true;
-
-#else
   // Use epoll for Linux (more efficient than poll for multiple sockets).
   // Ensure epoll FD is initialized (lazy initialization).
   // This reuses the same epoll FD across all poll() calls to avoid resource leaks.
@@ -439,24 +266,17 @@ bool UdpSocket::poll(const ReceiveHandler& handler, int timeout_ms, std::error_c
   }
 
   return true;
-#endif  // _WIN32
 }
 
 void UdpSocket::close() {
-#ifdef _WIN32
-  constexpr std::uintptr_t invalid_socket = static_cast<std::uintptr_t>(~0ULL);
-  if (fd_ != invalid_socket) {
-    ::closesocket(static_cast<SOCKET>(fd_));
-    fd_ = invalid_socket;
-  }
-#else
   // Close epoll FD first (it references the socket FD).
   close_epoll();
   if (fd_ >= 0) {
     ::close(fd_);
     fd_ = -1;
   }
-#endif
 }
 
 }  // namespace veil::transport
+
+#endif  // !_WIN32
