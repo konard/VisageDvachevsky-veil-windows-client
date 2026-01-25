@@ -7,11 +7,26 @@ if(WIN32)
     windows/service_manager.cpp
     windows/system_tray.cpp
   )
-  # Windows doesn't use POSIX signals, daemonization, epoll-based transport, tunnel, or CLI config
+  # Windows doesn't use POSIX signals or daemonization
   set(VEIL_SIGNAL_SOURCES)
   set(VEIL_DAEMON_SOURCES)
-  set(VEIL_TRANSPORT_SOURCES)
-  set(VEIL_TUNNEL_SOURCES)
+  # Transport layer now available on Windows with select-based event loop
+  set(VEIL_TRANSPORT_SOURCES
+    transport/udp_socket/udp_socket_windows.cpp
+    transport/mux/ack_bitmap.cpp
+    transport/mux/reorder_buffer.cpp
+    transport/mux/fragment_reassembly.cpp
+    transport/mux/mux_codec.cpp
+    transport/mux/retransmit_buffer.cpp
+    transport/mux/ack_scheduler.cpp
+    transport/session/transport_session.cpp
+    transport/event_loop/event_loop_windows.cpp
+    transport/stats/transport_stats.cpp
+  )
+  set(VEIL_TUNNEL_SOURCES
+    tunnel/tunnel.cpp
+    tunnel/session_migration.cpp
+  )
   set(VEIL_SERVER_SOURCES)
   set(VEIL_CLI_CONFIG_SOURCES)
 else()
@@ -23,7 +38,7 @@ else()
   set(VEIL_SIGNAL_SOURCES common/signal/signal_handler.cpp)
   set(VEIL_DAEMON_SOURCES common/daemon/daemon.cpp)
   set(VEIL_TRANSPORT_SOURCES
-    transport/udp_socket/udp_socket.cpp
+    transport/udp_socket/udp_socket_linux.cpp
     transport/mux/ack_bitmap.cpp
     transport/mux/reorder_buffer.cpp
     transport/mux/fragment_reassembly.cpp
@@ -31,7 +46,7 @@ else()
     transport/mux/retransmit_buffer.cpp
     transport/mux/ack_scheduler.cpp
     transport/session/transport_session.cpp
-    transport/event_loop/event_loop.cpp
+    transport/event_loop/event_loop_linux.cpp
     transport/stats/transport_stats.cpp
   )
   set(VEIL_TUNNEL_SOURCES
@@ -106,7 +121,9 @@ if(TARGET sodium_ep)
   add_dependencies(veil_common sodium_ep)
 endif()
 
-# Client executable (requires transport layer, not available on Windows yet).
+# Client executable (requires transport layer).
+# On Linux: uses epoll-based event loop
+# On Windows: uses select-based event loop
 if(NOT WIN32)
   add_executable(veil-client
     client/main.cpp

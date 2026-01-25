@@ -1,7 +1,12 @@
+// Windows event loop implementation using select()
+// This file is only compiled on Windows platforms
+
+#ifdef _WIN32
+
 #include "transport/event_loop/event_loop.h"
 
-#include <sys/epoll.h>
-#include <unistd.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
 
 #include <algorithm>
 #include <chrono>
@@ -13,22 +18,31 @@
 
 #include "common/logging/logger.h"
 
+namespace {
+std::error_code last_error() {
+  return std::error_code(WSAGetLastError(), std::system_category());
+}
+}  // namespace
+
 namespace veil::transport {
 
 EventLoop::EventLoop(EventLoopConfig config, std::function<TimePoint()> now_fn)
     : config_(config), now_fn_(std::move(now_fn)), timer_heap_(now_fn_) {
-  epoll_fd_ = epoll_create1(EPOLL_CLOEXEC);
-  if (epoll_fd_ < 0) {
-    LOG_ERROR("Failed to create epoll fd: {}", std::error_code(errno, std::generic_category()).message());
+  // Initialize Winsock if not already initialized.
+  WSADATA wsa_data;
+  int result = WSAStartup(MAKEWORD(2, 2), &wsa_data);
+  if (result != 0) {
+    LOG_ERROR("WSAStartup failed: {}", result);
   }
+  // No epoll_fd on Windows, but we set it to 0 to indicate initialization succeeded.
+  epoll_fd_ = 0;
 }
 
 EventLoop::~EventLoop() {
   stop();
-  if (epoll_fd_ >= 0) {
-    ::close(epoll_fd_);
-    epoll_fd_ = -1;
-  }
+  // Cleanup Winsock.
+  WSACleanup();
+  epoll_fd_ = -1;
 }
 
 bool EventLoop::add_socket(UdpSocket* socket, SessionId session_id, const UdpEndpoint& remote,
@@ -37,7 +51,7 @@ bool EventLoop::add_socket(UdpSocket* socket, SessionId session_id, const UdpEnd
                            ErrorHandler on_error) {
   VEIL_DCHECK_THREAD(thread_checker_);
 
-  if (socket == nullptr || epoll_fd_ < 0) {
+  if (socket == nullptr) {
     return false;
   }
 
@@ -49,16 +63,6 @@ bool EventLoop::add_socket(UdpSocket* socket, SessionId session_id, const UdpEnd
   // Check if already registered.
   if (sockets_.find(fd) != sockets_.end()) {
     LOG_WARN("Socket fd={} already registered", fd);
-    return false;
-  }
-
-  // Add to epoll (level-triggered for reads, edge-triggered for writes).
-  epoll_event ev{};
-  ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
-  ev.data.fd = fd;
-  if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, fd, &ev) != 0) {
-    LOG_ERROR("epoll_ctl ADD failed for fd={}: {}", fd,
-              std::error_code(errno, std::generic_category()).message());
     return false;
   }
 
@@ -95,12 +99,6 @@ bool EventLoop::remove_socket(int fd) {
   // Cleanup timers.
   cleanup_session_timers(it->second);
 
-  // Remove from epoll.
-  if (epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, fd, nullptr) != 0) {
-    LOG_WARN("epoll_ctl DEL failed for fd={}: {}", fd,
-             std::error_code(errno, std::generic_category()).message());
-  }
-
   sockets_.erase(it);
   LOG_DEBUG("Removed socket fd={}", fd);
   return true;
@@ -123,7 +121,7 @@ bool EventLoop::send_packet(int fd, std::span<const std::uint8_t> data, const Ud
       return true;
     }
     // If would block, queue it.
-    if (ec.value() == EAGAIN || ec.value() == EWOULDBLOCK) {
+    if (ec.value() == WSAEWOULDBLOCK) {
       info.writable = false;
     } else {
       LOG_ERROR("Send failed for fd={}: {}", fd, ec.message());
@@ -169,19 +167,12 @@ void EventLoop::reset_idle_timeout(int fd) {
 }
 
 void EventLoop::run() {
-  if (epoll_fd_ < 0) {
-    LOG_ERROR("Cannot run event loop: invalid epoll fd");
-    return;
-  }
-
   // Bind thread checker to the current thread (the event loop thread).
   // All subsequent operations on this EventLoop must happen on this thread.
   VEIL_THREAD_REBIND(thread_checker_);
 
   running_.store(true);
-  LOG_INFO("Event loop started");
-
-  std::vector<epoll_event> events(static_cast<std::size_t>(config_.max_events));
+  LOG_INFO("Event loop started (Windows select)");
 
   while (running_.load()) {
     // Calculate timeout based on next timer.
@@ -193,31 +184,89 @@ void EventLoop::run() {
       timeout_ms = std::min(timeout_ms, static_cast<int>(ms));
     }
 
-    const int n = epoll_wait(epoll_fd_, events.data(), config_.max_events, timeout_ms);
-    if (n < 0) {
-      if (errno == EINTR) {
+    // Build fd_sets for select.
+    fd_set read_fds;
+    fd_set write_fds;
+    fd_set except_fds;
+    FD_ZERO(&read_fds);
+    FD_ZERO(&write_fds);
+    FD_ZERO(&except_fds);
+
+    int max_fd = -1;
+    for (const auto& [fd, info] : sockets_) {
+      SOCKET s = static_cast<SOCKET>(fd);
+      FD_SET(s, &read_fds);
+      FD_SET(s, &except_fds);
+      // Only watch for writes if we have pending data or socket was not writable.
+      if (!info.writable || !info.pending_sends.empty()) {
+        FD_SET(s, &write_fds);
+      }
+      if (fd > max_fd) {
+        max_fd = fd;
+      }
+    }
+
+    // If no sockets registered, just process timers and sleep.
+    if (sockets_.empty()) {
+      handle_timers();
+      if (timeout_ms > 0) {
+        Sleep(static_cast<DWORD>(std::min(timeout_ms, 10)));
+      }
+      continue;
+    }
+
+    // Setup timeout for select.
+    timeval tv;
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+
+    // On Windows, select ignores the first argument (nfds).
+    int n = ::select(0, &read_fds, &write_fds, &except_fds, &tv);
+    if (n == SOCKET_ERROR) {
+      int err = WSAGetLastError();
+      if (err == WSAEINTR) {
         continue;
       }
-      LOG_ERROR("epoll_wait failed: {}", std::error_code(errno, std::generic_category()).message());
+      LOG_ERROR("select failed: {}", std::error_code(err, std::system_category()).message());
       break;
     }
 
     // Process I/O events.
-    for (int i = 0; i < n; ++i) {
-      const auto& ev = events[static_cast<std::size_t>(i)];
-      const int fd = ev.data.fd;
+    if (n > 0) {
+      // Collect file descriptors to process (avoid iterator invalidation).
+      std::vector<int> fds_to_process;
+      fds_to_process.reserve(sockets_.size());
+      for (const auto& [fd, info] : sockets_) {
+        fds_to_process.push_back(fd);
+      }
 
-      if ((ev.events & EPOLLIN) != 0U) {
-        handle_read(fd);
-      }
-      if ((ev.events & EPOLLOUT) != 0U) {
-        handle_write(fd);
-      }
-      if ((ev.events & (EPOLLERR | EPOLLHUP)) != 0U) {
-        auto it = sockets_.find(fd);
-        if (it != sockets_.end() && it->second.on_error) {
-          it->second.on_error(it->second.session_id,
-                              std::make_error_code(std::errc::connection_reset));
+      for (int fd : fds_to_process) {
+        // Check if socket is still registered (may have been removed during callback).
+        if (sockets_.find(fd) == sockets_.end()) {
+          continue;
+        }
+
+        SOCKET s = static_cast<SOCKET>(fd);
+        if (FD_ISSET(s, &read_fds)) {
+          handle_read(fd);
+        }
+        // Check again after read handling.
+        if (sockets_.find(fd) == sockets_.end()) {
+          continue;
+        }
+        if (FD_ISSET(s, &write_fds)) {
+          handle_write(fd);
+        }
+        // Check again after write handling.
+        if (sockets_.find(fd) == sockets_.end()) {
+          continue;
+        }
+        if (FD_ISSET(s, &except_fds)) {
+          auto it = sockets_.find(fd);
+          if (it != sockets_.end() && it->second.on_error) {
+            it->second.on_error(it->second.session_id,
+                                std::make_error_code(std::errc::connection_reset));
+          }
         }
       }
     }
@@ -239,7 +288,7 @@ void EventLoop::handle_read(int fd) {
 
   auto& info = it->second;
 
-  // Read packets in a loop (edge-triggered, must drain).
+  // Read packets until no more available.
   while (true) {
     std::error_code ec;
     bool got_packet = false;
@@ -275,7 +324,7 @@ void EventLoop::handle_write(int fd) {
     auto& pkt = info.pending_sends.front();
     std::error_code ec;
     if (!info.socket->send(pkt.data, pkt.remote, ec)) {
-      if (ec.value() == EAGAIN || ec.value() == EWOULDBLOCK) {
+      if (ec.value() == WSAEWOULDBLOCK) {
         info.writable = false;
         break;
       }
@@ -368,3 +417,5 @@ void EventLoop::cleanup_session_timers(SocketInfo& info) {
 }
 
 }  // namespace veil::transport
+
+#endif  // _WIN32
