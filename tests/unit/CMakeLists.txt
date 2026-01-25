@@ -11,6 +11,7 @@ if(WIN32)
     ack_scheduler_tests.cpp
     transport_session_tests.cpp
     session_migration_tests.cpp
+    console_handler_tests.cpp
   )
 else()
   set(VEIL_PLATFORM_TEST_SOURCES

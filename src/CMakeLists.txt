@@ -6,6 +6,7 @@ if(WIN32)
   set(VEIL_WINDOWS_SOURCES
     windows/service_manager.cpp
     windows/system_tray.cpp
+    windows/console_handler.cpp
   )
   # Windows doesn't use POSIX signals or daemonization
   set(VEIL_SIGNAL_SOURCES)
@@ -166,8 +167,7 @@ if(VEIL_BUILD_GUI)
 endif()
 
 # Windows Service executable (Windows only)
-# The service provides IPC communication with the GUI and service management.
-# Note: VPN tunnel functionality is not yet available (transport layer needs porting).
+# The service provides IPC communication with the GUI, service management, and VPN tunnel functionality.
 option(VEIL_BUILD_SERVICE "Build Windows service executable" ON)
 
 if(WIN32 AND VEIL_BUILD_SERVICE)

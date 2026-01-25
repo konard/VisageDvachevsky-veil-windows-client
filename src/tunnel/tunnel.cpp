@@ -7,6 +7,8 @@
 #include "common/logging/logger.h"
 #ifndef _WIN32
 #include "common/signal/signal_handler.h"
+#else
+#include "windows/console_handler.h"
 #endif
 #include "common/utils/rate_limiter.h"
 
@@ -124,7 +126,15 @@ void Tunnel::run() {
   running_.store(true);
   LOG_INFO("Tunnel starting...");
 
-#ifndef _WIN32
+#ifdef _WIN32
+  // Setup console control handler (Windows).
+  auto& console_handler = windows::ConsoleHandler::instance();
+  if (!console_handler.setup()) {
+    LOG_ERROR("Failed to setup console control handler");
+    running_.store(false);
+    return;
+  }
+#else
   // Setup signal handlers (POSIX only).
   auto& sig_handler = signal::SignalHandler::instance();
   sig_handler.setup_defaults();
@@ -164,7 +174,9 @@ void Tunnel::run() {
   std::array<std::uint8_t, kMaxPacketSize> tun_buffer{};
 
   while (running_.load()
-#ifndef _WIN32
+#ifdef _WIN32
+         && !console_handler.should_terminate()
+#else
          && !sig_handler.should_terminate()
 #endif
   ) {
