@@ -32,6 +32,7 @@
 #endif
 
 namespace {
+
 std::error_code last_error() {
   return std::error_code(errno, std::generic_category());
 }
@@ -88,14 +89,17 @@ bool UdpSocket::open(std::uint16_t bind_port, bool reuse_port, std::error_code& 
     ec = last_error();
     return false;
   }
+
   if (!configure_socket(reuse_port, ec)) {
     close();
     return false;
   }
+
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
   addr.sin_port = htons(bind_port);
   addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
   if (::bind(fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
     ec = last_error();
     close();
@@ -110,6 +114,7 @@ bool UdpSocket::connect(const UdpEndpoint& remote, std::error_code& ec) {
     ec = std::make_error_code(std::errc::invalid_argument);
     return false;
   }
+
   if (::connect(fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
     ec = last_error();
     return false;
@@ -125,6 +130,7 @@ bool UdpSocket::send(std::span<const std::uint8_t> data, const UdpEndpoint& remo
     ec = std::make_error_code(std::errc::invalid_argument);
     return false;
   }
+
   const auto sent =
       ::sendto(fd_, data.data(), data.size(), 0, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
   if (sent < 0 || static_cast<std::size_t>(sent) != data.size()) {
@@ -140,7 +146,7 @@ bool UdpSocket::send_batch(std::span<const UdpPacket> packets, std::error_code& 
   }
 
 #if VEIL_HAS_SENDMMSG
-  // Use sendmmsg for better performance when available.
+  // Use sendmmsg for better performance when available (Linux only).
   std::vector<mmsghdr> messages(packets.size());
   std::vector<sockaddr_in> addrs(packets.size());
   std::vector<iovec> iovecs(packets.size());
@@ -179,7 +185,7 @@ bool UdpSocket::send_batch(std::span<const UdpPacket> packets, std::error_code& 
 
 fallback:
 #endif
-  // Fallback: send each packet individually with sendto.
+  // Fallback: send each packet individually with sendto (Windows and non-sendmmsg systems).
   for (const auto& pkt : packets) {
     if (!send(pkt.data, pkt.remote, ec)) {
       return false;
@@ -220,6 +226,7 @@ void UdpSocket::close_epoll() {
 }
 
 bool UdpSocket::poll(const ReceiveHandler& handler, int timeout_ms, std::error_code& ec) {
+  // Use epoll for Linux (more efficient than poll for multiple sockets).
   // Ensure epoll FD is initialized (lazy initialization).
   // This reuses the same epoll FD across all poll() calls to avoid resource leaks.
   if (!ensure_epoll(ec)) {
