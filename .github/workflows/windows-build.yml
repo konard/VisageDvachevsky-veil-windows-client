@@ -129,7 +129,10 @@ jobs:
           Copy-Item build/src/veil-service.exe artifacts/bin/ -ErrorAction SilentlyContinue
           Copy-Item build/src/gui-client/veil-client-gui.exe artifacts/bin/ -ErrorAction SilentlyContinue
 
-          # Copy Wintun driver
+          # Copy Wintun driver to both locations
+          # - artifacts/bin/ so it's next to veil-service.exe (required for loading)
+          # - artifacts/driver/ for installer to pick up
+          Copy-Item driver/wintun.dll artifacts/bin/
           New-Item -ItemType Directory -Force -Path artifacts/driver
           Copy-Item driver/wintun.dll artifacts/driver/
 

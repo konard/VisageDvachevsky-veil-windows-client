@@ -314,15 +314,17 @@ Section "VEIL VPN Client (required)" SecMain
 SectionEnd
 
 Section "Wintun Driver" SecWintun
-  SetOutPath "$INSTDIR\driver"
-
-  ; Download Wintun if not bundled
-  ; For production, the driver should be bundled
+  ; Install wintun.dll next to veil-service.exe so it can be loaded
+  SetOutPath "$INSTDIR"
   File "driver\wintun.dll"
 
-  ; Copy to System32 for system-wide access
+  ; Also copy to driver subfolder for backup/reference
+  SetOutPath "$INSTDIR\driver"
+  File "driver\wintun.dll"
+
+  ; Copy to System32 for system-wide access (optional, but good for compatibility)
   ${If} ${RunningX64}
-    CopyFiles /SILENT "$INSTDIR\driver\wintun.dll" "$SYSDIR\wintun.dll"
+    CopyFiles /SILENT "$INSTDIR\wintun.dll" "$SYSDIR\wintun.dll"
   ${EndIf}
 
 SectionEnd
@@ -408,6 +410,7 @@ Section "Uninstall"
   ; Remove files
   Delete "$INSTDIR\veil-client-gui.exe"
   Delete "$INSTDIR\veil-service.exe"
+  Delete "$INSTDIR\wintun.dll"
   Delete "$INSTDIR\Qt6Core.dll"
   Delete "$INSTDIR\Qt6Gui.dll"
   Delete "$INSTDIR\Qt6Widgets.dll"
