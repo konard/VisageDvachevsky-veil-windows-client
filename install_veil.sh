@@ -698,6 +698,63 @@ display_update_summary() {
     echo "  • Binary Backup: ${INSTALL_DIR}/bin/veil-${INSTALL_MODE}.backup"
     echo ""
 
+    # Display client configuration data for server mode
+    if [[ "$INSTALL_MODE" == "server" ]]; then
+        echo -e "${CYAN}╔════════════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${CYAN}║              Client Configuration Data                                 ║${NC}"
+        echo -e "${CYAN}╚════════════════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+        echo -e "${YELLOW}Copy the following data to configure your clients:${NC}"
+        echo ""
+
+        # Get server public IP
+        local public_ip
+        public_ip=$(curl -s ifconfig.me 2>/dev/null || echo "<YOUR_SERVER_IP>")
+
+        # Get server port from config
+        local server_port="4433"
+        if [[ -f "$CONFIG_DIR/server.conf" ]]; then
+            server_port=$(grep -E '^\s*listen_port\s*=' "$CONFIG_DIR/server.conf" | grep -v '^#' | sed 's/.*=\s*//' | tr -d ' ' || echo "4433")
+        fi
+
+        echo -e "${BOLD}Server IP:${NC}"
+        echo "  $public_ip"
+        echo ""
+
+        echo -e "${BOLD}Server Port:${NC}"
+        echo "  $server_port"
+        echo ""
+
+        # Display Key in base64
+        if [[ -f "$CONFIG_DIR/server.key" ]]; then
+            echo -e "${BOLD}Pre-Shared Key (base64):${NC}"
+            base64 -w 0 "$CONFIG_DIR/server.key"
+            echo ""
+            echo ""
+        else
+            echo -e "${YELLOW}⚠ Warning: $CONFIG_DIR/server.key not found${NC}"
+            echo ""
+        fi
+
+        # Display Seed in base64
+        if [[ -f "$CONFIG_DIR/obfuscation.seed" ]]; then
+            echo -e "${BOLD}Obfuscation Seed (base64):${NC}"
+            base64 -w 0 "$CONFIG_DIR/obfuscation.seed"
+            echo ""
+            echo ""
+        else
+            echo -e "${YELLOW}⚠ Warning: $CONFIG_DIR/obfuscation.seed not found${NC}"
+            echo ""
+        fi
+
+        echo -e "${CYAN}Transfer these files to clients securely:${NC}"
+        echo "  scp $CONFIG_DIR/server.key user@client:/etc/veil/client.key"
+        echo "  scp $CONFIG_DIR/obfuscation.seed user@client:/etc/veil/obfuscation.seed"
+        echo ""
+        echo -e "${YELLOW}⚠ NEVER send these keys over email or insecure channels!${NC}"
+        echo ""
+    fi
+
     if is_service_running; then
         log_success "VEIL ${INSTALL_MODE} is running!"
     else
