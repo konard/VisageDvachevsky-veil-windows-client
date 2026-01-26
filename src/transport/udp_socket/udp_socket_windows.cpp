@@ -146,7 +146,7 @@ bool UdpSocket::send(std::span<const std::uint8_t> data, const UdpEndpoint& remo
   }
 
   SOCKET s = static_cast<SOCKET>(fd_);
-  LOG_DEBUG("[UDP] Sending {} bytes to {}:{}", data.size(), remote.host, remote.port);
+  LOG_INFO("[UDP] Sending {} bytes to {}:{}", data.size(), remote.host, remote.port);
 
   const int sent = ::sendto(s, reinterpret_cast<const char*>(data.data()),
                              static_cast<int>(data.size()), 0,
@@ -165,7 +165,7 @@ bool UdpSocket::send(std::span<const std::uint8_t> data, const UdpEndpoint& remo
     return false;
   }
 
-  LOG_DEBUG("[UDP] Successfully sent {} bytes to {}:{}", sent, remote.host, remote.port);
+  LOG_INFO("[UDP] Successfully sent {} bytes to {}:{}", sent, remote.host, remote.port);
   return true;
 }
 
@@ -232,7 +232,7 @@ bool UdpSocket::poll(const ReceiveHandler& handler, int timeout_ms, std::error_c
   if (read > 0) {
     UdpEndpoint remote{};
     fill_endpoint(src, remote);
-    LOG_DEBUG("[UDP] Received {} bytes from {}:{}", read, remote.host, remote.port);
+    LOG_INFO("[UDP] Received {} bytes from {}:{}", read, remote.host, remote.port);
     handler(UdpPacket{
         std::vector<std::uint8_t>(reinterpret_cast<std::uint8_t*>(buffer.data()),
                                    reinterpret_cast<std::uint8_t*>(buffer.data()) + read),
