@@ -370,6 +370,9 @@ void handle_ipc_message(const ipc::Message& msg, int client_fd) {
   response_msg.type = ipc::MessageType::kResponse;
   response_msg.id = msg.id;
 
+  // Initialize payload with a default Response to ensure correct variant type
+  response_msg.payload = ipc::Response{ipc::ErrorResponse{"Internal error", "Response not initialized"}};
+
   // Use std::visit to handle the Command variant
   std::visit(
       [&response_msg](const auto& command) {
