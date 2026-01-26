@@ -210,12 +210,10 @@ TEST_F(TunnelIntegrationTest, SustainedTraffic) {
   transport::TransportSession server_session(server_handshake_, {}, now_fn);
 
   const std::size_t num_packets = 100;
-  std::size_t total_bytes = 0;
 
   for (std::size_t i = 0; i < num_packets; ++i) {
     // Simulate various application data
     std::vector<std::uint8_t> data(64 + (i % 200), static_cast<std::uint8_t>(i));
-    total_bytes += data.size();
 
     auto encrypted = client_session.encrypt_data(data, 0, false);
     for (const auto& pkt : encrypted) {
@@ -281,7 +279,7 @@ TEST_F(TunnelIntegrationTest, PacketLossRecovery) {
   auto now_fn = []() { return std::chrono::steady_clock::now(); };
 
   transport::TransportSessionConfig config;
-  config.enable_reliable_delivery = true;
+  // Reliable delivery is enabled by default via retransmit_config
 
   transport::TransportSession client_session(client_handshake_, config, now_fn);
   transport::TransportSession server_session(server_handshake_, config, now_fn);
