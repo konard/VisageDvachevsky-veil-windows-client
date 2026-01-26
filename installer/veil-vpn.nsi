@@ -319,6 +319,8 @@ Section "Wintun Driver" SecWintun
 SectionEnd
 
 Section "Windows Service" SecService
+  SectionIn RO  ; Required section - cannot be deselected
+
   ; Check if service executable exists
   ${If} ${FileExists} "$INSTDIR\veil-service.exe"
     ; Stop any existing service first
@@ -374,7 +376,7 @@ SectionEnd
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
   !insertmacro MUI_DESCRIPTION_TEXT ${SecMain} "Core application files (required)"
   !insertmacro MUI_DESCRIPTION_TEXT ${SecWintun} "Wintun network driver for VPN connectivity"
-  !insertmacro MUI_DESCRIPTION_TEXT ${SecService} "Install and start the VPN background service"
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecService} "Install and start the VPN background service (required)"
   !insertmacro MUI_DESCRIPTION_TEXT ${SecStartMenu} "Create Start Menu shortcuts"
   !insertmacro MUI_DESCRIPTION_TEXT ${SecDesktop} "Create Desktop shortcut"
   !insertmacro MUI_DESCRIPTION_TEXT ${SecAutoStart} "Automatically start VEIL VPN when Windows starts"
