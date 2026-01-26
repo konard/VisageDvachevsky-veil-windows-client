@@ -313,28 +313,39 @@ bool Tunnel::perform_handshake(std::error_code& ec) {
     return false;
   }
 
+  LOG_INFO("========================================");
+  LOG_INFO("HANDSHAKE: Generated INIT message");
+  LOG_INFO("  Size: {} bytes", init_msg.size());
+  LOG_INFO("  Target: {}:{}", config_.server_address, config_.server_port);
+  LOG_INFO("========================================");
+
   // Send INIT message.
   transport::UdpEndpoint remote{config_.server_address, config_.server_port};
   if (!udp_socket_.send(init_msg, remote, ec)) {
-    LOG_ERROR("Failed to send handshake INIT: {}", ec.message());
+    LOG_ERROR("HANDSHAKE: Failed to send INIT: {}", ec.message());
     return false;
   }
-  LOG_DEBUG("Sent handshake INIT ({} bytes)", init_msg.size());
+  LOG_INFO("HANDSHAKE: INIT sent successfully, waiting for RESPONSE...");
 
   // Wait for RESPONSE.
   std::vector<std::uint8_t> response;
   bool received = false;
+  int timeout_ms = static_cast<int>(config_.handshake_skew_tolerance.count());
+  LOG_DEBUG("HANDSHAKE: Polling for response (timeout: {}ms)", timeout_ms);
 
   udp_socket_.poll(
       [&response, &received](const transport::UdpPacket& pkt) {
+        LOG_INFO("HANDSHAKE: Received packet from {}:{}, size: {} bytes",
+                 pkt.remote.host, pkt.remote.port, pkt.data.size());
         response = pkt.data;
         received = true;
       },
-      static_cast<int>(config_.handshake_skew_tolerance.count()), ec);
+      timeout_ms, ec);
 
   if (!received || response.empty()) {
     ec = std::make_error_code(std::errc::timed_out);
-    LOG_ERROR("Handshake timeout waiting for RESPONSE");
+    LOG_ERROR("HANDSHAKE: Timeout waiting for RESPONSE after {}ms", timeout_ms);
+    LOG_ERROR("HANDSHAKE: No packets received from server");
     return false;
   }
 

@@ -70,24 +70,29 @@ bool UdpSocket::open(std::uint16_t bind_port, bool reuse_port, std::error_code& 
   int result = WSAStartup(MAKEWORD(2, 2), &wsa_data);
   if (result != 0) {
     ec = std::error_code(result, std::system_category());
+    LOG_ERROR("[UDP] WSAStartup failed: {}", ec.message());
     return false;
   }
 
   SOCKET s = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
   if (s == INVALID_SOCKET) {
     ec = last_error();
+    LOG_ERROR("[UDP] socket() failed: {}", ec.message());
     return false;
   }
   fd_ = static_cast<std::uintptr_t>(s);
+  LOG_DEBUG("[UDP] Created UDP socket, fd={}", static_cast<int>(s));
 
   // Set non-blocking mode.
   if (!set_nonblocking(s)) {
     ec = last_error();
+    LOG_ERROR("[UDP] Failed to set non-blocking mode: {}", ec.message());
     close();
     return false;
   }
 
   if (!configure_socket(reuse_port, ec)) {
+    LOG_ERROR("[UDP] Failed to configure socket: {}", ec.message());
     close();
     return false;
   }
@@ -98,9 +103,21 @@ bool UdpSocket::open(std::uint16_t bind_port, bool reuse_port, std::error_code& 
   addr.sin_addr.s_addr = htonl(INADDR_ANY);
   if (::bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
     ec = last_error();
+    LOG_ERROR("[UDP] bind() to port {} failed: {}", bind_port, ec.message());
     close();
     return false;
   }
+
+  // Get actual bound port if bind_port was 0
+  sockaddr_in bound_addr{};
+  int addr_len = sizeof(bound_addr);
+  if (getsockname(s, reinterpret_cast<sockaddr*>(&bound_addr), &addr_len) == 0) {
+    std::uint16_t actual_port = ntohs(bound_addr.sin_port);
+    LOG_INFO("[UDP] Socket bound successfully to 0.0.0.0:{}", actual_port);
+  } else {
+    LOG_INFO("[UDP] Socket bound successfully to 0.0.0.0:{}", bind_port);
+  }
+
   return true;
 }
 
@@ -124,16 +141,31 @@ bool UdpSocket::send(std::span<const std::uint8_t> data, const UdpEndpoint& remo
   sockaddr_in addr{};
   if (!resolve(remote, addr)) {
     ec = std::make_error_code(std::errc::invalid_argument);
+    LOG_ERROR("[UDP] Failed to resolve endpoint {}:{}", remote.host, remote.port);
     return false;
   }
+
   SOCKET s = static_cast<SOCKET>(fd_);
+  LOG_DEBUG("[UDP] Sending {} bytes to {}:{}", data.size(), remote.host, remote.port);
+
   const int sent = ::sendto(s, reinterpret_cast<const char*>(data.data()),
                              static_cast<int>(data.size()), 0,
                              reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
-  if (sent == SOCKET_ERROR || static_cast<std::size_t>(sent) != data.size()) {
+
+  if (sent == SOCKET_ERROR) {
     ec = last_error();
+    int wsa_error = WSAGetLastError();
+    LOG_ERROR("[UDP] sendto() failed: WSA error {}, message: {}", wsa_error, ec.message());
     return false;
   }
+
+  if (static_cast<std::size_t>(sent) != data.size()) {
+    LOG_ERROR("[UDP] Partial send: {} bytes sent, {} bytes requested", sent, data.size());
+    ec = std::make_error_code(std::errc::io_error);
+    return false;
+  }
+
+  LOG_DEBUG("[UDP] Successfully sent {} bytes to {}:{}", sent, remote.host, remote.port);
   return true;
 }
 
@@ -200,6 +232,7 @@ bool UdpSocket::poll(const ReceiveHandler& handler, int timeout_ms, std::error_c
   if (read > 0) {
     UdpEndpoint remote{};
     fill_endpoint(src, remote);
+    LOG_DEBUG("[UDP] Received {} bytes from {}:{}", read, remote.host, remote.port);
     handler(UdpPacket{
         std::vector<std::uint8_t>(reinterpret_cast<std::uint8_t*>(buffer.data()),
                                    reinterpret_cast<std::uint8_t*>(buffer.data()) + read),
