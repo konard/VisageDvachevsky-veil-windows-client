@@ -1,5 +1,6 @@
 #include "ipc_protocol.h"
 
+#include <iostream>
 #include <type_traits>
 
 #include <nlohmann/json.hpp>
