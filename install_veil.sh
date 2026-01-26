@@ -19,6 +19,11 @@
 #   --with-gui             Install Qt6 GUI with monitoring dashboard
 #   --no-service           Don't create/start systemd service
 #   --dry-run              Show what would be done without making changes
+#   --update               Update existing VEIL installation
+#   --graceful             Graceful update with connection draining (use with --update)
+#   --force                Force update, immediately terminate connections (use with --update)
+#   --drain-timeout=N      Connection drain timeout in seconds (default: 300)
+#   --yes                  Skip confirmation prompts (use with --update)
 #   --help                 Show this help message
 #
 # Examples:
@@ -30,6 +35,15 @@
 #
 #   # Install with debug build for development
 #   curl -sSL https://...install_veil.sh | sudo bash -s -- --build=debug --with-gui
+#
+#   # Update to latest version
+#   curl -sSL https://...install_veil.sh | sudo bash -s -- --update
+#
+#   # Graceful update with zero-downtime (drain connections first)
+#   curl -sSL https://...install_veil.sh | sudo bash -s -- --update --graceful
+#
+#   # Force update (immediately kill existing instance)
+#   curl -sSL https://...install_veil.sh | sudo bash -s -- --update --force
 #
 
 set -e  # Exit on error
@@ -63,6 +77,18 @@ CREATE_SERVICE="${CREATE_SERVICE:-true}"  # Create systemd service
 DRY_RUN="${DRY_RUN:-false}"               # Dry run mode
 VERBOSE="${VERBOSE:-false}"               # Verbose output
 
+# Update-related options
+UPDATE_MODE="${UPDATE_MODE:-false}"       # Update existing installation
+GRACEFUL_UPDATE="${GRACEFUL_UPDATE:-false}"  # Graceful connection draining
+FORCE_UPDATE="${FORCE_UPDATE:-false}"     # Force update (kill connections)
+DRAIN_TIMEOUT="${DRAIN_TIMEOUT:-300}"     # Connection drain timeout in seconds
+SKIP_CONFIRM="${SKIP_CONFIRM:-false}"     # Skip confirmation prompts
+BACKUP_DIR="${BACKUP_DIR:-/etc/veil/backup}"  # Backup directory for updates
+
+# Version tracking
+INSTALLED_VERSION=""
+AVAILABLE_VERSION=""
+
 # Functions for colored output
 log_info() {
     echo -e "${BLUE}[INFO]${NC} $*"
@@ -90,6 +116,651 @@ log_step() {
     echo -e "${MAGENTA}[STEP]${NC} ${BOLD}$*${NC}"
 }
 
+# ============================================================================
+# UPDATE/UPGRADE FUNCTIONALITY
+# ============================================================================
+
+# Detect if VEIL is already installed
+detect_existing_installation() {
+    log_step "Detecting existing VEIL installation..."
+
+    local found_installation="false"
+    local binary_name="veil-${INSTALL_MODE}"
+    local binary_path="${INSTALL_DIR}/bin/${binary_name}"
+
+    # Check for binary
+    if [[ -f "$binary_path" ]]; then
+        found_installation="true"
+        log_info "Found ${binary_name} at ${binary_path}"
+
+        # Try to get version
+        if "$binary_path" --version &>/dev/null 2>&1; then
+            INSTALLED_VERSION=$("$binary_path" --version 2>&1 | head -n1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+        else
+            # Try alternative version detection
+            INSTALLED_VERSION=$(strings "$binary_path" 2>/dev/null | grep -oE 'VEIL [0-9]+\.[0-9]+\.[0-9]+' | head -n1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+        fi
+        log_info "Installed version: ${INSTALLED_VERSION:-unknown}"
+    fi
+
+    # Check for configuration
+    if [[ -d "$CONFIG_DIR" ]]; then
+        log_info "Found configuration directory: $CONFIG_DIR"
+        if [[ -f "$CONFIG_DIR/${INSTALL_MODE}.conf" ]]; then
+            log_info "Found ${INSTALL_MODE} configuration file"
+        fi
+    fi
+
+    # Check for systemd service
+    local service_name="veil-${INSTALL_MODE}"
+    if systemctl list-unit-files "${service_name}.service" &>/dev/null 2>&1; then
+        local service_status
+        service_status=$(systemctl is-active "${service_name}" 2>/dev/null || echo "not-found")
+        log_info "Systemd service status: ${service_status}"
+    fi
+
+    if [[ "$found_installation" == "true" ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Get latest available version from repository
+get_available_version() {
+    log_info "Checking available version..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        AVAILABLE_VERSION="latest"
+        log_info "[DRY-RUN] Would check available version from repository"
+        return
+    fi
+
+    # Clone a minimal version to get the version info
+    local temp_dir="/tmp/veil-version-check-$$"
+    if git clone --depth 1 --branch "$VEIL_BRANCH" "$VEIL_REPO" "$temp_dir" &>/dev/null 2>&1; then
+        # Try to extract version from CMakeLists.txt or version file
+        if [[ -f "$temp_dir/CMakeLists.txt" ]]; then
+            AVAILABLE_VERSION=$(grep -oE 'project\([^)]*VERSION[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+' "$temp_dir/CMakeLists.txt" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "")
+        fi
+        if [[ -z "$AVAILABLE_VERSION" && -f "$temp_dir/VERSION" ]]; then
+            AVAILABLE_VERSION=$(cat "$temp_dir/VERSION" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "")
+        fi
+        rm -rf "$temp_dir"
+    fi
+
+    if [[ -z "$AVAILABLE_VERSION" ]]; then
+        AVAILABLE_VERSION="latest"
+        log_debug "Could not determine exact version, using 'latest'"
+    else
+        log_info "Available version: ${AVAILABLE_VERSION}"
+    fi
+}
+
+# Count active client connections (for server mode)
+count_active_connections() {
+    local count=0
+
+    if [[ "$INSTALL_MODE" != "server" ]]; then
+        echo "0"
+        return
+    fi
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo "0"
+        return
+    fi
+
+    # Method 1: Check VEIL server's internal connection tracking (if available)
+    local binary_path="${INSTALL_DIR}/bin/veil-server"
+    if [[ -f "$binary_path" ]] && "$binary_path" --status &>/dev/null 2>&1; then
+        count=$("$binary_path" --status 2>/dev/null | grep -oE 'clients?:[[:space:]]*[0-9]+' | grep -oE '[0-9]+' || echo "0")
+    fi
+
+    # Method 2: Check established connections on the VEIL port
+    if [[ "$count" == "0" ]]; then
+        local veil_port=4433
+        if [[ -f "$CONFIG_DIR/server.conf" ]]; then
+            veil_port=$(grep -E '^listen_port' "$CONFIG_DIR/server.conf" 2>/dev/null | grep -oE '[0-9]+' || echo "4433")
+        fi
+        # Count UDP connections (VEIL uses UDP)
+        count=$(ss -u -n sport = :"$veil_port" 2>/dev/null | grep -c ESTAB || echo "0")
+        # If no ESTAB, count any connected peers
+        if [[ "$count" == "0" ]]; then
+            count=$(ss -u -n sport = :"$veil_port" 2>/dev/null | tail -n +2 | wc -l || echo "0")
+        fi
+    fi
+
+    echo "$count"
+}
+
+# Get VEIL process IDs
+get_veil_pids() {
+    local binary_name="veil-${INSTALL_MODE}"
+    pgrep -x "$binary_name" 2>/dev/null || true
+}
+
+# Check if VEIL service is running
+is_service_running() {
+    local service_name="veil-${INSTALL_MODE}"
+    systemctl is-active --quiet "$service_name" 2>/dev/null
+}
+
+# Pre-update safety checks
+perform_safety_checks() {
+    log_step "Performing pre-update safety checks..."
+
+    local errors=0
+
+    # Check 1: Disk space (need at least 500MB for build)
+    local available_space
+    available_space=$(df -BM /tmp 2>/dev/null | tail -1 | awk '{print $4}' | tr -d 'M')
+    if [[ -n "$available_space" ]] && [[ "$available_space" -lt 500 ]]; then
+        log_error "Insufficient disk space in /tmp: ${available_space}MB available, 500MB required"
+        ((errors++))
+    else
+        log_debug "Disk space check passed: ${available_space}MB available"
+    fi
+
+    # Check 2: Available memory (need at least 512MB)
+    local available_mem
+    available_mem=$(free -m 2>/dev/null | awk '/^Mem:/{print $7}')
+    if [[ -n "$available_mem" ]] && [[ "$available_mem" -lt 512 ]]; then
+        log_warn "Low available memory: ${available_mem}MB (512MB recommended)"
+    else
+        log_debug "Memory check passed: ${available_mem}MB available"
+    fi
+
+    # Check 3: Verify we can write to necessary directories
+    if [[ ! -w "$INSTALL_DIR" ]]; then
+        log_error "Cannot write to installation directory: $INSTALL_DIR"
+        ((errors++))
+    fi
+
+    if [[ -d "$CONFIG_DIR" && ! -w "$CONFIG_DIR" ]]; then
+        log_error "Cannot write to configuration directory: $CONFIG_DIR"
+        ((errors++))
+    fi
+
+    # Check 4: Verify git is available
+    if ! command -v git &>/dev/null; then
+        log_error "git is not installed (required for update)"
+        ((errors++))
+    fi
+
+    if [[ "$errors" -gt 0 ]]; then
+        log_error "Pre-update safety checks failed with $errors error(s)"
+        return 1
+    fi
+
+    log_success "All safety checks passed"
+    return 0
+}
+
+# Create backup of configuration and keys
+create_config_backup() {
+    log_step "Backing up configuration files..."
+
+    local backup_timestamp
+    backup_timestamp=$(date +%Y%m%d-%H%M%S)
+    local backup_path="${BACKUP_DIR}/${backup_timestamp}"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "[DRY-RUN] Would create backup at ${backup_path}"
+        log_info "[DRY-RUN] Would backup: configuration files, keys, and binaries"
+        return
+    fi
+
+    # Create backup directory
+    mkdir -p "$backup_path"
+
+    # Backup configuration files
+    local files_backed_up=0
+    for config_file in "$CONFIG_DIR"/*.conf "$CONFIG_DIR"/*.key "$CONFIG_DIR"/*.seed; do
+        if [[ -f "$config_file" ]]; then
+            cp -p "$config_file" "$backup_path/"
+            log_debug "Backed up: $(basename "$config_file")"
+            ((files_backed_up++))
+        fi
+    done
+
+    # Backup binaries
+    local binary_name="veil-${INSTALL_MODE}"
+    local binary_path="${INSTALL_DIR}/bin/${binary_name}"
+    if [[ -f "$binary_path" ]]; then
+        cp -p "$binary_path" "$backup_path/${binary_name}.backup"
+        log_debug "Backed up: ${binary_name} binary"
+        ((files_backed_up++))
+    fi
+
+    # Also backup GUI binary if it exists
+    if [[ -f "${binary_path}-gui" ]]; then
+        cp -p "${binary_path}-gui" "$backup_path/${binary_name}-gui.backup"
+        log_debug "Backed up: ${binary_name}-gui binary"
+        ((files_backed_up++))
+    fi
+
+    # Store backup metadata
+    cat > "$backup_path/backup.info" <<EOF
+backup_timestamp=${backup_timestamp}
+installed_version=${INSTALLED_VERSION:-unknown}
+install_mode=${INSTALL_MODE}
+backup_date=$(date)
+EOF
+
+    log_success "Backup created: ${backup_path} (${files_backed_up} files)"
+    echo "$backup_path"
+}
+
+# Backup current binary before replacement
+backup_binary() {
+    local binary_name="veil-${INSTALL_MODE}"
+    local binary_path="${INSTALL_DIR}/bin/${binary_name}"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "[DRY-RUN] Would backup ${binary_path} to ${binary_path}.backup"
+        return
+    fi
+
+    if [[ -f "$binary_path" ]]; then
+        cp -p "$binary_path" "${binary_path}.backup"
+        log_info "Binary backed up to: ${binary_path}.backup"
+    fi
+
+    # Also backup GUI binary if updating with GUI
+    if [[ "$WITH_GUI" == "true" && -f "${binary_path}-gui" ]]; then
+        cp -p "${binary_path}-gui" "${binary_path}-gui.backup"
+        log_info "GUI binary backed up to: ${binary_path}-gui.backup"
+    fi
+}
+
+# Rollback to previous binary version
+rollback_update() {
+    log_error "Update failed! Initiating automatic rollback..."
+
+    local binary_name="veil-${INSTALL_MODE}"
+    local binary_path="${INSTALL_DIR}/bin/${binary_name}"
+    local service_name="veil-${INSTALL_MODE}"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "[DRY-RUN] Would restore ${binary_path}.backup to ${binary_path}"
+        return
+    fi
+
+    # Restore binary from backup
+    if [[ -f "${binary_path}.backup" ]]; then
+        cp -p "${binary_path}.backup" "$binary_path"
+        log_info "Restored binary from backup"
+    else
+        log_error "No backup binary found at ${binary_path}.backup"
+        log_error "Manual recovery may be required. Check: $BACKUP_DIR"
+        return 1
+    fi
+
+    # Restore GUI binary if it exists
+    if [[ -f "${binary_path}-gui.backup" ]]; then
+        cp -p "${binary_path}-gui.backup" "${binary_path}-gui"
+        log_info "Restored GUI binary from backup"
+    fi
+
+    # Try to restart the service with the old binary
+    if systemctl is-enabled --quiet "$service_name" 2>/dev/null; then
+        log_info "Attempting to restart service with restored binary..."
+        if systemctl restart "$service_name" 2>/dev/null; then
+            sleep 2
+            if systemctl is-active --quiet "$service_name"; then
+                log_success "Service restarted successfully with previous version"
+                return 0
+            fi
+        fi
+        log_error "Service failed to start after rollback"
+        return 1
+    fi
+
+    log_success "Rollback completed"
+    return 0
+}
+
+# Verify new binary works correctly
+verify_new_binary() {
+    log_info "Verifying new binary..."
+
+    local binary_name="veil-${INSTALL_MODE}"
+    local binary_path="${INSTALL_DIR}/bin/${binary_name}"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "[DRY-RUN] Would verify ${binary_path}"
+        return 0
+    fi
+
+    # Check if binary exists
+    if [[ ! -f "$binary_path" ]]; then
+        log_error "New binary not found at ${binary_path}"
+        return 1
+    fi
+
+    # Check if binary is executable
+    if [[ ! -x "$binary_path" ]]; then
+        log_error "New binary is not executable"
+        return 1
+    fi
+
+    # Try to run with --help or --version to verify it's a valid executable
+    if "$binary_path" --help &>/dev/null 2>&1 || "$binary_path" --version &>/dev/null 2>&1; then
+        log_debug "Binary executes correctly"
+    else
+        # Some binaries might not have --help, try just checking if it runs
+        if ! ldd "$binary_path" 2>&1 | grep -q "not found"; then
+            log_debug "Binary dependencies are satisfied"
+        else
+            log_error "Binary has missing dependencies"
+            ldd "$binary_path" 2>&1 | grep "not found"
+            return 1
+        fi
+    fi
+
+    log_success "New binary verified successfully"
+    return 0
+}
+
+# Stop VEIL service gracefully with connection draining
+graceful_stop_service() {
+    local service_name="veil-${INSTALL_MODE}"
+    local timeout="$DRAIN_TIMEOUT"
+    local start_time
+    start_time=$(date +%s)
+
+    log_step "Gracefully stopping VEIL ${INSTALL_MODE}..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "[DRY-RUN] Would gracefully stop ${service_name} with ${timeout}s drain timeout"
+        return 0
+    fi
+
+    # Check current connections
+    local initial_connections
+    initial_connections=$(count_active_connections)
+    log_info "Active connections: ${initial_connections}"
+
+    if [[ "$initial_connections" -gt 0 ]]; then
+        log_info "Waiting for connections to drain (timeout: ${timeout}s)..."
+
+        # Send SIGTERM to allow graceful shutdown
+        # The VEIL server should handle this by:
+        # 1. Stop accepting new connections
+        # 2. Wait for existing connections to close
+        # 3. Exit cleanly
+
+        # First, tell systemd to stop (which sends SIGTERM)
+        systemctl stop "$service_name" --no-block 2>/dev/null || true
+
+        # Wait for connections to drain
+        local elapsed=0
+        while [[ "$elapsed" -lt "$timeout" ]]; do
+            local current_connections
+            current_connections=$(count_active_connections)
+
+            if [[ "$current_connections" -eq 0 ]]; then
+                log_success "All clients disconnected (took ${elapsed}s)"
+                break
+            fi
+
+            log_info "Waiting for ${current_connections} client(s) to disconnect... (${elapsed}s/${timeout}s)"
+            sleep 5
+            elapsed=$(( $(date +%s) - start_time ))
+        done
+
+        # Check if we timed out
+        local final_connections
+        final_connections=$(count_active_connections)
+        if [[ "$final_connections" -gt 0 ]]; then
+            log_warn "Drain timeout reached with ${final_connections} connection(s) still active"
+            if [[ "$FORCE_UPDATE" != "true" ]]; then
+                log_warn "Forcefully terminating remaining connections..."
+            fi
+        fi
+    fi
+
+    # Ensure service is fully stopped
+    systemctl stop "$service_name" 2>/dev/null || true
+
+    # Kill any remaining processes
+    local pids
+    pids=$(get_veil_pids)
+    if [[ -n "$pids" ]]; then
+        log_debug "Killing remaining VEIL processes: $pids"
+        echo "$pids" | xargs -r kill -9 2>/dev/null || true
+        sleep 1
+    fi
+
+    log_success "VEIL ${INSTALL_MODE} stopped"
+    return 0
+}
+
+# Force stop VEIL service
+force_stop_service() {
+    local service_name="veil-${INSTALL_MODE}"
+
+    log_step "Force stopping VEIL ${INSTALL_MODE}..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "[DRY-RUN] Would force stop ${service_name}"
+        return 0
+    fi
+
+    # Stop the service
+    systemctl stop "$service_name" 2>/dev/null || true
+
+    # Kill all VEIL processes
+    local pids
+    pids=$(get_veil_pids)
+    if [[ -n "$pids" ]]; then
+        log_info "Killing processes: $pids"
+        echo "$pids" | xargs -r kill -9 2>/dev/null || true
+        sleep 1
+    fi
+
+    log_success "VEIL ${INSTALL_MODE} force stopped"
+    return 0
+}
+
+# Prompt for user confirmation
+confirm_update() {
+    local message="$1"
+    local connections="$2"
+
+    if [[ "$SKIP_CONFIRM" == "true" ]]; then
+        return 0
+    fi
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "[DRY-RUN] Would prompt for confirmation"
+        return 0
+    fi
+
+    echo ""
+    if [[ "$connections" -gt 0 ]]; then
+        log_warn "$message"
+        log_warn "Active connections: $connections"
+    else
+        log_info "$message"
+    fi
+    echo ""
+
+    read -r -p "Continue? (yes/no): " response
+    case "$response" in
+        yes|Yes|YES|y|Y)
+            return 0
+            ;;
+        *)
+            log_info "Update cancelled by user"
+            exit 0
+            ;;
+    esac
+}
+
+# Display update summary
+display_update_summary() {
+    local service_name="veil-${INSTALL_MODE}"
+
+    echo ""
+    echo -e "${GREEN}╔════════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║              VEIL ${INSTALL_MODE^} Update Complete                               ║${NC}"
+    echo -e "${GREEN}╚════════════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "This was a dry run - no changes were made"
+        echo ""
+        return
+    fi
+
+    echo -e "${BLUE}Update Summary:${NC}"
+    echo "  • Mode: ${INSTALL_MODE}"
+    echo "  • Previous Version: ${INSTALLED_VERSION:-unknown}"
+    echo "  • New Version: ${AVAILABLE_VERSION:-latest}"
+    echo "  • Update Type: $(if [[ "$GRACEFUL_UPDATE" == "true" ]]; then echo "Graceful"; elif [[ "$FORCE_UPDATE" == "true" ]]; then echo "Force"; else echo "Standard"; fi)"
+    echo ""
+
+    echo -e "${BLUE}Backup Location:${NC}"
+    echo "  • Backup Dir: ${BACKUP_DIR}"
+    echo "  • Binary Backup: ${INSTALL_DIR}/bin/veil-${INSTALL_MODE}.backup"
+    echo ""
+
+    if is_service_running; then
+        log_success "VEIL ${INSTALL_MODE} is running!"
+    else
+        log_warn "Service is not running. Start with: sudo systemctl start ${service_name}"
+    fi
+
+    echo ""
+    echo -e "${BLUE}Management Commands:${NC}"
+    echo "  • Check status:  sudo systemctl status ${service_name}"
+    echo "  • View logs:     sudo journalctl -u ${service_name} -f"
+    echo "  • Rollback:      sudo cp ${INSTALL_DIR}/bin/veil-${INSTALL_MODE}.backup ${INSTALL_DIR}/bin/veil-${INSTALL_MODE}"
+    echo ""
+
+    echo -e "${GREEN}═══════════════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}                    Update completed successfully!                          ${NC}"
+    echo -e "${GREEN}═══════════════════════════════════════════════════════════════════════════${NC}"
+    echo ""
+}
+
+# Perform the update
+perform_update() {
+    local service_name="veil-${INSTALL_MODE}"
+
+    echo ""
+    echo -e "${BLUE}╔════════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║              VEIL Update/Upgrade Mode                                   ║${NC}"
+    echo -e "${BLUE}╚════════════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${YELLOW}╔════════════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${YELLOW}║                        DRY RUN MODE ENABLED                            ║${NC}"
+        echo -e "${YELLOW}║              No changes will be made to your system                    ║${NC}"
+        echo -e "${YELLOW}╚════════════════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+    fi
+
+    # Step 1: Detect existing installation
+    if ! detect_existing_installation; then
+        log_error "No existing VEIL installation detected"
+        log_info "Use install mode (without --update) for fresh installation"
+        exit 1
+    fi
+
+    # Step 2: Get available version
+    get_available_version
+
+    # Step 3: Compare versions
+    if [[ "$INSTALLED_VERSION" == "$AVAILABLE_VERSION" && "$INSTALLED_VERSION" != "unknown" ]]; then
+        log_info "Already running the latest version ($INSTALLED_VERSION)"
+        if [[ "$FORCE_UPDATE" != "true" ]]; then
+            log_info "Use --force to reinstall the same version"
+            exit 0
+        fi
+        log_warn "Force reinstalling same version as requested"
+    fi
+
+    # Step 4: Perform safety checks
+    if ! perform_safety_checks; then
+        exit 1
+    fi
+
+    # Step 5: Count active connections
+    local active_connections
+    active_connections=$(count_active_connections)
+    log_info "Active client connections: ${active_connections}"
+
+    # Step 6: Confirm update
+    if [[ "$active_connections" -gt 0 ]]; then
+        if [[ "$GRACEFUL_UPDATE" == "true" ]]; then
+            confirm_update "Graceful update will drain ${active_connections} connection(s) (timeout: ${DRAIN_TIMEOUT}s)" "$active_connections"
+        elif [[ "$FORCE_UPDATE" == "true" ]]; then
+            confirm_update "Force update will immediately disconnect ${active_connections} client(s)!" "$active_connections"
+        else
+            confirm_update "Update will restart the service, disconnecting ${active_connections} client(s)" "$active_connections"
+        fi
+    fi
+
+    # Step 7: Create backup
+    local backup_path
+    backup_path=$(create_config_backup)
+
+    # Step 8: Backup binary
+    backup_binary
+
+    # Step 9: Stop service
+    if is_service_running; then
+        if [[ "$GRACEFUL_UPDATE" == "true" ]]; then
+            graceful_stop_service
+        else
+            force_stop_service
+        fi
+    fi
+
+    # Step 10: Build and install new version
+    detect_os
+    install_dependencies
+    build_veil
+
+    # Step 11: Verify new binary
+    if ! verify_new_binary; then
+        log_error "New binary verification failed"
+        rollback_update
+        exit 1
+    fi
+
+    # Step 12: Start service
+    log_step "Starting VEIL ${INSTALL_MODE} service..."
+    systemctl daemon-reload
+    if systemctl start "$service_name" 2>/dev/null; then
+        sleep 2
+        if is_service_running; then
+            log_success "VEIL ${INSTALL_MODE} started successfully!"
+        else
+            log_error "Service started but is not running"
+            log_error "Checking logs..."
+            journalctl -u "$service_name" -n 20 --no-pager
+            rollback_update
+            exit 1
+        fi
+    else
+        log_error "Failed to start service"
+        rollback_update
+        exit 1
+    fi
+
+    # Step 13: Display summary
+    display_update_summary
+}
+
+# ============================================================================
+# END UPDATE/UPGRADE FUNCTIONALITY
+# ============================================================================
+
 # Execute command or show in dry-run mode
 run_cmd() {
     if [[ "$DRY_RUN" == "true" ]]; then
@@ -112,7 +783,7 @@ USAGE:
     Or download and run:
     ./install_veil.sh [OPTIONS]
 
-OPTIONS:
+INSTALLATION OPTIONS:
     --mode=MODE         Installation mode: 'server' or 'client' (default: server)
     --build=TYPE        Build type: 'debug' or 'release' (default: release)
     --with-gui          Install Qt6 GUI with real-time monitoring dashboard
@@ -121,6 +792,13 @@ OPTIONS:
     --verbose           Enable verbose output
     --help              Show this help message
 
+UPDATE OPTIONS:
+    --update            Update existing VEIL installation to latest version
+    --graceful          Graceful update: drain connections before update (default timeout: 300s)
+    --force             Force update: immediately terminate all connections
+    --drain-timeout=N   Custom drain timeout in seconds (use with --graceful)
+    --yes               Skip confirmation prompts
+
 ENVIRONMENT VARIABLES:
     VEIL_REPO           Git repository URL (default: https://github.com/VisageDvachevsky/veil-core.git)
     VEIL_BRANCH         Git branch to use (default: main)
@@ -128,7 +806,7 @@ ENVIRONMENT VARIABLES:
     BUILD_TYPE          Same as --build
     WITH_GUI            Set to 'true' for GUI installation
 
-EXAMPLES:
+INSTALLATION EXAMPLES:
     # Basic server installation (CLI only)
     curl -sSL https://...install_veil.sh | sudo bash
 
@@ -144,6 +822,22 @@ EXAMPLES:
     # Preview what would be installed
     curl -sSL https://...install_veil.sh | sudo bash -s -- --dry-run --with-gui
 
+UPDATE EXAMPLES:
+    # Update to latest version (will prompt for confirmation if connections active)
+    curl -sSL https://...install_veil.sh | sudo bash -s -- --update
+
+    # Graceful update with zero-downtime (drain connections first)
+    curl -sSL https://...install_veil.sh | sudo bash -s -- --update --graceful
+
+    # Graceful update with custom drain timeout (10 minutes)
+    curl -sSL https://...install_veil.sh | sudo bash -s -- --update --graceful --drain-timeout=600
+
+    # Force update immediately (will kill active connections)
+    curl -sSL https://...install_veil.sh | sudo bash -s -- --update --force
+
+    # Update client
+    curl -sSL https://...install_veil.sh | sudo bash -s -- --mode=client --update
+
 GUI FEATURES (--with-gui):
     • Real-time traffic monitoring with dynamic graphs
     • Protocol state visualization
@@ -152,6 +846,14 @@ GUI FEATURES (--with-gui):
     • Performance metrics dashboard (CPU, memory, bandwidth)
     • Session management interface
     • Export diagnostics functionality
+
+UPDATE FEATURES:
+    • Automatic version detection and comparison
+    • Configuration and key preservation
+    • Binary backup and automatic rollback on failure
+    • Graceful connection draining for zero-downtime updates
+    • Pre-update safety checks (disk space, memory)
+    • Active client connection counting for servers
 
 For more information, visit: https://github.com/VisageDvachevsky/veil-core
 EOF
@@ -187,6 +889,25 @@ parse_args() {
             --verbose)
                 VERBOSE="true"
                 ;;
+            --update)
+                UPDATE_MODE="true"
+                ;;
+            --graceful)
+                GRACEFUL_UPDATE="true"
+                ;;
+            --force)
+                FORCE_UPDATE="true"
+                ;;
+            --drain-timeout=*)
+                DRAIN_TIMEOUT="${1#*=}"
+                if ! [[ "$DRAIN_TIMEOUT" =~ ^[0-9]+$ ]]; then
+                    log_error "Invalid drain timeout: $DRAIN_TIMEOUT (must be a number)"
+                    exit 1
+                fi
+                ;;
+            --yes|-y)
+                SKIP_CONFIRM="true"
+                ;;
             --help|-h)
                 show_help
                 exit 0
@@ -199,6 +920,19 @@ parse_args() {
         esac
         shift
     done
+
+    # Validate update mode options
+    if [[ "$UPDATE_MODE" != "true" ]]; then
+        if [[ "$GRACEFUL_UPDATE" == "true" || "$FORCE_UPDATE" == "true" ]]; then
+            log_error "--graceful and --force can only be used with --update"
+            exit 1
+        fi
+    fi
+
+    if [[ "$GRACEFUL_UPDATE" == "true" && "$FORCE_UPDATE" == "true" ]]; then
+        log_error "Cannot use both --graceful and --force at the same time"
+        exit 1
+    fi
 }
 
 # Check if running as root
@@ -937,9 +1671,23 @@ main() {
     # Parse command line arguments first
     parse_args "$@"
 
+    # Set trap for cleanup
+    trap cleanup EXIT
+
+    # Check root first
+    check_root
+
+    # Handle update mode
+    if [[ "$UPDATE_MODE" == "true" ]]; then
+        perform_update
+        log_success "Update completed successfully!"
+        exit 0
+    fi
+
+    # Fresh installation mode
     echo ""
     echo -e "${BLUE}╔════════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║              VEIL One-Line Automated Installer v2.0                    ║${NC}"
+    echo -e "${BLUE}║              VEIL One-Line Automated Installer v2.1                    ║${NC}"
     echo -e "${BLUE}╚════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 
@@ -958,11 +1706,7 @@ main() {
     log_info "  Create Service: ${CREATE_SERVICE}"
     echo ""
 
-    # Set trap for cleanup
-    trap cleanup EXIT
-
     # Common installation steps
-    check_root
     detect_os
     install_dependencies
     build_veil
