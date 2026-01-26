@@ -350,6 +350,33 @@ Section "Windows Service" SecService
       DetailPrint "Service installed successfully"
     ${EndIf}
 
+    ; Configure Windows Firewall to allow VPN traffic
+    DetailPrint "Configuring Windows Firewall rules..."
+
+    ; Remove any existing firewall rules first (ignore errors)
+    nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="VEIL VPN Service - Outbound"'
+    nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="VEIL VPN Service - Inbound"'
+
+    ; Add outbound rule for UDP (CRITICAL - allows connection to VPN server)
+    DetailPrint "Adding firewall rule for outbound VPN traffic..."
+    nsExec::ExecToLog 'netsh advfirewall firewall add rule name="VEIL VPN Service - Outbound" dir=out action=allow program="$INSTDIR\veil-service.exe" protocol=UDP description="Allow VEIL VPN Service to connect to VPN servers" enable=yes'
+    Pop $0
+    ${If} $0 != 0
+      DetailPrint "Warning: Failed to add outbound firewall rule (error code: $0)"
+    ${Else}
+      DetailPrint "Outbound firewall rule added successfully"
+    ${EndIf}
+
+    ; Add inbound rule for UDP (allows server responses)
+    DetailPrint "Adding firewall rule for inbound VPN traffic..."
+    nsExec::ExecToLog 'netsh advfirewall firewall add rule name="VEIL VPN Service - Inbound" dir=in action=allow program="$INSTDIR\veil-service.exe" protocol=UDP description="Allow VEIL VPN Service to receive responses from VPN servers" enable=yes'
+    Pop $0
+    ${If} $0 != 0
+      DetailPrint "Warning: Failed to add inbound firewall rule (error code: $0)"
+    ${Else}
+      DetailPrint "Inbound firewall rule added successfully"
+    ${EndIf}
+
     ; Start the service
     DetailPrint "Starting VEIL VPN Service..."
     nsExec::ExecToLog '"$INSTDIR\veil-service.exe" --start'
@@ -406,6 +433,11 @@ Section "Uninstall"
     DetailPrint "Uninstalling VEIL VPN Service..."
     nsExec::ExecToLog '"$INSTDIR\veil-service.exe" --uninstall'
   ${EndIf}
+
+  ; Remove Windows Firewall rules
+  DetailPrint "Removing Windows Firewall rules..."
+  nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="VEIL VPN Service - Outbound"'
+  nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="VEIL VPN Service - Inbound"'
 
   ; Remove files
   Delete "$INSTDIR\veil-client-gui.exe"
