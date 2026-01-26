@@ -90,12 +90,9 @@ bool Tunnel::initialize(std::error_code& ec) {
     }
   }
 
-  // Open TUN device.
-  if (!tun_device_.open(config_.tun, ec)) {
-    LOG_ERROR("Failed to open TUN device: {}", ec.message());
-    return false;
-  }
-  LOG_INFO("TUN device {} opened with IP {}", tun_device_.device_name(), config_.tun.ip_address);
+  // NOTE: TUN device creation is deferred until after successful handshake
+  // to avoid routing conflicts where handshake packets would be sent through
+  // the VPN tunnel interface instead of the physical network interface.
 
   // Open UDP socket.
   if (!udp_socket_.open(config_.local_port, true, ec)) {
@@ -165,6 +162,19 @@ void Tunnel::run() {
       }
       handle_reconnect();
     } else {
+      // Handshake succeeded - now create TUN device.
+      LOG_INFO("Creating TUN device after successful handshake...");
+      if (!tun_device_.open(config_.tun, ec)) {
+        LOG_ERROR("Failed to open TUN device: {}", ec.message());
+        if (error_callback_) {
+          error_callback_("Failed to open TUN device: " + ec.message());
+        }
+        set_state(ConnectionState::kDisconnected);
+        running_.store(false);
+        return;
+      }
+      LOG_INFO("TUN device {} opened with IP {}", tun_device_.device_name(), config_.tun.ip_address);
+
       set_state(ConnectionState::kConnected);
       stats_.connected_since = now_fn_();
     }
@@ -182,13 +192,15 @@ void Tunnel::run() {
   ) {
     std::error_code ec;
 
-    // Check TUN device for incoming packets.
-    auto tun_read = tun_device_.read_into(tun_buffer, ec);
-    if (tun_read > 0) {
-      on_tun_packet(std::span<const std::uint8_t>(tun_buffer.data(), static_cast<std::size_t>(tun_read)));
-    } else if (tun_read < 0) {
-      LOG_ERROR("TUN read error: {}", ec.message());
-      stats_.tun_read_errors++;
+    // Check TUN device for incoming packets (only if device is open).
+    if (tun_device_.is_open()) {
+      auto tun_read = tun_device_.read_into(tun_buffer, ec);
+      if (tun_read > 0) {
+        on_tun_packet(std::span<const std::uint8_t>(tun_buffer.data(), static_cast<std::size_t>(tun_read)));
+      } else if (tun_read < 0) {
+        LOG_ERROR("TUN read error: {}", ec.message());
+        stats_.tun_read_errors++;
+      }
     }
 
     // Poll UDP socket for incoming packets.
@@ -447,6 +459,17 @@ void Tunnel::handle_reconnect() {
     LOG_ERROR("Reconnection handshake failed: {}", ec.message());
     set_state(ConnectionState::kReconnecting);
     return;
+  }
+
+  // Handshake succeeded - create TUN device if not already created.
+  if (!tun_device_.is_open()) {
+    LOG_INFO("Creating TUN device after successful reconnection...");
+    if (!tun_device_.open(config_.tun, ec)) {
+      LOG_ERROR("Failed to open TUN device: {}", ec.message());
+      set_state(ConnectionState::kReconnecting);
+      return;
+    }
+    LOG_INFO("TUN device {} opened with IP {}", tun_device_.device_name(), config_.tun.ip_address);
   }
 
   // Success!
