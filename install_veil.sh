@@ -1209,6 +1209,26 @@ generate_keys() {
     fi
 }
 
+# Calculate IP pool size from start and end IP addresses
+calculate_ip_pool_size() {
+    local start_ip="$1"
+    local end_ip="$2"
+
+    # Convert IP address to integer
+    ip_to_int() {
+        local ip=$1
+        local a b c d
+        IFS=. read -r a b c d <<< "$ip"
+        echo "$((a * 256 ** 3 + b * 256 ** 2 + c * 256 + d))"
+    }
+
+    local start_int=$(ip_to_int "$start_ip")
+    local end_int=$(ip_to_int "$end_ip")
+
+    # Calculate pool size (inclusive)
+    echo "$((end_int - start_int + 1))"
+}
+
 # Create server configuration
 create_config() {
     log_step "Creating server configuration..."
@@ -1222,6 +1242,16 @@ create_config() {
         log_warn "Configuration file already exists, backing up to server.conf.backup"
         run_cmd cp "$CONFIG_DIR/server.conf" "$CONFIG_DIR/server.conf.backup.$(date +%s)"
     fi
+
+    # Define IP pool range
+    local IP_POOL_START="10.8.0.2"
+    local IP_POOL_END="10.8.0.254"
+
+    # Calculate max_clients dynamically based on IP pool size
+    local MAX_CLIENTS=$(calculate_ip_pool_size "$IP_POOL_START" "$IP_POOL_END")
+
+    log_info "IP pool range: $IP_POOL_START to $IP_POOL_END"
+    log_info "Calculated max_clients: $MAX_CLIENTS"
 
     cat > "$CONFIG_DIR/server.conf" <<EOF
 # VEIL Server Configuration
@@ -1251,7 +1281,7 @@ enable_forwarding = true
 use_masquerade = true
 
 [sessions]
-max_clients = 253
+max_clients = $MAX_CLIENTS
 session_timeout = 300
 idle_warning_sec = 270
 absolute_timeout_sec = 86400
@@ -1260,8 +1290,8 @@ cleanup_interval = 60
 drain_timeout_sec = 5
 
 [ip_pool]
-start = 10.8.0.2
-end = 10.8.0.254
+start = $IP_POOL_START
+end = $IP_POOL_END
 
 [daemon]
 pid_file = /var/run/veil-server.pid
@@ -1296,6 +1326,7 @@ EOF
 
     chmod 600 "$CONFIG_DIR/server.conf"
     log_success "Configuration created: $CONFIG_DIR/server.conf"
+    log_success "max_clients automatically set to $MAX_CLIENTS based on IP pool size"
 }
 
 # Configure system networking
