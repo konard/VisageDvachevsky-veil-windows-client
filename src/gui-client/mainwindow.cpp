@@ -15,6 +15,9 @@
 #include <QTimer>
 #include <QSettings>
 #include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QCoreApplication>
 
 #include "common/gui/theme.h"
 #include "common/ipc/ipc_protocol.h"
@@ -901,15 +904,91 @@ bool MainWindow::ensureServiceRunning() {
 
   // Check if service is installed
   if (!ServiceManager::is_installed()) {
-    // Service not installed - show message to user
-    QMessageBox::warning(
-        this,
-        tr("VEIL Service Not Installed"),
-        tr("The VEIL VPN service is not installed.\n\n"
-           "Please install the service first by running:\n"
-           "  veil-service.exe --install\n\n"
-           "as Administrator."));
-    return false;
+    // Service not installed - attempt to install it automatically
+    statusBar()->showMessage(tr("VEIL service not found, attempting to install..."));
+
+    // Check if we have admin privileges
+    if (!elevation::is_elevated()) {
+      // Try to install with elevation
+      QMessageBox msgBox(this);
+      msgBox.setIcon(QMessageBox::Information);
+      msgBox.setWindowTitle(tr("VEIL Service Installation Required"));
+      msgBox.setText(tr("The VEIL VPN service is not installed and needs to be set up.\n\n"
+                       "Administrator privileges are required to install the service."));
+      msgBox.setInformativeText(tr("Would you like to install the service now?"));
+      msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+      msgBox.setDefaultButton(QMessageBox::Yes);
+
+      if (msgBox.exec() == QMessageBox::Yes) {
+        // Get path to veil-service.exe
+        QString appDir = QCoreApplication::applicationDirPath();
+        QString servicePath = QDir(appDir).filePath("veil-service.exe");
+
+        if (QFile::exists(servicePath)) {
+          // Request elevation and install
+          statusBar()->showMessage(tr("Installing VEIL service..."));
+          if (elevation::run_elevated(servicePath.toStdString(), "--install", true)) {
+            statusBar()->showMessage(tr("VEIL service installed successfully"), 3000);
+
+            // Verify installation succeeded
+            if (ServiceManager::is_installed()) {
+              // Try to start the service
+              std::string error;
+              if (ServiceManager::start(error)) {
+                statusBar()->showMessage(tr("VEIL service started successfully"), 3000);
+                return true;
+              }
+            }
+          } else {
+            QMessageBox::warning(
+                this,
+                tr("Service Installation Failed"),
+                tr("Failed to install the VEIL service.\n\n"
+                   "Please ensure you have administrator privileges and try again."));
+            return false;
+          }
+        } else {
+          QMessageBox::warning(
+              this,
+              tr("Service Executable Not Found"),
+              tr("Could not find veil-service.exe in the application directory.\n\n"
+                 "Please reinstall VEIL VPN to ensure all components are present."));
+          return false;
+        }
+      } else {
+        return false;
+      }
+    } else {
+      // We have admin privileges, try to install directly
+      QString appDir = QCoreApplication::applicationDirPath();
+      QString servicePath = QDir(appDir).filePath("veil-service.exe");
+
+      if (QFile::exists(servicePath)) {
+        std::string error;
+        if (ServiceManager::install(servicePath.toStdString(), error)) {
+          statusBar()->showMessage(tr("VEIL service installed successfully"), 3000);
+
+          // Try to start the service
+          if (ServiceManager::start(error)) {
+            statusBar()->showMessage(tr("VEIL service started successfully"), 3000);
+            return true;
+          }
+        } else {
+          QMessageBox::warning(
+              this,
+              tr("Service Installation Failed"),
+              tr("Failed to install the VEIL service: %1").arg(QString::fromStdString(error)));
+          return false;
+        }
+      } else {
+        QMessageBox::warning(
+            this,
+            tr("Service Executable Not Found"),
+            tr("Could not find veil-service.exe in the application directory.\n\n"
+               "Please reinstall VEIL VPN to ensure all components are present."));
+        return false;
+      }
+    }
   }
 
   // Service is installed but not running - try to start it
