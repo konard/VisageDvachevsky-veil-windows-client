@@ -83,6 +83,7 @@ jobs:
           ./vcpkg/vcpkg install cli11:${{ matrix.arch }}-windows
           ./vcpkg/vcpkg install nlohmann-json:${{ matrix.arch }}-windows
           ./vcpkg/vcpkg install gtest:${{ matrix.arch }}-windows
+          ./vcpkg/vcpkg install openssl:${{ matrix.arch }}-windows
 
       - name: Download Wintun
         run: |
@@ -132,9 +133,58 @@ jobs:
           New-Item -ItemType Directory -Force -Path artifacts/driver
           Copy-Item driver/wintun.dll artifacts/driver/
 
-          # Copy Qt dependencies
+          # Copy vcpkg-installed DLLs (libsodium, spdlog, fmt, OpenSSL)
+          # These are required for the service and GUI to run
+          $vcpkgInstalled = "${{ github.workspace }}/vcpkg/installed/${{ matrix.arch }}-windows"
+
+          Write-Host "Looking for DLLs in: $vcpkgInstalled"
+
+          # Copy libsodium.dll (required for VEIL cryptography)
+          $sodiumDll = Get-ChildItem -Path "$vcpkgInstalled/bin" -Filter "libsodium*.dll" -ErrorAction SilentlyContinue
+          if ($sodiumDll) {
+            Write-Host "Found libsodium: $($sodiumDll.FullName)"
+            Copy-Item $sodiumDll.FullName artifacts/bin/
+          } else {
+            Write-Warning "libsodium.dll not found!"
+          }
+
+          # Copy spdlog.dll (logging library)
+          $spdlogDll = Get-ChildItem -Path "$vcpkgInstalled/bin" -Filter "spdlog*.dll" -ErrorAction SilentlyContinue
+          if ($spdlogDll) {
+            Write-Host "Found spdlog: $($spdlogDll.FullName)"
+            Copy-Item $spdlogDll.FullName artifacts/bin/
+          }
+
+          # Copy fmt.dll (formatting library, dependency of spdlog)
+          $fmtDll = Get-ChildItem -Path "$vcpkgInstalled/bin" -Filter "fmt*.dll" -ErrorAction SilentlyContinue
+          if ($fmtDll) {
+            Write-Host "Found fmt: $($fmtDll.FullName)"
+            Copy-Item $fmtDll.FullName artifacts/bin/
+          }
+
+          # Copy OpenSSL DLLs for Qt Network TLS support
+          # These enable HTTPS connections for update checks
+          $opensslDlls = Get-ChildItem -Path "$vcpkgInstalled/bin" -Filter "*.dll" | Where-Object { $_.Name -match "^(libssl|libcrypto)" }
+          foreach ($dll in $opensslDlls) {
+            Write-Host "Found OpenSSL: $($dll.FullName)"
+            Copy-Item $dll.FullName artifacts/bin/
+          }
+
+          # List all DLLs in artifacts/bin for verification
+          Write-Host "`nDLLs in artifacts/bin:"
+          Get-ChildItem artifacts/bin/*.dll | ForEach-Object { Write-Host "  - $($_.Name)" }
+
+          # Copy Qt dependencies (including TLS plugins)
           if (Test-Path "build/src/gui-client/veil-client-gui.exe") {
             windeployqt --no-translations --no-opengl-sw artifacts/bin/veil-client-gui.exe
+          }
+
+          # Verify Qt TLS plugins were copied
+          if (Test-Path "artifacts/bin/tls") {
+            Write-Host "`nQt TLS plugins:"
+            Get-ChildItem artifacts/bin/tls/*.dll | ForEach-Object { Write-Host "  - $($_.Name)" }
+          } else {
+            Write-Host "`nNote: Qt TLS plugins directory not created (may use Schannel backend)"
           }
 
       - name: Upload build artifacts

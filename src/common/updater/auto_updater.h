@@ -66,7 +66,7 @@ struct ReleaseInfo {
 struct UpdateConfig {
   // GitHub repository information
   std::string github_owner{"VisageDvachevsky"};
-  std::string github_repo{"veil-win-client"};
+  std::string github_repo{"veil-core"};
 
   // Update check settings
   bool check_on_startup{true};

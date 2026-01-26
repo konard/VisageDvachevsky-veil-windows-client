@@ -1,5 +1,8 @@
 #include "ipc_protocol.h"
 
+#include <iostream>
+#include <type_traits>
+
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
@@ -44,7 +47,13 @@ void to_json(json& j, const ConnectionConfig& cfg) {
     {"reconnect_interval_sec", cfg.reconnect_interval_sec},
     {"max_reconnect_attempts", cfg.max_reconnect_attempts},
     {"route_all_traffic", cfg.route_all_traffic},
-    {"custom_routes", cfg.custom_routes}
+    {"custom_routes", cfg.custom_routes},
+    {"key_file", cfg.key_file},
+    {"obfuscation_seed_file", cfg.obfuscation_seed_file},
+    {"tun_device_name", cfg.tun_device_name},
+    {"tun_ip_address", cfg.tun_ip_address},
+    {"tun_netmask", cfg.tun_netmask},
+    {"tun_mtu", cfg.tun_mtu}
   };
 }
 
@@ -57,6 +66,25 @@ void from_json(const json& j, ConnectionConfig& cfg) {
   j.at("max_reconnect_attempts").get_to(cfg.max_reconnect_attempts);
   j.at("route_all_traffic").get_to(cfg.route_all_traffic);
   j.at("custom_routes").get_to(cfg.custom_routes);
+  // Optional fields with defaults
+  if (j.contains("key_file")) {
+    j.at("key_file").get_to(cfg.key_file);
+  }
+  if (j.contains("obfuscation_seed_file")) {
+    j.at("obfuscation_seed_file").get_to(cfg.obfuscation_seed_file);
+  }
+  if (j.contains("tun_device_name")) {
+    j.at("tun_device_name").get_to(cfg.tun_device_name);
+  }
+  if (j.contains("tun_ip_address")) {
+    j.at("tun_ip_address").get_to(cfg.tun_ip_address);
+  }
+  if (j.contains("tun_netmask")) {
+    j.at("tun_netmask").get_to(cfg.tun_netmask);
+  }
+  if (j.contains("tun_mtu")) {
+    j.at("tun_mtu").get_to(cfg.tun_mtu);
+  }
 }
 
 // ConnectionStatus
@@ -194,6 +222,467 @@ void to_json(json& j, const ServerStatus& status) {
 }
 
 // ============================================================================
+// JSON Conversion - LogEvent
+// ============================================================================
+
+void to_json(json& j, const LogEvent& event) {
+  j = json{
+    {"timestamp_ms", event.timestamp_ms},
+    {"level", event.level},
+    {"message", event.message}
+  };
+}
+
+void from_json(const json& j, LogEvent& event) {
+  if (j.contains("timestamp_ms")) j.at("timestamp_ms").get_to(event.timestamp_ms);
+  if (j.contains("level")) j.at("level").get_to(event.level);
+  if (j.contains("message")) j.at("message").get_to(event.message);
+}
+
+// ============================================================================
+// JSON Conversion - DiagnosticsData
+// ============================================================================
+
+void to_json(json& j, const DiagnosticsData& diag) {
+  j = json{
+    {"protocol", json{
+      {"send_sequence", diag.protocol.send_sequence},
+      {"recv_sequence", diag.protocol.recv_sequence},
+      {"packets_sent", diag.protocol.packets_sent},
+      {"packets_received", diag.protocol.packets_received},
+      {"packets_lost", diag.protocol.packets_lost},
+      {"packets_retransmitted", diag.protocol.packets_retransmitted},
+      {"loss_percentage", diag.protocol.loss_percentage}
+    }},
+    {"reassembly", json{
+      {"fragments_received", diag.reassembly.fragments_received},
+      {"messages_reassembled", diag.reassembly.messages_reassembled},
+      {"fragments_pending", diag.reassembly.fragments_pending},
+      {"reassembly_timeouts", diag.reassembly.reassembly_timeouts}
+    }},
+    {"obfuscation", json{
+      {"padding_enabled", diag.obfuscation.padding_enabled},
+      {"current_padding_size", diag.obfuscation.current_padding_size},
+      {"timing_jitter_model", diag.obfuscation.timing_jitter_model},
+      {"timing_jitter_param", diag.obfuscation.timing_jitter_param},
+      {"heartbeat_mode", diag.obfuscation.heartbeat_mode},
+      {"last_heartbeat_sec", diag.obfuscation.last_heartbeat_sec},
+      {"active_dpi_mode", diag.obfuscation.active_dpi_mode}
+    }},
+    {"recent_events", json::array()}
+  };
+  for (const auto& event : diag.recent_events) {
+    json event_json;
+    to_json(event_json, event);
+    j["recent_events"].push_back(event_json);
+  }
+}
+
+void from_json(const json& j, DiagnosticsData& diag) {
+  if (j.contains("protocol")) {
+    const auto& p = j.at("protocol");
+    if (p.contains("send_sequence")) p.at("send_sequence").get_to(diag.protocol.send_sequence);
+    if (p.contains("recv_sequence")) p.at("recv_sequence").get_to(diag.protocol.recv_sequence);
+    if (p.contains("packets_sent")) p.at("packets_sent").get_to(diag.protocol.packets_sent);
+    if (p.contains("packets_received")) p.at("packets_received").get_to(diag.protocol.packets_received);
+    if (p.contains("packets_lost")) p.at("packets_lost").get_to(diag.protocol.packets_lost);
+    if (p.contains("packets_retransmitted")) p.at("packets_retransmitted").get_to(diag.protocol.packets_retransmitted);
+    if (p.contains("loss_percentage")) p.at("loss_percentage").get_to(diag.protocol.loss_percentage);
+  }
+  if (j.contains("reassembly")) {
+    const auto& r = j.at("reassembly");
+    if (r.contains("fragments_received")) r.at("fragments_received").get_to(diag.reassembly.fragments_received);
+    if (r.contains("messages_reassembled")) r.at("messages_reassembled").get_to(diag.reassembly.messages_reassembled);
+    if (r.contains("fragments_pending")) r.at("fragments_pending").get_to(diag.reassembly.fragments_pending);
+    if (r.contains("reassembly_timeouts")) r.at("reassembly_timeouts").get_to(diag.reassembly.reassembly_timeouts);
+  }
+  if (j.contains("obfuscation")) {
+    const auto& o = j.at("obfuscation");
+    if (o.contains("padding_enabled")) o.at("padding_enabled").get_to(diag.obfuscation.padding_enabled);
+    if (o.contains("current_padding_size")) o.at("current_padding_size").get_to(diag.obfuscation.current_padding_size);
+    if (o.contains("timing_jitter_model")) o.at("timing_jitter_model").get_to(diag.obfuscation.timing_jitter_model);
+    if (o.contains("timing_jitter_param")) o.at("timing_jitter_param").get_to(diag.obfuscation.timing_jitter_param);
+    if (o.contains("heartbeat_mode")) o.at("heartbeat_mode").get_to(diag.obfuscation.heartbeat_mode);
+    if (o.contains("last_heartbeat_sec")) o.at("last_heartbeat_sec").get_to(diag.obfuscation.last_heartbeat_sec);
+    if (o.contains("active_dpi_mode")) o.at("active_dpi_mode").get_to(diag.obfuscation.active_dpi_mode);
+  }
+  if (j.contains("recent_events") && j.at("recent_events").is_array()) {
+    for (const auto& event_json : j.at("recent_events")) {
+      LogEvent event;
+      from_json(event_json, event);
+      diag.recent_events.push_back(event);
+    }
+  }
+}
+
+// ============================================================================
+// JSON Conversion - ClientSession
+// ============================================================================
+
+void from_json(const json& j, ClientSession& session) {
+  if (j.contains("session_id")) j.at("session_id").get_to(session.session_id);
+  if (j.contains("tunnel_ip")) j.at("tunnel_ip").get_to(session.tunnel_ip);
+  if (j.contains("endpoint_host")) j.at("endpoint_host").get_to(session.endpoint_host);
+  if (j.contains("endpoint_port")) j.at("endpoint_port").get_to(session.endpoint_port);
+  if (j.contains("uptime_sec")) j.at("uptime_sec").get_to(session.uptime_sec);
+  if (j.contains("packets_sent")) j.at("packets_sent").get_to(session.packets_sent);
+  if (j.contains("packets_received")) j.at("packets_received").get_to(session.packets_received);
+  if (j.contains("bytes_sent")) j.at("bytes_sent").get_to(session.bytes_sent);
+  if (j.contains("bytes_received")) j.at("bytes_received").get_to(session.bytes_received);
+  if (j.contains("last_activity_sec")) j.at("last_activity_sec").get_to(session.last_activity_sec);
+}
+
+// ============================================================================
+// Command Serialization Helpers
+// ============================================================================
+
+namespace {
+
+json serialize_command(const Command& cmd) {
+  json payload;
+
+  std::visit([&payload](const auto& c) {
+    using T = std::decay_t<decltype(c)>;
+
+    if constexpr (std::is_same_v<T, ConnectCommand>) {
+      payload["command_type"] = "connect";
+      json config_json;
+      to_json(config_json, c.config);
+      payload["config"] = config_json;
+    }
+    else if constexpr (std::is_same_v<T, DisconnectCommand>) {
+      payload["command_type"] = "disconnect";
+    }
+    else if constexpr (std::is_same_v<T, GetStatusCommand>) {
+      payload["command_type"] = "get_status";
+    }
+    else if constexpr (std::is_same_v<T, GetMetricsCommand>) {
+      payload["command_type"] = "get_metrics";
+    }
+    else if constexpr (std::is_same_v<T, GetDiagnosticsCommand>) {
+      payload["command_type"] = "get_diagnostics";
+    }
+    else if constexpr (std::is_same_v<T, UpdateConfigCommand>) {
+      payload["command_type"] = "update_config";
+      json config_json;
+      to_json(config_json, c.config);
+      payload["config"] = config_json;
+    }
+    else if constexpr (std::is_same_v<T, ExportDiagnosticsCommand>) {
+      payload["command_type"] = "export_diagnostics";
+      payload["export_path"] = c.export_path;
+    }
+    else if constexpr (std::is_same_v<T, GetClientListCommand>) {
+      payload["command_type"] = "get_client_list";
+    }
+  }, cmd);
+
+  return payload;
+}
+
+json serialize_event(const Event& evt) {
+  json payload;
+
+  std::visit([&payload](const auto& e) {
+    using T = std::decay_t<decltype(e)>;
+
+    if constexpr (std::is_same_v<T, StatusUpdateEvent>) {
+      payload["event_type"] = "status_update";
+      json status_json;
+      to_json(status_json, e.status);
+      payload["status"] = status_json;
+    }
+    else if constexpr (std::is_same_v<T, MetricsUpdateEvent>) {
+      payload["event_type"] = "metrics_update";
+      json metrics_json;
+      to_json(metrics_json, e.metrics);
+      payload["metrics"] = metrics_json;
+    }
+    else if constexpr (std::is_same_v<T, ConnectionStateChangeEvent>) {
+      payload["event_type"] = "connection_state_change";
+      payload["old_state"] = connection_state_to_string(e.old_state);
+      payload["new_state"] = connection_state_to_string(e.new_state);
+      payload["message"] = e.message;
+    }
+    else if constexpr (std::is_same_v<T, ErrorEvent>) {
+      payload["event_type"] = "error";
+      payload["error_message"] = e.error_message;
+      payload["details"] = e.details;
+    }
+    else if constexpr (std::is_same_v<T, LogEventData>) {
+      payload["event_type"] = "log";
+      json event_json;
+      to_json(event_json, e.event);
+      payload["event"] = event_json;
+    }
+    else if constexpr (std::is_same_v<T, ClientListUpdateEvent>) {
+      payload["event_type"] = "client_list_update";
+      payload["clients"] = json::array();
+      for (const auto& client : e.clients) {
+        json client_json;
+        to_json(client_json, client);
+        payload["clients"].push_back(client_json);
+      }
+    }
+    else if constexpr (std::is_same_v<T, ServerStatusUpdateEvent>) {
+      payload["event_type"] = "server_status_update";
+      json status_json;
+      to_json(status_json, e.status);
+      payload["status"] = status_json;
+    }
+  }, evt);
+
+  return payload;
+}
+
+json serialize_response(const Response& resp) {
+  json payload;
+
+  std::visit([&payload](const auto& r) {
+    using T = std::decay_t<decltype(r)>;
+
+    if constexpr (std::is_same_v<T, StatusResponse>) {
+      payload["response_type"] = "status";
+      json status_json;
+      to_json(status_json, r.status);
+      payload["status"] = status_json;
+    }
+    else if constexpr (std::is_same_v<T, MetricsResponse>) {
+      payload["response_type"] = "metrics";
+      json metrics_json;
+      to_json(metrics_json, r.metrics);
+      payload["metrics"] = metrics_json;
+    }
+    else if constexpr (std::is_same_v<T, DiagnosticsResponse>) {
+      payload["response_type"] = "diagnostics";
+      json diag_json;
+      to_json(diag_json, r.diagnostics);
+      payload["diagnostics"] = diag_json;
+    }
+    else if constexpr (std::is_same_v<T, ClientListResponse>) {
+      payload["response_type"] = "client_list";
+      payload["clients"] = json::array();
+      for (const auto& client : r.clients) {
+        json client_json;
+        to_json(client_json, client);
+        payload["clients"].push_back(client_json);
+      }
+    }
+    else if constexpr (std::is_same_v<T, SuccessResponse>) {
+      payload["response_type"] = "success";
+      payload["message"] = r.message;
+    }
+    else if constexpr (std::is_same_v<T, ErrorResponse>) {
+      payload["response_type"] = "error";
+      payload["error_message"] = r.error_message;
+      payload["details"] = r.details;
+    }
+  }, resp);
+
+  return payload;
+}
+
+std::optional<Command> deserialize_command(const json& payload) {
+  if (!payload.contains("command_type")) {
+    return std::nullopt;
+  }
+
+  std::string cmd_type = payload.at("command_type").get<std::string>();
+
+  if (cmd_type == "connect") {
+    ConnectCommand cmd;
+    if (payload.contains("config")) {
+      from_json(payload.at("config"), cmd.config);
+    }
+    return cmd;
+  }
+  else if (cmd_type == "disconnect") {
+    return DisconnectCommand{};
+  }
+  else if (cmd_type == "get_status") {
+    return GetStatusCommand{};
+  }
+  else if (cmd_type == "get_metrics") {
+    return GetMetricsCommand{};
+  }
+  else if (cmd_type == "get_diagnostics") {
+    return GetDiagnosticsCommand{};
+  }
+  else if (cmd_type == "update_config") {
+    UpdateConfigCommand cmd;
+    if (payload.contains("config")) {
+      from_json(payload.at("config"), cmd.config);
+    }
+    return cmd;
+  }
+  else if (cmd_type == "export_diagnostics") {
+    ExportDiagnosticsCommand cmd;
+    if (payload.contains("export_path")) {
+      payload.at("export_path").get_to(cmd.export_path);
+    }
+    return cmd;
+  }
+  else if (cmd_type == "get_client_list") {
+    return GetClientListCommand{};
+  }
+
+  return std::nullopt;
+}
+
+std::optional<Event> deserialize_event(const json& payload) {
+  if (!payload.contains("event_type")) {
+    return std::nullopt;
+  }
+
+  std::string evt_type = payload.at("event_type").get<std::string>();
+
+  if (evt_type == "status_update") {
+    StatusUpdateEvent evt;
+    if (payload.contains("status")) {
+      from_json(payload.at("status"), evt.status);
+    }
+    return evt;
+  }
+  else if (evt_type == "metrics_update") {
+    MetricsUpdateEvent evt;
+    if (payload.contains("metrics")) {
+      from_json(payload.at("metrics"), evt.metrics);
+    }
+    return evt;
+  }
+  else if (evt_type == "connection_state_change") {
+    ConnectionStateChangeEvent evt;
+    if (payload.contains("old_state")) {
+      auto state_opt = connection_state_from_string(payload.at("old_state").get<std::string>());
+      evt.old_state = state_opt.value_or(ConnectionState::kDisconnected);
+    }
+    if (payload.contains("new_state")) {
+      auto state_opt = connection_state_from_string(payload.at("new_state").get<std::string>());
+      evt.new_state = state_opt.value_or(ConnectionState::kDisconnected);
+    }
+    if (payload.contains("message")) {
+      payload.at("message").get_to(evt.message);
+    }
+    return evt;
+  }
+  else if (evt_type == "error") {
+    ErrorEvent evt;
+    if (payload.contains("error_message")) {
+      payload.at("error_message").get_to(evt.error_message);
+    }
+    if (payload.contains("details")) {
+      payload.at("details").get_to(evt.details);
+    }
+    return evt;
+  }
+  else if (evt_type == "log") {
+    LogEventData evt;
+    if (payload.contains("event")) {
+      from_json(payload.at("event"), evt.event);
+    }
+    return evt;
+  }
+  else if (evt_type == "client_list_update") {
+    ClientListUpdateEvent evt;
+    if (payload.contains("clients") && payload.at("clients").is_array()) {
+      for (const auto& client_json : payload.at("clients")) {
+        ClientSession session;
+        from_json(client_json, session);
+        evt.clients.push_back(session);
+      }
+    }
+    return evt;
+  }
+  else if (evt_type == "server_status_update") {
+    ServerStatusUpdateEvent evt;
+    if (payload.contains("status")) {
+      const auto& s = payload.at("status");
+      if (s.contains("running")) s.at("running").get_to(evt.status.running);
+      if (s.contains("listen_port")) s.at("listen_port").get_to(evt.status.listen_port);
+      if (s.contains("listen_address")) s.at("listen_address").get_to(evt.status.listen_address);
+      if (s.contains("active_clients")) s.at("active_clients").get_to(evt.status.active_clients);
+      if (s.contains("max_clients")) s.at("max_clients").get_to(evt.status.max_clients);
+      if (s.contains("uptime_sec")) s.at("uptime_sec").get_to(evt.status.uptime_sec);
+      if (s.contains("total_packets_sent")) s.at("total_packets_sent").get_to(evt.status.total_packets_sent);
+      if (s.contains("total_packets_received")) s.at("total_packets_received").get_to(evt.status.total_packets_received);
+      if (s.contains("total_bytes_sent")) s.at("total_bytes_sent").get_to(evt.status.total_bytes_sent);
+      if (s.contains("total_bytes_received")) s.at("total_bytes_received").get_to(evt.status.total_bytes_received);
+    }
+    return evt;
+  }
+
+  return std::nullopt;
+}
+
+std::optional<Response> deserialize_response(const json& payload) {
+  if (!payload.contains("response_type")) {
+    #ifdef VEIL_IPC_DEBUG
+    std::cerr << "[IPC Debug] Response payload missing 'response_type' field!" << std::endl;
+    #endif
+    return std::nullopt;
+  }
+
+  std::string resp_type = payload.at("response_type").get<std::string>();
+  #ifdef VEIL_IPC_DEBUG
+  std::cerr << "[IPC Debug] Response type: " << resp_type << std::endl;
+  #endif
+
+  if (resp_type == "status") {
+    StatusResponse resp;
+    if (payload.contains("status")) {
+      from_json(payload.at("status"), resp.status);
+    }
+    return resp;
+  }
+  else if (resp_type == "metrics") {
+    MetricsResponse resp;
+    if (payload.contains("metrics")) {
+      from_json(payload.at("metrics"), resp.metrics);
+    }
+    return resp;
+  }
+  else if (resp_type == "diagnostics") {
+    DiagnosticsResponse resp;
+    if (payload.contains("diagnostics")) {
+      from_json(payload.at("diagnostics"), resp.diagnostics);
+    }
+    return resp;
+  }
+  else if (resp_type == "client_list") {
+    ClientListResponse resp;
+    if (payload.contains("clients") && payload.at("clients").is_array()) {
+      for (const auto& client_json : payload.at("clients")) {
+        ClientSession session;
+        from_json(client_json, session);
+        resp.clients.push_back(session);
+      }
+    }
+    return resp;
+  }
+  else if (resp_type == "success") {
+    SuccessResponse resp;
+    if (payload.contains("message")) {
+      payload.at("message").get_to(resp.message);
+    }
+    return resp;
+  }
+  else if (resp_type == "error") {
+    ErrorResponse resp;
+    if (payload.contains("error_message")) {
+      payload.at("error_message").get_to(resp.error_message);
+    }
+    if (payload.contains("details")) {
+      payload.at("details").get_to(resp.details);
+    }
+    return resp;
+  }
+
+  return std::nullopt;
+}
+
+}  // namespace
+
+// ============================================================================
 // Message Serialization
 // ============================================================================
 
@@ -214,16 +703,38 @@ std::string serialize_message(const Message& msg) {
   }
 
   // Serialize payload based on type
-  // Note: This is simplified - full implementation would handle all variants
-  j["payload"] = json::object();
+  std::visit([&j](const auto& payload) {
+    using T = std::decay_t<decltype(payload)>;
+
+    if constexpr (std::is_same_v<T, Command>) {
+      j["payload"] = serialize_command(payload);
+    }
+    else if constexpr (std::is_same_v<T, Event>) {
+      j["payload"] = serialize_event(payload);
+    }
+    else if constexpr (std::is_same_v<T, Response>) {
+      j["payload"] = serialize_response(payload);
+    }
+  }, msg.payload);
 
   // Add newline delimiter for framing
-  return j.dump() + "\n";
+  std::string result = j.dump() + "\n";
+
+  #ifdef VEIL_IPC_DEBUG
+  std::cerr << "[IPC Debug] Serialized message: " << result;
+  #endif
+
+  return result;
 }
 
 std::optional<Message> deserialize_message(const std::string& json_str) {
   try {
     auto j = json::parse(json_str);
+
+    // Debug: Log the raw JSON being deserialized
+    #ifdef VEIL_IPC_DEBUG
+    std::cerr << "[IPC Debug] Deserializing JSON: " << json_str << std::endl;
+    #endif
 
     Message msg;
 
@@ -246,8 +757,54 @@ std::optional<Message> deserialize_message(const std::string& json_str) {
       msg.id = j.at("id").get<std::uint64_t>();
     }
 
-    // Parse payload
-    // Note: This is simplified - full implementation would handle all variants
+    // Parse payload based on message type
+    if (!j.contains("payload")) {
+      #ifdef VEIL_IPC_DEBUG
+      std::cerr << "[IPC Debug] No payload in message!" << std::endl;
+      #endif
+      return std::nullopt;
+    }
+
+    const auto& payload = j.at("payload");
+    #ifdef VEIL_IPC_DEBUG
+    std::cerr << "[IPC Debug] Payload: " << payload.dump() << std::endl;
+    #endif
+
+    switch (msg.type) {
+      case MessageType::kCommand: {
+        auto cmd_opt = deserialize_command(payload);
+        if (!cmd_opt) {
+          return std::nullopt;
+        }
+        msg.payload = *cmd_opt;
+        break;
+      }
+      case MessageType::kEvent: {
+        auto evt_opt = deserialize_event(payload);
+        if (!evt_opt) {
+          return std::nullopt;
+        }
+        msg.payload = *evt_opt;
+        break;
+      }
+      case MessageType::kResponse: {
+        auto resp_opt = deserialize_response(payload);
+        if (!resp_opt) {
+          return std::nullopt;
+        }
+        msg.payload = *resp_opt;
+        break;
+      }
+      case MessageType::kError: {
+        // Error messages typically use ErrorResponse format
+        auto resp_opt = deserialize_response(payload);
+        if (!resp_opt) {
+          return std::nullopt;
+        }
+        msg.payload = *resp_opt;
+        break;
+      }
+    }
 
     return msg;
   } catch (const json::exception&) {

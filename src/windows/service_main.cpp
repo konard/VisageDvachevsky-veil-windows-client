@@ -237,54 +237,100 @@ void run_service() {
   g_running = true;
   g_connected = false;
 
+  LOG_INFO("========================================");
+  LOG_INFO("VEIL VPN SERVICE STARTING");
+  LOG_INFO("========================================");
+
   // Create IPC server for GUI communication
+  LOG_DEBUG("Creating IPC server instance...");
   g_ipc_server = std::make_unique<ipc::IpcServer>();
   g_ipc_server->on_message(handle_ipc_message);
 
+  LOG_DEBUG("Starting IPC server...");
   std::error_code ec;
   if (!g_ipc_server->start(ec)) {
-    LOG_ERROR("Failed to start IPC server: {}", ec.message());
-    // Continue anyway - service can still run
+    LOG_ERROR("========================================");
+    LOG_ERROR("IPC SERVER START FAILED");
+    LOG_ERROR("========================================");
+    LOG_ERROR("Error code: {}", ec.value());
+    LOG_ERROR("Error message: {}", ec.message());
+    LOG_ERROR("========================================");
+    LOG_WARN("Service will continue but GUI will not be able to connect");
   } else {
     LOG_INFO("IPC server started successfully");
+    LOG_INFO("Listening on named pipe: \\\\.\\pipe\\veil-client");
   }
 
   // Report that we're running
   ServiceControlHandler::report_running();
 
-  LOG_INFO("VEIL VPN Service started");
-  LOG_INFO("VPN tunnel functionality is now available on Windows");
+  LOG_INFO("========================================");
+  LOG_INFO("VEIL VPN SERVICE RUNNING");
+  LOG_INFO("========================================");
+  LOG_INFO("Service is now accepting IPC connections");
+  LOG_INFO("VPN tunnel functionality is available");
 
   // Main service loop
+  LOG_DEBUG("Entering main service loop");
+  std::chrono::steady_clock::time_point last_status_log = std::chrono::steady_clock::now();
+
   while (g_running) {
     // Poll IPC server for messages
     if (g_ipc_server) {
       std::error_code ipc_ec;
       g_ipc_server->poll(ipc_ec);
+      if (ipc_ec && ipc_ec.value() != 0) {
+        // Only log actual errors, not "would block" conditions
+        LOG_DEBUG("IPC poll error (may be normal): {}", ipc_ec.message());
+      }
+    }
+
+    // Periodic status logging (every 60 seconds)
+    auto now = std::chrono::steady_clock::now();
+    if (std::chrono::duration_cast<std::chrono::seconds>(now - last_status_log).count() >= 60) {
+      LOG_DEBUG("Service status: running={}, connected={}", g_running.load(), g_connected.load());
+      if (g_tunnel) {
+        const auto& stats = g_tunnel->stats();
+        LOG_DEBUG("Tunnel stats: TX={} bytes, RX={} bytes", stats.udp_bytes_sent, stats.udp_bytes_received);
+      }
+      last_status_log = now;
     }
 
     // Small sleep to prevent busy-waiting
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 
+  LOG_INFO("Exiting main service loop");
+
   // Cleanup
+  LOG_INFO("========================================");
+  LOG_INFO("SERVICE SHUTDOWN - CLEANUP STARTING");
+  LOG_INFO("========================================");
+
   // Stop tunnel if running
   if (g_tunnel) {
     LOG_INFO("Stopping VPN tunnel...");
     g_tunnel->stop();
     if (g_tunnel_thread && g_tunnel_thread->joinable()) {
+      LOG_DEBUG("Waiting for tunnel thread to terminate...");
       g_tunnel_thread->join();
+      LOG_DEBUG("Tunnel thread terminated");
     }
     g_tunnel.reset();
     g_tunnel_thread.reset();
+    LOG_INFO("VPN tunnel stopped and cleaned up");
   }
 
   if (g_ipc_server) {
+    LOG_DEBUG("Stopping IPC server...");
     g_ipc_server->stop();
     g_ipc_server.reset();
+    LOG_INFO("IPC server stopped");
   }
 
-  LOG_INFO("VEIL VPN Service stopped");
+  LOG_INFO("========================================");
+  LOG_INFO("VEIL VPN SERVICE STOPPED");
+  LOG_INFO("========================================");
 }
 
 void stop_service() {
@@ -301,12 +347,24 @@ void stop_service() {
 // ============================================================================
 
 void handle_ipc_message(const ipc::Message& msg, int client_fd) {
+  LOG_DEBUG("========================================");
+  LOG_DEBUG("IPC MESSAGE RECEIVED");
+  LOG_DEBUG("========================================");
+  LOG_DEBUG("Message type: {}", static_cast<int>(msg.type));
+  if (msg.id) {
+    LOG_DEBUG("Message ID: {}", *msg.id);
+  }
+
   if (!std::holds_alternative<ipc::Command>(msg.payload)) {
     LOG_WARN("Received non-command message from client");
+    LOG_WARN("Payload holds_alternative<Command>: {}", std::holds_alternative<ipc::Command>(msg.payload));
+    LOG_WARN("Payload holds_alternative<Event>: {}", std::holds_alternative<ipc::Event>(msg.payload));
+    LOG_WARN("Payload holds_alternative<Response>: {}", std::holds_alternative<ipc::Response>(msg.payload));
     return;
   }
 
   const auto& cmd = std::get<ipc::Command>(msg.payload);
+  LOG_DEBUG("Successfully extracted Command from payload");
 
   ipc::Response response;
   ipc::Message response_msg;
@@ -319,10 +377,25 @@ void handle_ipc_message(const ipc::Message& msg, int client_fd) {
         using T = std::decay_t<decltype(command)>;
 
         if constexpr (std::is_same_v<T, ipc::ConnectCommand>) {
-          LOG_DEBUG("Received ConnectCommand");
+          LOG_DEBUG("========================================");
+          LOG_DEBUG("PROCESSING CONNECT COMMAND");
+          LOG_DEBUG("========================================");
+          LOG_DEBUG("Server: {}:{}", command.config.server_address, command.config.server_port);
+          LOG_DEBUG("Key file: {}", command.config.key_file);
+          LOG_DEBUG("Obfuscation seed file: {}", command.config.obfuscation_seed_file);
+          LOG_DEBUG("TUN device: {}", command.config.tun_device_name);
+          LOG_DEBUG("TUN IP: {}", command.config.tun_ip_address);
+          LOG_DEBUG("TUN netmask: {}", command.config.tun_netmask);
+          LOG_DEBUG("TUN MTU: {}", command.config.tun_mtu);
+          LOG_DEBUG("Enable obfuscation: {}", command.config.enable_obfuscation);
+          LOG_DEBUG("Auto reconnect: {}", command.config.auto_reconnect);
+          LOG_DEBUG("Route all traffic: {}", command.config.route_all_traffic);
+
           if (g_connected) {
+            LOG_WARN("Already connected - rejecting connection request");
             response = ipc::ErrorResponse{"Already connected", ""};
           } else {
+            LOG_INFO("Initializing new VPN connection...");
             // Configure tunnel from IPC command
             g_tunnel_config = tunnel::TunnelConfig{};
             g_tunnel_config.server_address = command.config.server_address;
@@ -333,24 +406,60 @@ void handle_ipc_message(const ipc::Message& msg, int client_fd) {
             g_tunnel_config.max_reconnect_attempts =
                 static_cast<int>(command.config.max_reconnect_attempts);
 
-            // Set TUN device configuration (default Windows values)
-            g_tunnel_config.tun.ip_address = "10.8.0.2";
-            g_tunnel_config.tun.netmask = "255.255.255.0";
-            g_tunnel_config.tun.mtu = 1420;
+            // Cryptographic configuration - critical for VPN handshake!
+            g_tunnel_config.key_file = command.config.key_file;
+            g_tunnel_config.obfuscation_seed_file = command.config.obfuscation_seed_file;
+
+            // Set TUN device configuration from IPC command (with defaults)
+            g_tunnel_config.tun.device_name = command.config.tun_device_name.empty()
+                ? "veil0" : command.config.tun_device_name;
+            g_tunnel_config.tun.ip_address = command.config.tun_ip_address.empty()
+                ? "10.8.0.2" : command.config.tun_ip_address;
+            g_tunnel_config.tun.netmask = command.config.tun_netmask.empty()
+                ? "255.255.255.0" : command.config.tun_netmask;
+            g_tunnel_config.tun.mtu = command.config.tun_mtu > 0
+                ? command.config.tun_mtu : 1400;
+
+            // Log configuration for debugging
+            LOG_INFO("Connecting to {}:{}", g_tunnel_config.server_address, g_tunnel_config.server_port);
+            if (!g_tunnel_config.key_file.empty()) {
+              LOG_DEBUG("Using pre-shared key file: {}", g_tunnel_config.key_file);
+            } else {
+              LOG_WARN("No pre-shared key file specified - handshake will fail!");
+            }
+            if (!g_tunnel_config.obfuscation_seed_file.empty()) {
+              LOG_DEBUG("Using obfuscation seed file: {}", g_tunnel_config.obfuscation_seed_file);
+            }
 
             // Create and initialize tunnel
+            LOG_DEBUG("Creating tunnel instance with configuration...");
             g_tunnel = std::make_unique<tunnel::Tunnel>(g_tunnel_config);
+
+            LOG_DEBUG("Initializing tunnel...");
             std::error_code ec;
             if (!g_tunnel->initialize(ec)) {
-              LOG_ERROR("Failed to initialize tunnel: {}", ec.message());
+              LOG_ERROR("========================================");
+              LOG_ERROR("TUNNEL INITIALIZATION FAILED");
+              LOG_ERROR("========================================");
+              LOG_ERROR("Error code: {}", ec.value());
+              LOG_ERROR("Error message: {}", ec.message());
+              LOG_ERROR("========================================");
               response = ipc::ErrorResponse{"Failed to initialize tunnel: " + ec.message(), ""};
               g_tunnel.reset();
             } else {
+              LOG_INFO("Tunnel initialized successfully");
+              LOG_DEBUG("Starting tunnel thread...");
+
               // Start tunnel in background thread
               g_tunnel_thread = std::make_unique<std::thread>([&]() {
-                LOG_INFO("Starting VPN tunnel...");
+                LOG_INFO("========================================");
+                LOG_INFO("VPN TUNNEL THREAD STARTED");
+                LOG_INFO("========================================");
+                LOG_INFO("Running tunnel event loop...");
                 g_tunnel->run();
-                LOG_INFO("VPN tunnel stopped");
+                LOG_INFO("========================================");
+                LOG_INFO("VPN TUNNEL STOPPED");
+                LOG_INFO("========================================");
                 g_connected = false;
 
                 // Broadcast disconnection event
@@ -368,9 +477,15 @@ void handle_ipc_message(const ipc::Message& msg, int client_fd) {
               });
 
               g_connected = true;
+
+              LOG_INFO("========================================");
+              LOG_INFO("VPN CONNECTION ESTABLISHED");
+              LOG_INFO("========================================");
+              LOG_DEBUG("Setting response to SuccessResponse");
               response = ipc::SuccessResponse{"Connected successfully"};
 
               // Broadcast connection event
+              LOG_DEBUG("Broadcasting connection state change event...");
               ipc::ConnectionStateChangeEvent event;
               event.old_state = ipc::ConnectionState::kDisconnected;
               event.new_state = ipc::ConnectionState::kConnected;
@@ -380,6 +495,7 @@ void handle_ipc_message(const ipc::Message& msg, int client_fd) {
               event_msg.type = ipc::MessageType::kEvent;
               event_msg.payload = ipc::Event{event};
               g_ipc_server->broadcast_message(event_msg);
+              LOG_DEBUG("Connection state change event broadcasted");
             }
           }
         } else if constexpr (std::is_same_v<T, ipc::DisconnectCommand>) {
@@ -458,6 +574,22 @@ void handle_ipc_message(const ipc::Message& msg, int client_fd) {
               std::chrono::seconds(command.config.reconnect_interval_sec);
           g_tunnel_config.max_reconnect_attempts =
               static_cast<int>(command.config.max_reconnect_attempts);
+          // Cryptographic configuration
+          g_tunnel_config.key_file = command.config.key_file;
+          g_tunnel_config.obfuscation_seed_file = command.config.obfuscation_seed_file;
+          // TUN configuration
+          if (!command.config.tun_device_name.empty()) {
+            g_tunnel_config.tun.device_name = command.config.tun_device_name;
+          }
+          if (!command.config.tun_ip_address.empty()) {
+            g_tunnel_config.tun.ip_address = command.config.tun_ip_address;
+          }
+          if (!command.config.tun_netmask.empty()) {
+            g_tunnel_config.tun.netmask = command.config.tun_netmask;
+          }
+          if (command.config.tun_mtu > 0) {
+            g_tunnel_config.tun.mtu = command.config.tun_mtu;
+          }
           response = ipc::SuccessResponse{"Configuration updated"};
         } else if constexpr (std::is_same_v<T, ipc::ExportDiagnosticsCommand>) {
           LOG_DEBUG("Received ExportDiagnosticsCommand");
@@ -477,8 +609,46 @@ void handle_ipc_message(const ipc::Message& msg, int client_fd) {
 
   response_msg.payload = response;
 
+  // Log response details before sending
+  LOG_DEBUG("========================================");
+  LOG_DEBUG("SENDING IPC RESPONSE");
+  LOG_DEBUG("========================================");
+  LOG_DEBUG("Response message type: {}", static_cast<int>(response_msg.type));
+  if (response_msg.id) {
+    LOG_DEBUG("Response message ID: {}", *response_msg.id);
+  }
+
+  // Log which response type we're sending
+  if (std::holds_alternative<ipc::SuccessResponse>(response)) {
+    const auto& sr = std::get<ipc::SuccessResponse>(response);
+    LOG_DEBUG("Response type: SuccessResponse");
+    LOG_DEBUG("  Message: {}", sr.message);
+  } else if (std::holds_alternative<ipc::ErrorResponse>(response)) {
+    const auto& er = std::get<ipc::ErrorResponse>(response);
+    LOG_DEBUG("Response type: ErrorResponse");
+    LOG_DEBUG("  Error: {}", er.error_message);
+    LOG_DEBUG("  Details: {}", er.details);
+  } else if (std::holds_alternative<ipc::StatusResponse>(response)) {
+    const auto& sr = std::get<ipc::StatusResponse>(response);
+    LOG_DEBUG("Response type: StatusResponse");
+    LOG_DEBUG("  State: {}", static_cast<int>(sr.status.state));
+  } else if (std::holds_alternative<ipc::MetricsResponse>(response)) {
+    LOG_DEBUG("Response type: MetricsResponse");
+  } else if (std::holds_alternative<ipc::DiagnosticsResponse>(response)) {
+    LOG_DEBUG("Response type: DiagnosticsResponse");
+  } else if (std::holds_alternative<ipc::ClientListResponse>(response)) {
+    LOG_DEBUG("Response type: ClientListResponse");
+  } else {
+    LOG_WARN("Response type: UNKNOWN!");
+  }
+
   std::error_code ec;
-  g_ipc_server->send_message(client_fd, response_msg, ec);
+  if (!g_ipc_server->send_message(client_fd, response_msg, ec)) {
+    LOG_ERROR("Failed to send IPC response: {}", ec.message());
+  } else {
+    LOG_DEBUG("IPC response sent successfully");
+  }
+  LOG_DEBUG("========================================");
 }
 
 #else

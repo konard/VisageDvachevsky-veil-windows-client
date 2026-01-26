@@ -131,6 +131,39 @@ unset VEIL_SKIP_NETEM
 sudo ./build/debug/tests/integration/veil_integration_transport
 ```
 
+## Troubleshooting
+
+### Windows TLS/SSL Warnings
+
+If you see Qt SSL/TLS warnings on Windows like:
+```
+qt.network.ssl: No functional TLS backend was found
+```
+
+**Note:** These warnings only affect the update checker feature. The VPN tunnel itself is NOT affected and will work normally.
+
+For detailed solutions, see [Windows TLS Setup Guide](docs/windows-tls-setup.md).
+
+Quick fixes:
+- Use official VEIL builds (include SSL support)
+- Add OpenSSL 3.x DLLs to installation directory
+- Run from command line to see detailed diagnostics
+
+### Windows Service Issues
+
+If the VEIL service fails to start:
+1. Run VEIL Client as Administrator
+2. Check Windows Event Viewer: `eventvwr.msc` → Windows Logs → Application
+3. Run from command line to see detailed logs:
+   ```powershell
+   cd "C:\Program Files\VEIL VPN"
+   .\veil-client-gui.exe
+   ```
+4. Verify service status:
+   ```powershell
+   sc query VeilVPN
+   ```
+
 ## Project Structure
 
 ```

@@ -114,6 +114,10 @@ if(WIN32)
       rpcrt4
   )
   target_compile_definitions(veil_common PUBLIC WIN32_LEAN_AND_MEAN NOMINMAX)
+
+  # Enable IPC debug logging on Windows for easier troubleshooting
+  target_compile_definitions(veil_common PUBLIC VEIL_IPC_DEBUG)
+  message(STATUS "IPC debug logging enabled for Windows builds")
 endif()
 
 veil_set_warnings(veil_common)

@@ -18,8 +18,8 @@ constexpr const char* kFullVersionString = "VEIL VPN 1.0.0";
 
 // GitHub repository for update checks
 constexpr const char* kGitHubRepo = "VisageDvachevsky/veil-windows-client";
-constexpr const char* kGitHubReleasesApi = "https://api.github.com/repos/VisageDvachevsky/veil-windows-client/releases/latest";
-constexpr const char* kGitHubReleasesUrl = "https://github.com/VisageDvachevsky/veil-windows-client/releases";
+constexpr const char* kGitHubReleasesApi = "https://api.github.com/repos/VisageDvachevsky/veil-core/releases/latest";
+constexpr const char* kGitHubReleasesUrl = "https://github.com/VisageDvachevsky/veil-core/releases";
 
 // Build information (can be overridden at compile time)
 #ifndef VEIL_BUILD_TYPE

@@ -27,7 +27,10 @@ class IpcClientManager : public QObject {
   /// Check if connected to daemon
   [[nodiscard]] bool isConnected() const;
 
-  /// Send a connect command to the daemon
+  /// Send a connect command to the daemon with full configuration
+  bool sendConnect(const ipc::ConnectionConfig& config);
+
+  /// Send a connect command to the daemon (legacy - uses minimal config)
   bool sendConnect(const QString& serverAddress, uint16_t serverPort);
 
   /// Send a disconnect command to the daemon

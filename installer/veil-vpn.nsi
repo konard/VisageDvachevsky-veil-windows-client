@@ -259,6 +259,15 @@ Section "VEIL VPN Client (required)" SecMain
   File /nonfatal "bin\spdlog.dll"
   File /nonfatal "bin\fmt.dll"
 
+  ; OpenSSL DLLs for Qt Network TLS support (enables HTTPS for update checks)
+  File /nonfatal "bin\libssl*.dll"
+  File /nonfatal "bin\libcrypto*.dll"
+
+  ; Qt TLS plugins (if available)
+  SetOutPath "$INSTDIR\tls"
+  File /nonfatal "bin\tls\*.dll"
+  SetOutPath "$INSTDIR"
+
   ; Documentation
   SetOutPath "$INSTDIR\docs"
   File "docs\README.md"
@@ -406,11 +415,15 @@ Section "Uninstall"
   Delete "$INSTDIR\libsodium.dll"
   Delete "$INSTDIR\spdlog.dll"
   Delete "$INSTDIR\fmt.dll"
+  Delete "$INSTDIR\libssl*.dll"
+  Delete "$INSTDIR\libcrypto*.dll"
   Delete "$INSTDIR\uninstall.exe"
+  Delete "$INSTDIR\version.txt"
 
   ; Remove directories
   RMDir /r "$INSTDIR\platforms"
   RMDir /r "$INSTDIR\styles"
+  RMDir /r "$INSTDIR\tls"
   RMDir /r "$INSTDIR\docs"
   RMDir /r "$INSTDIR\config"
   RMDir /r "$INSTDIR\driver"

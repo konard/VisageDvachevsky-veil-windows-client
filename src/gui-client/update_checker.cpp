@@ -6,6 +6,8 @@
 #include <QUrl>
 #include <QNetworkRequest>
 #include <QRegularExpression>
+#include <QSslSocket>
+#include <QDebug>
 
 #include "common/version.h"
 
@@ -16,6 +18,14 @@ UpdateChecker::UpdateChecker(QObject* parent)
       networkManager_(std::make_unique<QNetworkAccessManager>(this)) {
   connect(networkManager_.get(), &QNetworkAccessManager::finished,
           this, &UpdateChecker::onNetworkReply);
+
+  // Log SSL support status
+  qDebug() << "UpdateChecker: SSL support available:" << QSslSocket::supportsSsl();
+  if (!QSslSocket::supportsSsl()) {
+    qWarning() << "UpdateChecker: No SSL/TLS support detected!";
+    qWarning() << "Update checks via HTTPS will fail.";
+    qWarning() << "Please ensure Qt is built with SSL support or OpenSSL libraries are available.";
+  }
 }
 
 UpdateChecker::~UpdateChecker() = default;
@@ -45,7 +55,19 @@ void UpdateChecker::onNetworkReply(QNetworkReply* reply) {
   reply->deleteLater();
 
   if (reply->error() != QNetworkReply::NoError) {
-    emit checkFailed(reply->errorString());
+    qWarning() << "UpdateChecker: Network error:" << reply->error() << reply->errorString();
+
+    // Provide more helpful error message for SSL errors
+    QString errorMsg = reply->errorString();
+    if (reply->error() == QNetworkReply::SslHandshakeFailedError ||
+        reply->error() == QNetworkReply::UnknownNetworkError) {
+      if (!QSslSocket::supportsSsl()) {
+        errorMsg = QString("SSL/TLS not available. Update checks require HTTPS support.\n"
+                          "This does not affect VPN functionality.");
+      }
+    }
+
+    emit checkFailed(errorMsg);
     return;
   }
 

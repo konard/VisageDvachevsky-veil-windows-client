@@ -69,6 +69,16 @@ struct ConnectionConfig {
   bool route_all_traffic{true};
   std::vector<std::string> custom_routes;
   std::uint8_t dpi_bypass_mode{0};  // DPI bypass mode (0=IoT, 1=QUIC, 2=Noise, 3=Trickle)
+
+  // Cryptographic settings
+  std::string key_file;               // Path to pre-shared key file (client.key)
+  std::string obfuscation_seed_file;  // Path to obfuscation seed file (optional)
+
+  // TUN interface settings
+  std::string tun_device_name{"veil0"};
+  std::string tun_ip_address{"10.8.0.2"};
+  std::string tun_netmask{"255.255.255.0"};
+  std::uint16_t tun_mtu{1400};
 };
 
 // Current connection status
