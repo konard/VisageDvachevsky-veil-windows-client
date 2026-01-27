@@ -257,21 +257,58 @@ bool RouteManager::remove_route(const Route& route, std::error_code& ec) {
 
 bool RouteManager::add_default_route(const std::string& interface, const std::string& gateway,
                                       int metric, std::error_code& ec) {
-  Route route;
-  route.destination = "0.0.0.0";
-  route.netmask = "0.0.0.0";
-  route.gateway = gateway;
-  route.interface = interface;
-  route.metric = metric;
-  return add_route(route, ec);
+  // On Windows, we need to use a split default route approach (0.0.0.0/1 and 128.0.0.0/1)
+  // instead of 0.0.0.0/0 to ensure it takes precedence over existing default routes
+  // while still allowing the bypass route for the VPN server to work.
+
+  Route route1;
+  route1.destination = "0.0.0.0";
+  route1.netmask = "128.0.0.0";  // This is /1 in CIDR
+  route1.gateway = gateway;
+  route1.interface = interface;
+  route1.metric = metric;
+
+  Route route2;
+  route2.destination = "128.0.0.0";
+  route2.netmask = "128.0.0.0";  // This is /1 in CIDR
+  route2.gateway = gateway;
+  route2.interface = interface;
+  route2.metric = metric;
+
+  // Add both routes
+  if (!add_route(route1, ec)) {
+    return false;
+  }
+
+  if (!add_route(route2, ec)) {
+    // Try to remove the first route if the second fails
+    std::error_code cleanup_ec;
+    remove_route(route1, cleanup_ec);
+    return false;
+  }
+
+  return true;
 }
 
 bool RouteManager::remove_default_route(const std::string& interface, std::error_code& ec) {
-  Route route;
-  route.destination = "0.0.0.0";
-  route.netmask = "0.0.0.0";
-  route.interface = interface;
-  return remove_route(route, ec);
+  // Remove both halves of the split default route
+  Route route1;
+  route1.destination = "0.0.0.0";
+  route1.netmask = "128.0.0.0";  // This is /1 in CIDR
+  route1.interface = interface;
+
+  Route route2;
+  route2.destination = "128.0.0.0";
+  route2.netmask = "128.0.0.0";  // This is /1 in CIDR
+  route2.interface = interface;
+
+  // Try to remove both, even if one fails
+  bool result1 = remove_route(route1, ec);
+  std::error_code ec2;
+  bool result2 = remove_route(route2, ec2);
+
+  // Return success if at least one succeeded
+  return result1 || result2;
 }
 
 bool RouteManager::set_ip_forwarding(bool enable, std::error_code& ec) {
