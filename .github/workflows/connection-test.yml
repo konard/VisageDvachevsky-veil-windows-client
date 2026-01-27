@@ -78,7 +78,7 @@ jobs:
         run: |
           mkdir -p /tmp/veil-test
           # Decode base64-encoded key (CLIENT_KEY should be base64-encoded 32-byte key)
-          echo "$VEIL_CLIENT_KEY" | base64 -d > /tmp/veil-test/client.key
+          echo -n "$VEIL_CLIENT_KEY" | base64 -d > /tmp/veil-test/client.key
           # Verify key file size
           KEY_SIZE=$(stat -c%s /tmp/veil-test/client.key 2>/dev/null || echo 0)
           echo "Key file size: $KEY_SIZE bytes"
@@ -88,7 +88,7 @@ jobs:
           fi
           # Create obfuscation seed if provided
           if [[ -n "$VEIL_OBFUSCATION_SEED" ]]; then
-            echo "$VEIL_OBFUSCATION_SEED" | base64 -d > /tmp/veil-test/obfuscation.seed
+            echo -n "$VEIL_OBFUSCATION_SEED" | base64 -d > /tmp/veil-test/obfuscation.seed
             SEED_SIZE=$(stat -c%s /tmp/veil-test/obfuscation.seed 2>/dev/null || echo 0)
             echo "Obfuscation seed file size: $SEED_SIZE bytes"
           fi
