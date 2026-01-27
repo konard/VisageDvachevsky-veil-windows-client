@@ -140,6 +140,25 @@ int main(int argc, char* argv[]) {
     }
 
     if (arg == "--debug" || arg == "-d") {
+      // Check for administrator privileges
+      if (!elevation::is_elevated()) {
+        std::cerr << "========================================" << std::endl;
+        std::cerr << "ERROR: Administrator privileges required" << std::endl;
+        std::cerr << "========================================" << std::endl;
+        std::cerr << "\nThe VEIL VPN service requires administrator privileges to:" << std::endl;
+        std::cerr << "  - Create virtual network adapters (Wintun)" << std::endl;
+        std::cerr << "  - Configure IP addresses and routing" << std::endl;
+        std::cerr << "  - Manage network interfaces" << std::endl;
+        std::cerr << "\nPlease run this command from an elevated PowerShell or Command Prompt:" << std::endl;
+        std::cerr << "  1. Right-click PowerShell/Command Prompt" << std::endl;
+        std::cerr << "  2. Select 'Run as administrator'" << std::endl;
+        std::cerr << "  3. Run the command again" << std::endl;
+        std::cerr << "\nAlternatively, use this command to automatically elevate:" << std::endl;
+        std::cerr << "  Start-Process -Verb RunAs -FilePath \"" << argv[0] << "\" -ArgumentList \"--debug\"" << std::endl;
+        std::cerr << "========================================" << std::endl;
+        return 1;
+      }
+
       // Run in console mode for debugging
       std::cout << "Running in debug mode (press Ctrl+C to stop)..."
                 << std::endl;

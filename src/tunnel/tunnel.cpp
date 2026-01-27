@@ -37,17 +37,68 @@ std::string format_key_error(const std::string& key_type, const std::string& pat
 
 bool load_key_from_file(const std::string& path, std::vector<std::uint8_t>& key,
                         std::error_code& ec) {
+  LOG_DEBUG("Loading key from file: {}", path);
   std::ifstream file(path, std::ios::binary);
   if (!file) {
     ec = std::error_code(errno, std::generic_category());
+    LOG_ERROR("Failed to open key file '{}': {}", path, ec.message());
     return false;
   }
 
-  key.resize(32);
-  file.read(reinterpret_cast<char*>(key.data()), static_cast<std::streamsize>(key.size()));
-  if (file.gcount() != static_cast<std::streamsize>(key.size())) {
+  // First, determine the file size
+  file.seekg(0, std::ios::end);
+  auto file_size = file.tellg();
+  file.seekg(0, std::ios::beg);
+  LOG_DEBUG("Key file size: {} bytes", static_cast<long long>(file_size));
+
+  if (file_size < 32) {
+    LOG_ERROR("Key file '{}' is too small: {} bytes (expected at least 32)", path,
+              static_cast<long long>(file_size));
     ec = std::make_error_code(std::errc::io_error);
     return false;
+  }
+
+  if (file_size > 32) {
+    LOG_WARN("Key file '{}' is {} bytes (expected 32). Only first 32 bytes will be used.",
+             path, static_cast<long long>(file_size));
+
+    // Read all bytes to show what extra data is present
+    std::vector<std::uint8_t> all_bytes(static_cast<size_t>(file_size));
+    file.read(reinterpret_cast<char*>(all_bytes.data()), file_size);
+
+    // Log hex dump of extra bytes to diagnose the issue
+    if (file.gcount() == file_size && file_size > 32) {
+      std::string extra_hex;
+      for (size_t i = 32; i < static_cast<size_t>(file_size) && i < 44; ++i) {
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%02x ", all_bytes[i]);
+        extra_hex += buf;
+      }
+      LOG_WARN("  Extra bytes after position 32: {}", extra_hex);
+      LOG_WARN("  This likely means the key file has Windows line endings (CRLF) or was edited in Notepad.");
+      LOG_WARN("  FIX: The key should be exactly 32 bytes with no newlines or extra characters.");
+      LOG_WARN("  To fix: Copy the raw hex/base64 value WITHOUT any newlines or spaces.");
+    }
+
+    // Copy first 32 bytes to key
+    key.assign(all_bytes.begin(), all_bytes.begin() + 32);
+  } else {
+    key.resize(32);
+    file.read(reinterpret_cast<char*>(key.data()), static_cast<std::streamsize>(key.size()));
+    if (file.gcount() != static_cast<std::streamsize>(key.size())) {
+      LOG_ERROR("Failed to read 32 bytes from key file '{}': only {} bytes read",
+                path, file.gcount());
+      ec = std::make_error_code(std::errc::io_error);
+      return false;
+    }
+  }
+
+  LOG_DEBUG("Successfully read 32 bytes from key file");
+
+  // Log hex dump of key for debugging (first 8 bytes only for security)
+  if (key.size() >= 8) {
+    LOG_DEBUG("Key file content (first 8 bytes): {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+              key[0], key[1], key[2], key[3], key[4], key[5], key[6], key[7]);
   }
 
   return true;
@@ -70,6 +121,15 @@ bool Tunnel::initialize(std::error_code& ec) {
       return false;
     }
     LOG_DEBUG("Loaded pre-shared key from {}", config_.key_file);
+    // Log key fingerprint (first 4 bytes as hex) for debugging key mismatch issues
+    // This helps verify the same key is being used on client and server
+    // without revealing the full key
+    if (config_.psk.size() >= 4) {
+      LOG_DEBUG("PSK fingerprint (first 4 bytes): {:02x}{:02x}{:02x}{:02x}",
+                config_.psk[0], config_.psk[1], config_.psk[2], config_.psk[3]);
+    }
+  } else {
+    LOG_WARN("No pre-shared key file specified - connection will fail!");
   }
 
   // Generate ephemeral key pair for this session.
@@ -314,6 +374,19 @@ void Tunnel::on_udp_packet(std::span<const std::uint8_t> packet,
 bool Tunnel::perform_handshake(std::error_code& ec) {
   LOG_INFO("Performing handshake with {}:{}", config_.server_address, config_.server_port);
 
+  // Validate PSK before attempting handshake
+  if (config_.psk.empty()) {
+    ec = std::make_error_code(std::errc::invalid_argument);
+    LOG_ERROR("HANDSHAKE: PSK is empty - cannot perform handshake");
+    return false;
+  }
+  if (config_.psk.size() != 32) {
+    ec = std::make_error_code(std::errc::invalid_argument);
+    LOG_ERROR("HANDSHAKE: PSK size is {} bytes (expected 32)", config_.psk.size());
+    return false;
+  }
+  LOG_DEBUG("HANDSHAKE: PSK validated (32 bytes)");
+
   // Create handshake initiator.
   handshake::HandshakeInitiator initiator(config_.psk, config_.handshake_skew_tolerance);
 
@@ -329,6 +402,13 @@ bool Tunnel::perform_handshake(std::error_code& ec) {
   LOG_INFO("HANDSHAKE: Generated INIT message");
   LOG_INFO("  Size: {} bytes", init_msg.size());
   LOG_INFO("  Target: {}:{}", config_.server_address, config_.server_port);
+  // Log first few bytes of encrypted INIT for debugging (nonce is public, safe to log)
+  if (init_msg.size() >= 12) {
+    LOG_DEBUG("  Nonce (first 12 bytes): {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+              init_msg[0], init_msg[1], init_msg[2], init_msg[3],
+              init_msg[4], init_msg[5], init_msg[6], init_msg[7],
+              init_msg[8], init_msg[9], init_msg[10], init_msg[11]);
+  }
   LOG_INFO("========================================");
 
   // Send INIT message.

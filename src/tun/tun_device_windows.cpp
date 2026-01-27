@@ -236,6 +236,19 @@ bool TunDevice::open(const TunConfig& config, std::error_code& ec) {
   if (!impl_->adapter) {
     ec = last_error();
     LOG_ERROR("Failed to create Wintun adapter '{}': {}", device_name_, ec.message());
+
+    // Provide helpful error message for common issues
+    if (ec.value() == ERROR_ACCESS_DENIED) {
+      LOG_ERROR("========================================");
+      LOG_ERROR("ACCESS DENIED ERROR");
+      LOG_ERROR("========================================");
+      LOG_ERROR("Creating virtual network adapters requires administrator privileges.");
+      LOG_ERROR("Please ensure the service is running with administrator rights:");
+      LOG_ERROR("  - If using --debug mode: Run from elevated PowerShell/Command Prompt");
+      LOG_ERROR("  - If installed as service: The service should run as SYSTEM automatically");
+      LOG_ERROR("========================================");
+    }
+
     impl_.reset();
     return false;
   }

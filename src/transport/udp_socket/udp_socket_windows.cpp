@@ -132,14 +132,26 @@ bool UdpSocket::connect(const UdpEndpoint& remote, std::error_code& ec) {
   sockaddr_in addr{};
   if (!resolve(remote, addr)) {
     ec = std::make_error_code(std::errc::invalid_argument);
+    LOG_ERROR("[UDP] Failed to resolve endpoint for connect: {}:{}", remote.host, remote.port);
     return false;
   }
   SOCKET s = static_cast<SOCKET>(fd_);
-  if (::connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-    ec = last_error();
+  if (s == INVALID_SOCKET) {
+    ec = std::make_error_code(std::errc::bad_file_descriptor);
+    LOG_ERROR("[UDP] Cannot connect: socket is invalid");
     return false;
   }
+
+  LOG_DEBUG("[UDP] Connecting UDP socket to {}:{}", remote.host, remote.port);
+  if (::connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+    ec = last_error();
+    int wsa_error = WSAGetLastError();
+    LOG_ERROR("[UDP] connect() failed: WSA error {}, message: {}", wsa_error, ec.message());
+    return false;
+  }
+
   connected_ = remote;
+  LOG_INFO("[UDP] UDP socket connected to {}:{}", remote.host, remote.port);
   return true;
 }
 
@@ -153,7 +165,16 @@ bool UdpSocket::send(std::span<const std::uint8_t> data, const UdpEndpoint& remo
   }
 
   SOCKET s = static_cast<SOCKET>(fd_);
+  if (s == INVALID_SOCKET) {
+    ec = std::make_error_code(std::errc::bad_file_descriptor);
+    LOG_ERROR("[UDP] Socket is invalid (not opened or already closed)");
+    return false;
+  }
+
   LOG_INFO("[UDP] Sending {} bytes to {}:{}", data.size(), remote.host, remote.port);
+  LOG_DEBUG("[UDP] Socket handle: {}, target addr: {:08x}:{}",
+            static_cast<unsigned long long>(s),
+            ntohl(addr.sin_addr.s_addr), ntohs(addr.sin_port));
 
   const int sent = ::sendto(s, reinterpret_cast<const char*>(data.data()),
                              static_cast<int>(data.size()), 0,
@@ -163,6 +184,16 @@ bool UdpSocket::send(std::span<const std::uint8_t> data, const UdpEndpoint& remo
     ec = last_error();
     int wsa_error = WSAGetLastError();
     LOG_ERROR("[UDP] sendto() failed: WSA error {}, message: {}", wsa_error, ec.message());
+    // Log additional Windows-specific error context
+    if (wsa_error == WSAENETUNREACH) {
+      LOG_ERROR("[UDP] Network is unreachable - check routing and firewall");
+    } else if (wsa_error == WSAEHOSTUNREACH) {
+      LOG_ERROR("[UDP] Host is unreachable - check if server is reachable");
+    } else if (wsa_error == WSAEACCES) {
+      LOG_ERROR("[UDP] Permission denied - firewall may be blocking outgoing UDP");
+    } else if (wsa_error == WSAEINVAL) {
+      LOG_ERROR("[UDP] Invalid argument - socket may not be properly configured");
+    }
     return false;
   }
 
