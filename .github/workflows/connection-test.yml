@@ -14,12 +14,14 @@ on:
       - 'src/transport/**'
       - 'src/common/handshake/**'
       - 'tests/integration/connection_test.cpp'
+      - '.github/workflows/connection-test.yml'
   pull_request:
     paths:
       - 'src/tunnel/**'
       - 'src/transport/**'
       - 'src/common/handshake/**'
       - 'tests/integration/connection_test.cpp'
+      - '.github/workflows/connection-test.yml'
 
 jobs:
   connection-test:
@@ -133,6 +135,58 @@ jobs:
           VEIL_TEST_TIMEOUT_MS="$((TIMEOUT_SECS * 1000))" \
           ./build/tests/integration/veil_integration_connection --gtest_filter="*LiveServerHandshake*" \
             || echo "Connection test completed (check results above)"
+
+      - name: Verify network connectivity (ping external services)
+        if: steps.check-secrets.outputs.secrets_available == 'true'
+        timeout-minutes: 1
+        run: |
+          echo "=========================================="
+          echo "Verifying network connectivity to external services"
+          echo "=========================================="
+
+          # Test DNS resolution and connectivity to Google's public DNS
+          echo "Testing DNS resolution and ping to 8.8.8.8 (Google DNS)..."
+          if ping -c 3 -W 5 8.8.8.8; then
+            echo "✓ Successfully pinged 8.8.8.8"
+          else
+            echo "✗ Failed to ping 8.8.8.8"
+            exit 1
+          fi
+
+          # Test HTTP connectivity to a reliable service
+          echo ""
+          echo "Testing HTTP connectivity to google.com..."
+          if curl -f -s -m 10 --head https://www.google.com > /dev/null; then
+            echo "✓ Successfully connected to google.com via HTTPS"
+          else
+            echo "✗ Failed to connect to google.com"
+            exit 1
+          fi
+
+          # Test alternative DNS service (Cloudflare)
+          echo ""
+          echo "Testing connectivity to 1.1.1.1 (Cloudflare DNS)..."
+          if ping -c 3 -W 5 1.1.1.1; then
+            echo "✓ Successfully pinged 1.1.1.1"
+          else
+            echo "✗ Failed to ping 1.1.1.1"
+            exit 1
+          fi
+
+          echo ""
+          echo "=========================================="
+          echo "✓ All network connectivity tests passed!"
+          echo "=========================================="
+
+          # Add summary to GitHub Actions
+          echo "## Network Connectivity Verification" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Successfully verified connectivity to external services:" >> $GITHUB_STEP_SUMMARY
+          echo "- Google DNS (8.8.8.8)" >> $GITHUB_STEP_SUMMARY
+          echo "- Cloudflare DNS (1.1.1.1)" >> $GITHUB_STEP_SUMMARY
+          echo "- Google.com (HTTPS)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "This confirms the test environment has proper network access and can reach external services." >> $GITHUB_STEP_SUMMARY
 
       - name: Cleanup key files
         if: always() && steps.check-secrets.outputs.secrets_available == 'true'
