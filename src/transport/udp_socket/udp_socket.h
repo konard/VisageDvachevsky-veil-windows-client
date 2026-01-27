@@ -54,11 +54,19 @@ class UdpSocket {
   // Returns 0 if the socket is not open or on error.
   std::uint16_t local_port() const;
 
+#ifdef _WIN32
+  // Bind the socket to a specific network interface by index.
+  // This ensures packets are sent through the physical interface even when VPN routes are active.
+  // interface_index should be obtained from GetBestInterface() or GetAdaptersAddresses().
+  bool bind_to_interface(std::uint32_t interface_index, std::error_code& ec);
+#endif
+
  private:
 #ifdef _WIN32
   // On Windows, we use SOCKET type (unsigned __int64 on 64-bit, unsigned int on 32-bit).
   // Using uintptr_t provides a portable representation that works with INVALID_SOCKET.
   std::uintptr_t fd_{static_cast<std::uintptr_t>(~0ULL)};  // INVALID_SOCKET
+  std::uint32_t bound_interface_index_{0};  // Interface index if bound via IP_BOUND_IF.
 #else
   int fd_{-1};
   int epoll_fd_{-1};  // Persistent epoll FD to avoid creating/destroying on every poll() call.

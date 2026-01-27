@@ -7,6 +7,7 @@
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <iphlpapi.h>  // For GetBestInterface
 
 #include <array>
 #include <chrono>
@@ -15,6 +16,13 @@
 #include <vector>
 
 #include "common/logging/logger.h"
+
+#pragma comment(lib, "iphlpapi.lib")
+
+// IP_BOUND_IF may not be defined in older SDKs
+#ifndef IP_BOUND_IF
+#define IP_BOUND_IF 31
+#endif
 
 namespace {
 std::error_code last_error() {
@@ -128,6 +136,30 @@ bool UdpSocket::open(std::uint16_t bind_port, bool reuse_port, std::error_code& 
   return true;
 }
 
+bool UdpSocket::bind_to_interface(std::uint32_t interface_index, std::error_code& ec) {
+  SOCKET s = static_cast<SOCKET>(fd_);
+  if (s == INVALID_SOCKET) {
+    ec = std::make_error_code(std::errc::bad_file_descriptor);
+    LOG_ERROR("[UDP] Cannot bind to interface: socket is invalid");
+    return false;
+  }
+
+  // Use IP_BOUND_IF to bind the socket to a specific interface.
+  // This ensures all outgoing packets use this interface regardless of routing table changes.
+  // The interface_index should be in host byte order.
+  DWORD index = static_cast<DWORD>(interface_index);
+  if (setsockopt(s, IPPROTO_IP, IP_BOUND_IF, reinterpret_cast<const char*>(&index), sizeof(index)) != 0) {
+    ec = last_error();
+    int wsa_error = WSAGetLastError();
+    LOG_ERROR("[UDP] setsockopt(IP_BOUND_IF) failed: WSA error {}, message: {}", wsa_error, ec.message());
+    return false;
+  }
+
+  bound_interface_index_ = interface_index;
+  LOG_INFO("[UDP] Socket bound to interface index {}", interface_index);
+  return true;
+}
+
 bool UdpSocket::connect(const UdpEndpoint& remote, std::error_code& ec) {
   sockaddr_in addr{};
   if (!resolve(remote, addr)) {
@@ -142,6 +174,28 @@ bool UdpSocket::connect(const UdpEndpoint& remote, std::error_code& ec) {
     return false;
   }
 
+  // Before connecting, determine the best interface to reach the remote host
+  // and bind the socket to that interface. This is CRITICAL for VPN clients
+  // because once VPN routes are configured, we need to ensure that UDP packets
+  // to the VPN server continue to use the physical interface, not the VPN tunnel.
+  DWORD best_interface = 0;
+  DWORD result = GetBestInterface(addr.sin_addr.s_addr, &best_interface);
+  if (result == NO_ERROR && best_interface != 0) {
+    LOG_INFO("[UDP] Best interface for {}:{} is index {}", remote.host, remote.port, best_interface);
+
+    // Bind the socket to this interface so it continues to use it even after
+    // VPN routing is configured. This prevents the "routing loop" issue where
+    // VPN packets get sent through the VPN tunnel instead of the physical interface.
+    std::error_code bind_ec;
+    if (!bind_to_interface(best_interface, bind_ec)) {
+      // Log warning but don't fail - the connection may still work without interface binding
+      LOG_WARN("[UDP] Failed to bind to interface {}: {}. Continuing without interface binding.",
+               best_interface, bind_ec.message());
+    }
+  } else {
+    LOG_WARN("[UDP] GetBestInterface() failed or returned 0: error {}. Continuing without interface binding.", result);
+  }
+
   LOG_DEBUG("[UDP] Connecting UDP socket to {}:{}", remote.host, remote.port);
   if (::connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
     ec = last_error();
@@ -152,6 +206,18 @@ bool UdpSocket::connect(const UdpEndpoint& remote, std::error_code& ec) {
 
   connected_ = remote;
   LOG_INFO("[UDP] UDP socket connected to {}:{}", remote.host, remote.port);
+
+  // Log the local address after connect to verify interface binding worked
+  sockaddr_in local_addr{};
+  int local_addr_len = sizeof(local_addr);
+  if (getsockname(s, reinterpret_cast<sockaddr*>(&local_addr), &local_addr_len) == 0) {
+    std::array<char, INET_ADDRSTRLEN> local_addr_str{};
+    if (inet_ntop(AF_INET, &local_addr.sin_addr, local_addr_str.data(),
+                  static_cast<socklen_t>(local_addr_str.size())) != nullptr) {
+      LOG_INFO("[UDP] Local address after connect: {}:{}", local_addr_str.data(), ntohs(local_addr.sin_port));
+    }
+  }
+
   return true;
 }
 
