@@ -340,19 +340,46 @@ bool Tunnel::perform_handshake(std::error_code& ec) {
   LOG_INFO("HANDSHAKE: INIT sent successfully, waiting for RESPONSE...");
 
   // Wait for RESPONSE.
+  // Use short polling intervals to allow checking running_ flag and respond quickly to stop().
   std::vector<std::uint8_t> response;
   bool received = false;
   transport::UdpEndpoint response_endpoint;
   int timeout_ms = static_cast<int>(config_.handshake_skew_tolerance.count());
   LOG_DEBUG("HANDSHAKE: Polling for response (timeout: {}ms)", timeout_ms);
 
-  udp_socket_.poll(
-      [&response, &received, &response_endpoint](const transport::UdpPacket& pkt) {
-        response = pkt.data;
-        response_endpoint = pkt.remote;
-        received = true;
-      },
-      timeout_ms, ec);
+  auto start_time = now_fn_();
+  const auto timeout_duration = std::chrono::milliseconds(timeout_ms);
+  constexpr int poll_interval_ms = 100;  // Poll in 100ms chunks to check running_ flag.
+
+  while (!received && running_.load()) {
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now_fn_() - start_time);
+    if (elapsed >= timeout_duration) {
+      break;  // Timeout reached.
+    }
+
+    // Calculate remaining time, but don't exceed poll_interval_ms.
+    auto remaining = timeout_duration - elapsed;
+    int current_poll_ms = std::min(poll_interval_ms, static_cast<int>(remaining.count()));
+
+    udp_socket_.poll(
+        [&response, &received, &response_endpoint](const transport::UdpPacket& pkt) {
+          response = pkt.data;
+          response_endpoint = pkt.remote;
+          received = true;
+        },
+        current_poll_ms, ec);
+
+    if (received) {
+      break;  // Got response!
+    }
+
+    // Check if we should stop (user pressed disconnect).
+    if (!running_.load()) {
+      LOG_INFO("HANDSHAKE: Aborted by user disconnect");
+      ec = std::make_error_code(std::errc::operation_canceled);
+      return false;
+    }
+  }
 
   if (!received || response.empty()) {
     ec = std::make_error_code(std::errc::timed_out);
@@ -407,6 +434,13 @@ bool Tunnel::send_packet(std::span<const std::uint8_t> data) {
 }
 
 void Tunnel::handle_reconnect() {
+  // Check if tunnel has been stopped - don't reconnect if user disconnected.
+  if (!running_.load()) {
+    LOG_DEBUG("Reconnect aborted: tunnel stopped");
+    set_state(ConnectionState::kDisconnected);
+    return;
+  }
+
   if (!config_.auto_reconnect) {
     set_state(ConnectionState::kDisconnected);
     return;
