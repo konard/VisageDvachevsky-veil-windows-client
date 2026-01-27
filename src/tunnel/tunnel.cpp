@@ -61,18 +61,46 @@ bool load_key_from_file(const std::string& path, std::vector<std::uint8_t>& key,
   if (file_size > 32) {
     LOG_WARN("Key file '{}' is {} bytes (expected 32). Only first 32 bytes will be used.",
              path, static_cast<long long>(file_size));
-  }
 
-  key.resize(32);
-  file.read(reinterpret_cast<char*>(key.data()), static_cast<std::streamsize>(key.size()));
-  if (file.gcount() != static_cast<std::streamsize>(key.size())) {
-    LOG_ERROR("Failed to read 32 bytes from key file '{}': only {} bytes read",
-              path, file.gcount());
-    ec = std::make_error_code(std::errc::io_error);
-    return false;
+    // Read all bytes to show what extra data is present
+    std::vector<std::uint8_t> all_bytes(static_cast<size_t>(file_size));
+    file.read(reinterpret_cast<char*>(all_bytes.data()), file_size);
+
+    // Log hex dump of extra bytes to diagnose the issue
+    if (file.gcount() == file_size && file_size > 32) {
+      std::string extra_hex;
+      for (size_t i = 32; i < static_cast<size_t>(file_size) && i < 44; ++i) {
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%02x ", all_bytes[i]);
+        extra_hex += buf;
+      }
+      LOG_WARN("  Extra bytes after position 32: {}", extra_hex);
+      LOG_WARN("  This likely means the key file has Windows line endings (CRLF) or was edited in Notepad.");
+      LOG_WARN("  FIX: The key should be exactly 32 bytes with no newlines or extra characters.");
+      LOG_WARN("  To fix: Copy the raw hex/base64 value WITHOUT any newlines or spaces.");
+    }
+
+    // Copy first 32 bytes to key
+    key.assign(all_bytes.begin(), all_bytes.begin() + 32);
+  } else {
+    key.resize(32);
+    file.read(reinterpret_cast<char*>(key.data()), static_cast<std::streamsize>(key.size()));
+    if (file.gcount() != static_cast<std::streamsize>(key.size())) {
+      LOG_ERROR("Failed to read 32 bytes from key file '{}': only {} bytes read",
+                path, file.gcount());
+      ec = std::make_error_code(std::errc::io_error);
+      return false;
+    }
   }
 
   LOG_DEBUG("Successfully read 32 bytes from key file");
+
+  // Log hex dump of key for debugging (first 8 bytes only for security)
+  if (key.size() >= 8) {
+    LOG_DEBUG("Key file content (first 8 bytes): {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+              key[0], key[1], key[2], key[3], key[4], key[5], key[6], key[7]);
+  }
+
   return true;
 }
 }  // namespace
