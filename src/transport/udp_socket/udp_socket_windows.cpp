@@ -136,6 +136,55 @@ bool UdpSocket::open(std::uint16_t bind_port, bool reuse_port, std::error_code& 
   return true;
 }
 
+// Get the IP address of a network interface by its index
+bool get_interface_ip(DWORD interface_index, IN_ADDR& out_addr, std::error_code& ec) {
+  // Allocate buffer for adapter addresses
+  ULONG buffer_size = 15000;  // Recommended initial size
+  std::vector<BYTE> buffer(buffer_size);
+  PIP_ADAPTER_ADDRESSES adapter_addresses = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(buffer.data());
+
+  // Get adapter addresses
+  ULONG result = GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_PREFIX, nullptr,
+                                      adapter_addresses, &buffer_size);
+
+  if (result == ERROR_BUFFER_OVERFLOW) {
+    // Buffer too small, resize and try again
+    buffer.resize(buffer_size);
+    adapter_addresses = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(buffer.data());
+    result = GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_PREFIX, nullptr,
+                                  adapter_addresses, &buffer_size);
+  }
+
+  if (result != NO_ERROR) {
+    ec = std::error_code(result, std::system_category());
+    LOG_ERROR("[UDP] GetAdaptersAddresses failed: {}", ec.message());
+    return false;
+  }
+
+  // Find the adapter with matching interface index
+  for (PIP_ADAPTER_ADDRESSES adapter = adapter_addresses; adapter != nullptr; adapter = adapter->Next) {
+    if (adapter->IfIndex == interface_index || adapter->Ipv6IfIndex == interface_index) {
+      // Found the adapter, now get its first unicast IPv4 address
+      for (PIP_ADAPTER_UNICAST_ADDRESS unicast = adapter->FirstUnicastAddress;
+           unicast != nullptr; unicast = unicast->Next) {
+        if (unicast->Address.lpSockaddr->sa_family == AF_INET) {
+          sockaddr_in* addr_in = reinterpret_cast<sockaddr_in*>(unicast->Address.lpSockaddr);
+          out_addr = addr_in->sin_addr;
+
+          std::array<char, INET_ADDRSTRLEN> addr_str{};
+          inet_ntop(AF_INET, &out_addr, addr_str.data(), static_cast<socklen_t>(addr_str.size()));
+          LOG_INFO("[UDP] Found IP {} for interface index {}", addr_str.data(), interface_index);
+          return true;
+        }
+      }
+    }
+  }
+
+  ec = std::make_error_code(std::errc::no_such_device);
+  LOG_ERROR("[UDP] No IPv4 address found for interface index {}", interface_index);
+  return false;
+}
+
 bool UdpSocket::bind_to_interface(std::uint32_t interface_index, std::error_code& ec) {
   SOCKET s = static_cast<SOCKET>(fd_);
   if (s == INVALID_SOCKET) {
@@ -144,19 +193,77 @@ bool UdpSocket::bind_to_interface(std::uint32_t interface_index, std::error_code
     return false;
   }
 
-  // Use IP_BOUND_IF to bind the socket to a specific interface.
-  // This ensures all outgoing packets use this interface regardless of routing table changes.
-  // The interface_index should be in host byte order.
-  DWORD index = static_cast<DWORD>(interface_index);
-  if (setsockopt(s, IPPROTO_IP, IP_BOUND_IF, reinterpret_cast<const char*>(&index), sizeof(index)) != 0) {
+  // Get the IP address of the interface
+  IN_ADDR interface_ip;
+  if (!get_interface_ip(static_cast<DWORD>(interface_index), interface_ip, ec)) {
+    LOG_ERROR("[UDP] Failed to get IP address for interface {}: {}", interface_index, ec.message());
+    return false;
+  }
+
+  // Rebind the socket to the specific interface IP address
+  // First, we need to get the current bound port
+  sockaddr_in current_addr{};
+  int addr_len = sizeof(current_addr);
+  if (getsockname(s, reinterpret_cast<sockaddr*>(&current_addr), &addr_len) != 0) {
     ec = last_error();
-    int wsa_error = WSAGetLastError();
-    LOG_ERROR("[UDP] setsockopt(IP_BOUND_IF) failed: WSA error {}, message: {}", wsa_error, ec.message());
+    LOG_ERROR("[UDP] getsockname() failed: {}", ec.message());
+    return false;
+  }
+  std::uint16_t bound_port = ntohs(current_addr.sin_port);
+
+  // Close the current socket
+  closesocket(s);
+
+  // Create a new socket
+  s = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+  if (s == INVALID_SOCKET) {
+    ec = last_error();
+    LOG_ERROR("[UDP] socket() failed during rebind: {}", ec.message());
+    return false;
+  }
+  fd_ = static_cast<std::uintptr_t>(s);
+
+  // Set non-blocking mode
+  if (!set_nonblocking(s)) {
+    ec = last_error();
+    LOG_ERROR("[UDP] Failed to set non-blocking mode during rebind: {}", ec.message());
+    closesocket(s);
+    fd_ = static_cast<std::uintptr_t>(INVALID_SOCKET);
+    return false;
+  }
+
+  // Configure socket options
+  const char enable = 1;
+  if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) != 0) {
+    ec = last_error();
+    LOG_ERROR("[UDP] setsockopt(SO_REUSEADDR) failed during rebind: {}", ec.message());
+    closesocket(s);
+    fd_ = static_cast<std::uintptr_t>(INVALID_SOCKET);
+    return false;
+  }
+
+  // Bind to the specific interface IP and the same port
+  sockaddr_in bind_addr{};
+  bind_addr.sin_family = AF_INET;
+  bind_addr.sin_port = htons(bound_port);
+  bind_addr.sin_addr = interface_ip;
+
+  if (::bind(s, reinterpret_cast<sockaddr*>(&bind_addr), sizeof(bind_addr)) != 0) {
+    ec = last_error();
+    std::array<char, INET_ADDRSTRLEN> addr_str{};
+    inet_ntop(AF_INET, &interface_ip, addr_str.data(), static_cast<socklen_t>(addr_str.size()));
+    LOG_ERROR("[UDP] bind() to {}:{} failed during interface rebind: {}",
+              addr_str.data(), bound_port, ec.message());
+    closesocket(s);
+    fd_ = static_cast<std::uintptr_t>(INVALID_SOCKET);
     return false;
   }
 
   bound_interface_index_ = interface_index;
-  LOG_INFO("[UDP] Socket bound to interface index {}", interface_index);
+  std::array<char, INET_ADDRSTRLEN> addr_str{};
+  inet_ntop(AF_INET, &interface_ip, addr_str.data(), static_cast<socklen_t>(addr_str.size()));
+  LOG_INFO("[UDP] Socket rebound to {}:{} (interface index {})",
+           addr_str.data(), bound_port, interface_index);
   return true;
 }
 
@@ -194,6 +301,15 @@ bool UdpSocket::connect(const UdpEndpoint& remote, std::error_code& ec) {
     }
   } else {
     LOG_WARN("[UDP] GetBestInterface() failed or returned 0: error {}. Continuing without interface binding.", result);
+  }
+
+  // After bind_to_interface(), the socket handle may have changed (due to rebinding)
+  // Get the updated socket handle
+  s = static_cast<SOCKET>(fd_);
+  if (s == INVALID_SOCKET) {
+    ec = std::make_error_code(std::errc::bad_file_descriptor);
+    LOG_ERROR("[UDP] Socket is invalid after interface binding");
+    return false;
   }
 
   LOG_DEBUG("[UDP] Connecting UDP socket to {}:{}", remote.host, remote.port);
