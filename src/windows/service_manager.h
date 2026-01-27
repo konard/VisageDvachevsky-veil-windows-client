@@ -30,8 +30,13 @@ class ServiceManager {
   // Uninstall the service
   static bool uninstall(std::string& error);
 
-  // Start the service
+  // Start the service (returns immediately after initiating start)
   static bool start(std::string& error);
+
+  // Start the service and wait for it to reach SERVICE_RUNNING state
+  // timeout_ms: Maximum time to wait for the service to start (default: 30 seconds)
+  // Returns true if service reaches SERVICE_RUNNING within the timeout
+  static bool start_and_wait(std::string& error, DWORD timeout_ms = 30000);
 
   // Stop the service
   static bool stop(std::string& error);

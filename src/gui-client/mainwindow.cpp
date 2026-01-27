@@ -1178,10 +1178,10 @@ bool MainWindow::ensureServiceRunning() {
             // Verify installation succeeded
             if (ServiceManager::is_installed()) {
               qDebug() << "ensureServiceRunning: Service installation verified, attempting to start...";
-              // Try to start the service
+              // Try to start the service and wait for it to be ready
               std::string error;
-              if (ServiceManager::start(error)) {
-                qDebug() << "ensureServiceRunning: Service started successfully";
+              if (ServiceManager::start_and_wait(error)) {
+                qDebug() << "ensureServiceRunning: Service started and is now running";
                 statusBar()->showMessage(tr("VEIL service started successfully"), 3000);
                 return true;
               } else {
@@ -1228,9 +1228,9 @@ bool MainWindow::ensureServiceRunning() {
           qDebug() << "ensureServiceRunning: Service installed successfully, attempting to start...";
           statusBar()->showMessage(tr("VEIL service installed successfully"), 3000);
 
-          // Try to start the service
-          if (ServiceManager::start(error)) {
-            qDebug() << "ensureServiceRunning: Service started successfully";
+          // Try to start the service and wait for it to be ready
+          if (ServiceManager::start_and_wait(error)) {
+            qDebug() << "ensureServiceRunning: Service started and is now running";
             statusBar()->showMessage(tr("VEIL service started successfully"), 3000);
             return true;
           } else {
@@ -1257,13 +1257,16 @@ bool MainWindow::ensureServiceRunning() {
     }
   }
 
-  // Service is installed but not running - try to start it
+  // Service is installed but not running - try to start it and wait for it to be ready
   qDebug() << "ensureServiceRunning: Service is installed but not running, attempting to start...";
   statusBar()->showMessage(tr("Starting VEIL service..."));
 
   std::string error;
-  if (ServiceManager::start(error)) {
-    qDebug() << "ensureServiceRunning: Service started successfully";
+  // Use start_and_wait() to ensure the service is fully running before returning
+  // This prevents race conditions where the GUI tries to connect before the
+  // service has created the IPC Named Pipe
+  if (ServiceManager::start_and_wait(error)) {
+    qDebug() << "ensureServiceRunning: Service started and is now running";
     statusBar()->showMessage(tr("VEIL service started successfully"), 3000);
     return true;
   }

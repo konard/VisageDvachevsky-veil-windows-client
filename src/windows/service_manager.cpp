@@ -163,6 +163,115 @@ bool ServiceManager::start(std::string& error) {
   return true;
 }
 
+bool ServiceManager::start_and_wait(std::string& error, DWORD timeout_ms) {
+  SC_HANDLE scm = OpenSCManagerA(nullptr, nullptr, SC_MANAGER_CONNECT);
+  if (!scm) {
+    error = "Failed to open Service Control Manager: " +
+            std::to_string(GetLastError());
+    return false;
+  }
+
+  SC_HANDLE service = OpenServiceA(scm, kServiceName,
+                                   SERVICE_START | SERVICE_QUERY_STATUS);
+  if (!service) {
+    error = "Failed to open service: " + std::to_string(GetLastError());
+    CloseServiceHandle(scm);
+    return false;
+  }
+
+  // Check if already running
+  SERVICE_STATUS_PROCESS status_process;
+  DWORD bytes_needed;
+  if (QueryServiceStatusEx(service, SC_STATUS_PROCESS_INFO,
+                           reinterpret_cast<LPBYTE>(&status_process),
+                           sizeof(status_process), &bytes_needed)) {
+    if (status_process.dwCurrentState == SERVICE_RUNNING) {
+      LOG_INFO("Service '{}' is already running", kServiceName);
+      CloseServiceHandle(service);
+      CloseServiceHandle(scm);
+      return true;
+    }
+  }
+
+  // Start the service
+  if (!StartServiceA(service, 0, nullptr)) {
+    DWORD err = GetLastError();
+    if (err != ERROR_SERVICE_ALREADY_RUNNING) {
+      error = "Failed to start service: " + std::to_string(err);
+      CloseServiceHandle(service);
+      CloseServiceHandle(scm);
+      return false;
+    }
+    // If already running, that's fine - continue to wait
+  }
+
+  LOG_INFO("Service '{}' start initiated, waiting for it to become running...",
+           kServiceName);
+
+  // Wait for the service to reach SERVICE_RUNNING state
+  DWORD start_tick = GetTickCount();
+  DWORD wait_time = 250;  // Start with 250ms poll interval
+  DWORD old_checkpoint = 0;
+
+  while (true) {
+    // Query current status
+    if (!QueryServiceStatusEx(service, SC_STATUS_PROCESS_INFO,
+                              reinterpret_cast<LPBYTE>(&status_process),
+                              sizeof(status_process), &bytes_needed)) {
+      error = "Failed to query service status: " +
+              std::to_string(GetLastError());
+      CloseServiceHandle(service);
+      CloseServiceHandle(scm);
+      return false;
+    }
+
+    // Check if running
+    if (status_process.dwCurrentState == SERVICE_RUNNING) {
+      LOG_INFO("Service '{}' is now running (waited {}ms)", kServiceName,
+               GetTickCount() - start_tick);
+      CloseServiceHandle(service);
+      CloseServiceHandle(scm);
+      return true;
+    }
+
+    // Check if failed to start
+    if (status_process.dwCurrentState != SERVICE_START_PENDING) {
+      error = "Service failed to start (state: " +
+              std::to_string(status_process.dwCurrentState) + ")";
+      CloseServiceHandle(service);
+      CloseServiceHandle(scm);
+      return false;
+    }
+
+    // Check timeout
+    if (GetTickCount() - start_tick > timeout_ms) {
+      error = "Timeout waiting for service to start (timeout: " +
+              std::to_string(timeout_ms) + "ms)";
+      CloseServiceHandle(service);
+      CloseServiceHandle(scm);
+      return false;
+    }
+
+    // Calculate wait time based on service hint
+    if (status_process.dwWaitHint > 0) {
+      wait_time = status_process.dwWaitHint / 10;
+      // Clamp wait time between 100ms and 5000ms
+      if (wait_time < 100) wait_time = 100;
+      if (wait_time > 5000) wait_time = 5000;
+    }
+
+    // Check if checkpoint is progressing
+    if (status_process.dwCheckPoint > old_checkpoint) {
+      // Service is making progress, reset our timeout tracking
+      old_checkpoint = status_process.dwCheckPoint;
+    }
+
+    LOG_DEBUG("Service '{}' starting (checkpoint: {}, waiting {}ms)...",
+              kServiceName, status_process.dwCheckPoint, wait_time);
+    Sleep(wait_time);
+  }
+}
+
 bool ServiceManager::stop(std::string& error) {
   SC_HANDLE scm = OpenSCManagerA(nullptr, nullptr, SC_MANAGER_CONNECT);
   if (!scm) {
