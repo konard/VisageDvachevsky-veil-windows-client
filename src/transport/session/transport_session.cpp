@@ -39,6 +39,15 @@ TransportSession::TransportSession(const handshake::HandshakeSession& handshake_
       fragment_reassembly_(config_.fragment_buffer_size),
       retransmit_buffer_(config_.retransmit_config, now_fn_) {
   LOG_DEBUG("TransportSession created with session_id={}", current_session_id_);
+  // Log key fingerprints for debugging (only first 4 bytes - safe to log)
+  LOG_DEBUG("  send_key fingerprint: {:02x}{:02x}{:02x}{:02x}",
+            keys_.send_key[0], keys_.send_key[1], keys_.send_key[2], keys_.send_key[3]);
+  LOG_DEBUG("  recv_key fingerprint: {:02x}{:02x}{:02x}{:02x}",
+            keys_.recv_key[0], keys_.recv_key[1], keys_.recv_key[2], keys_.recv_key[3]);
+  LOG_DEBUG("  send_nonce fingerprint: {:02x}{:02x}{:02x}{:02x}",
+            keys_.send_nonce[0], keys_.send_nonce[1], keys_.send_nonce[2], keys_.send_nonce[3]);
+  LOG_DEBUG("  recv_nonce fingerprint: {:02x}{:02x}{:02x}{:02x}",
+            keys_.recv_nonce[0], keys_.recv_nonce[1], keys_.recv_nonce[2], keys_.recv_nonce[3]);
 }
 
 TransportSession::~TransportSession() {
@@ -105,6 +114,13 @@ std::optional<std::vector<mux::MuxFrame>> TransportSession::decrypt_packet(
   // obfuscation here to recover the real sequence for nonce derivation and replay checking.
   const std::uint64_t sequence = crypto::deobfuscate_sequence(obfuscated_sequence, recv_seq_obfuscation_key_);
 
+  // Log packet details for debugging
+  LOG_DEBUG("decrypt_packet: size={}, obfuscated_seq={:#018x}, deobfuscated_seq={}",
+            ciphertext.size(), obfuscated_sequence, sequence);
+  LOG_DEBUG("  first 8 bytes: {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+            ciphertext[0], ciphertext[1], ciphertext[2], ciphertext[3],
+            ciphertext[4], ciphertext[5], ciphertext[6], ciphertext[7]);
+
   // Replay check.
   if (!replay_window_.mark_and_check(sequence)) {
     LOG_DEBUG("Packet replay detected: sequence={}", sequence);
@@ -119,7 +135,8 @@ std::optional<std::vector<mux::MuxFrame>> TransportSession::decrypt_packet(
   auto ciphertext_body = ciphertext.subspan(8);
   auto decrypted = crypto::aead_decrypt(keys_.recv_key, nonce, {}, ciphertext_body);
   if (!decrypted) {
-    LOG_DEBUG("Decryption failed for sequence={}", sequence);
+    LOG_DEBUG("Decryption FAILED for sequence={}, nonce={:02x}{:02x}{:02x}{:02x}..., ciphertext_body_size={}",
+              sequence, nonce[0], nonce[1], nonce[2], nonce[3], ciphertext_body.size());
     ++stats_.packets_dropped_decrypt;
     return std::nullopt;
   }
@@ -274,6 +291,10 @@ std::vector<std::uint8_t> TransportSession::build_encrypted_packet(const mux::Mu
   // increasing values). Now we obfuscate it using ChaCha20 with a session-specific key.
   // The receiver can deobfuscate using the same key to recover the sequence for nonce derivation.
   const std::uint64_t obfuscated_sequence = crypto::obfuscate_sequence(send_sequence_, send_seq_obfuscation_key_);
+
+  // Log packet details for debugging
+  LOG_DEBUG("build_encrypted_packet: seq={}, obfuscated_seq={:#018x}, plaintext_size={}, ciphertext_size={}",
+            send_sequence_, obfuscated_sequence, plaintext.size(), ciphertext.size());
 
   // Prepend obfuscated sequence number (8 bytes big-endian).
   std::vector<std::uint8_t> packet;

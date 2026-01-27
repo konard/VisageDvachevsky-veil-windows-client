@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "common/crypto/random.h"
+#include "common/logging/logger.h"
 namespace {
 // Internal magic bytes used inside encrypted payload (not visible to DPI)
 constexpr std::array<std::uint8_t, 2> kMagic{'H', 'S'};
@@ -312,6 +313,17 @@ std::optional<HandshakeSession> HandshakeInitiator::consume_response(
   const auto info = derive_info(init_pub, responder_pub);
   const auto keys = crypto::derive_session_keys(shared, psk_, info, true);
 
+  // Log key derivation details for debugging
+  LOG_DEBUG("INITIATOR: Derived session keys for session_id={}", session_id);
+  LOG_DEBUG("  init_pub fingerprint: {:02x}{:02x}{:02x}{:02x}",
+            init_pub[0], init_pub[1], init_pub[2], init_pub[3]);
+  LOG_DEBUG("  resp_pub fingerprint: {:02x}{:02x}{:02x}{:02x}",
+            responder_pub[0], responder_pub[1], responder_pub[2], responder_pub[3]);
+  LOG_DEBUG("  send_key fingerprint: {:02x}{:02x}{:02x}{:02x}",
+            keys.send_key[0], keys.send_key[1], keys.send_key[2], keys.send_key[3]);
+  LOG_DEBUG("  recv_key fingerprint: {:02x}{:02x}{:02x}{:02x}",
+            keys.recv_key[0], keys.recv_key[1], keys.recv_key[2], keys.recv_key[3]);
+
   // SECURITY: Clear shared secret immediately after key derivation
   sodium_memzero(shared.data(), shared.size());
 
@@ -440,6 +452,20 @@ std::optional<HandshakeResponder::Result> HandshakeResponder::handle_init(
   auto shared = crypto::compute_shared_secret(responder_keys.secret_key, init_pub);
   const auto info = derive_info(init_pub, responder_keys.public_key);
   const auto session_keys = crypto::derive_session_keys(shared, psk_, info, false);
+
+  // Debug logging for key derivation troubleshooting
+  LOG_DEBUG("RESPONDER: Derived session keys for session_id={}", session_id);
+  LOG_DEBUG("  init_pub fingerprint: {:02x}{:02x}{:02x}{:02x}",
+            init_pub[0], init_pub[1], init_pub[2], init_pub[3]);
+  LOG_DEBUG("  resp_pub fingerprint: {:02x}{:02x}{:02x}{:02x}",
+            responder_keys.public_key[0], responder_keys.public_key[1],
+            responder_keys.public_key[2], responder_keys.public_key[3]);
+  LOG_DEBUG("  send_key fingerprint: {:02x}{:02x}{:02x}{:02x}",
+            session_keys.send_key[0], session_keys.send_key[1],
+            session_keys.send_key[2], session_keys.send_key[3]);
+  LOG_DEBUG("  recv_key fingerprint: {:02x}{:02x}{:02x}{:02x}",
+            session_keys.recv_key[0], session_keys.recv_key[1],
+            session_keys.recv_key[2], session_keys.recv_key[3]);
 
   // SECURITY: Clear shared secret immediately after key derivation
   sodium_memzero(shared.data(), shared.size());
