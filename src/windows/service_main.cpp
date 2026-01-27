@@ -423,17 +423,19 @@ void configure_routes() {
 
       // Add bypass route for VPN server via original gateway
       // This ensures VPN packets still go through the real network
+      // Use a very low metric (1) to ensure this route takes priority over VPN routes
       tun::Route bypass;
       bypass.destination = g_tunnel_config.server_address;
       bypass.netmask = "255.255.255.255";
       bypass.gateway = state->default_gateway;
       bypass.interface = state->default_interface;
+      bypass.metric = 1;  // Lower metric = higher priority than VPN routes (metric 5)
 
       if (!route_manager->add_route(bypass, ec)) {
         LOG_WARN("Failed to add server bypass route: {}", ec.message());
       } else {
-        LOG_INFO("Added bypass route for VPN server {} via {}",
-                 g_tunnel_config.server_address, state->default_gateway);
+        LOG_INFO("Added bypass route for VPN server {} via {} (metric {})",
+                 g_tunnel_config.server_address, state->default_gateway, bypass.metric);
       }
     } else {
       LOG_WARN("Could not determine current default gateway for bypass route");

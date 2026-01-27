@@ -207,10 +207,12 @@ bool RouteManager::add_route(const Route& route, std::error_code& ec) {
   }
 
   added_routes_.push_back(route);
-  LOG_INFO("Added route: {} via {} dev {}",
+  LOG_INFO("Added route: {}/{} via {} dev {} metric {}",
            route.destination,
+           route.netmask.empty() ? "default" : route.netmask,
            route.gateway.empty() ? "(direct)" : route.gateway,
-           route.interface);
+           route.interface,
+           route.metric);
   return true;
 }
 
