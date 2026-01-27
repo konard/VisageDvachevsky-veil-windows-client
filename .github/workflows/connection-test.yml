@@ -136,40 +136,46 @@ jobs:
           ./build/tests/integration/veil_integration_connection --gtest_filter="*LiveServerHandshake*" \
             || echo "Connection test completed (check results above)"
 
-      - name: Verify network connectivity (ping external services)
+      - name: Verify network connectivity (HTTP/TCP checks)
         if: steps.check-secrets.outputs.secrets_available == 'true'
         timeout-minutes: 1
         run: |
           echo "=========================================="
           echo "Verifying network connectivity to external services"
           echo "=========================================="
-
-          # Test DNS resolution and connectivity to Google's public DNS
-          echo "Testing DNS resolution and ping to 8.8.8.8 (Google DNS)..."
-          if ping -c 3 -W 5 8.8.8.8; then
-            echo "✓ Successfully pinged 8.8.8.8"
-          else
-            echo "✗ Failed to ping 8.8.8.8"
-            exit 1
-          fi
-
-          # Test HTTP connectivity to a reliable service
           echo ""
-          echo "Testing HTTP connectivity to google.com..."
+          echo "Note: Using HTTP/TCP checks instead of ICMP ping"
+          echo "(ICMP ping is often blocked in GitHub Actions runners)"
+          echo ""
+
+          # Test DNS resolution and HTTP connectivity to Google
+          echo "Testing DNS resolution and HTTPS connectivity to www.google.com..."
           if curl -f -s -m 10 --head https://www.google.com > /dev/null; then
-            echo "✓ Successfully connected to google.com via HTTPS"
+            echo "✓ Successfully connected to www.google.com via HTTPS"
+            echo "  (DNS resolution and HTTP connectivity confirmed)"
           else
-            echo "✗ Failed to connect to google.com"
+            echo "✗ Failed to connect to www.google.com"
             exit 1
           fi
 
-          # Test alternative DNS service (Cloudflare)
+          # Test connectivity to Cloudflare DNS over HTTPS (DoH)
           echo ""
-          echo "Testing connectivity to 1.1.1.1 (Cloudflare DNS)..."
-          if ping -c 3 -W 5 1.1.1.1; then
-            echo "✓ Successfully pinged 1.1.1.1"
+          echo "Testing connectivity to Cloudflare DNS over HTTPS (1.1.1.1)..."
+          if curl -f -s -m 10 --head https://1.1.1.1 > /dev/null 2>&1 || \
+             curl -f -s -m 10 --head https://cloudflare-dns.com > /dev/null; then
+            echo "✓ Successfully connected to Cloudflare DNS service"
           else
-            echo "✗ Failed to ping 1.1.1.1"
+            echo "✗ Failed to connect to Cloudflare DNS"
+            exit 1
+          fi
+
+          # Test connectivity to another reliable service (GitHub API)
+          echo ""
+          echo "Testing connectivity to GitHub API..."
+          if curl -f -s -m 10 --head https://api.github.com > /dev/null; then
+            echo "✓ Successfully connected to api.github.com via HTTPS"
+          else
+            echo "✗ Failed to connect to GitHub API"
             exit 1
           fi
 
@@ -182,11 +188,13 @@ jobs:
           echo "## Network Connectivity Verification" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "✅ Successfully verified connectivity to external services:" >> $GITHUB_STEP_SUMMARY
-          echo "- Google DNS (8.8.8.8)" >> $GITHUB_STEP_SUMMARY
-          echo "- Cloudflare DNS (1.1.1.1)" >> $GITHUB_STEP_SUMMARY
-          echo "- Google.com (HTTPS)" >> $GITHUB_STEP_SUMMARY
+          echo "- Google (HTTPS) - DNS resolution and HTTP connectivity confirmed" >> $GITHUB_STEP_SUMMARY
+          echo "- Cloudflare DNS (HTTPS)" >> $GITHUB_STEP_SUMMARY
+          echo "- GitHub API (HTTPS)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "This confirms the test environment has proper network access and can reach external services." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "_Note: Using HTTP/TCP checks instead of ICMP ping (which is often blocked in containerized CI environments)_" >> $GITHUB_STEP_SUMMARY
 
       - name: Cleanup key files
         if: always() && steps.check-secrets.outputs.secrets_available == 'true'
