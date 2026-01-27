@@ -78,14 +78,37 @@ jobs:
         run: |
           mkdir -p /tmp/veil-test
           # Decode base64-encoded key (CLIENT_KEY should be base64-encoded 32-byte key)
-          echo -n "$VEIL_CLIENT_KEY" | base64 -d > /tmp/veil-test/client.key
-          # Verify key file size
-          KEY_SIZE=$(stat -c%s /tmp/veil-test/client.key 2>/dev/null || echo 0)
-          echo "Key file size: $KEY_SIZE bytes"
-          if [[ "$KEY_SIZE" != "32" ]]; then
-            echo "::error::Client key must be exactly 32 bytes (got $KEY_SIZE). Ensure CLIENT_KEY secret is a base64-encoded 32-byte key."
+          echo -n "$VEIL_CLIENT_KEY" | base64 -d > /tmp/veil-test/client.key.tmp
+
+          # Check and fix key size if needed
+          KEY_SIZE=$(stat -c%s /tmp/veil-test/client.key.tmp 2>/dev/null || echo 0)
+          echo "Decoded key size: $KEY_SIZE bytes"
+
+          if [[ "$KEY_SIZE" == "33" ]]; then
+            # Check if last byte is newline (0x0a)
+            LAST_BYTE=$(tail -c 1 /tmp/veil-test/client.key.tmp | od -An -tx1 | tr -d ' ')
+            if [[ "$LAST_BYTE" == "0a" ]]; then
+              echo "::warning::Client key is 33 bytes with trailing newline. Stripping newline to get 32 bytes."
+              head -c 32 /tmp/veil-test/client.key.tmp > /tmp/veil-test/client.key
+              rm /tmp/veil-test/client.key.tmp
+              KEY_SIZE=32
+            else
+              mv /tmp/veil-test/client.key.tmp /tmp/veil-test/client.key
+            fi
+          elif [[ "$KEY_SIZE" == "32" ]]; then
+            mv /tmp/veil-test/client.key.tmp /tmp/veil-test/client.key
+          else
+            mv /tmp/veil-test/client.key.tmp /tmp/veil-test/client.key
+          fi
+
+          # Verify final key size
+          FINAL_KEY_SIZE=$(stat -c%s /tmp/veil-test/client.key 2>/dev/null || echo 0)
+          echo "Final key file size: $FINAL_KEY_SIZE bytes"
+          if [[ "$FINAL_KEY_SIZE" != "32" ]]; then
+            echo "::error::Client key must be exactly 32 bytes (got $FINAL_KEY_SIZE). Ensure CLIENT_KEY secret is a base64-encoded 32-byte key."
             exit 1
           fi
+
           # Create obfuscation seed if provided
           if [[ -n "$VEIL_OBFUSCATION_SEED" ]]; then
             echo -n "$VEIL_OBFUSCATION_SEED" | base64 -d > /tmp/veil-test/obfuscation.seed
