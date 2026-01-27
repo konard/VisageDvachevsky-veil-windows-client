@@ -418,9 +418,23 @@ bool IpcClient::connect(std::error_code& ec) {
   }
 
   // Retry logic with exponential backoff to handle race condition
-  // where GUI launches before daemon creates the named pipe
-  constexpr int kMaxRetries = 5;
-  constexpr DWORD kRetryDelays[kMaxRetries] = {0, 100, 250, 500, 1000};  // milliseconds
+  // where GUI launches before daemon creates the named pipe.
+  // Windows Service cold start can take 5-10 seconds on slower systems
+  // (loading DLLs, crypto init, creating Named Pipe), so we need generous timeouts.
+  // Total retry time: ~15 seconds to handle worst-case scenarios.
+  constexpr int kMaxRetries = 10;
+  constexpr DWORD kRetryDelays[kMaxRetries] = {
+      0,      // 1st attempt: immediate
+      100,    // 2nd attempt: 100ms delay
+      250,    // 3rd attempt: 250ms delay
+      500,    // 4th attempt: 500ms delay
+      1000,   // 5th attempt: 1s delay
+      1000,   // 6th attempt: 1s delay
+      2000,   // 7th attempt: 2s delay
+      2000,   // 8th attempt: 2s delay
+      3000,   // 9th attempt: 3s delay
+      3000    // 10th attempt: 3s delay
+  };  // Total: 0 + 100 + 250 + 500 + 1000 + 1000 + 2000 + 2000 + 3000 + 3000 = 13.85 seconds
 
   for (int attempt = 0; attempt < kMaxRetries; ++attempt) {
     if (attempt > 0) {
