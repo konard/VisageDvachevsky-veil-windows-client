@@ -30,7 +30,11 @@ void AckBitmap::ack(std::uint64_t seq) {
     if (shift >= 32) {
       bitmap_ = 0;
     } else {
-      bitmap_ <<= shift;
+      // Issue #80: Set bit for current head before shifting.
+      // When head advances from H to H+N, we shift left by N positions and set
+      // bit (N-1) to indicate that sequence H was received.
+      // This ensures out-of-order packets are tracked in the SACK bitmap.
+      bitmap_ = (bitmap_ << shift) | (1U << (shift - 1));
     }
     head_ = seq;
     return;
