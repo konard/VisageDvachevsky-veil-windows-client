@@ -175,6 +175,14 @@ std::optional<std::vector<mux::MuxFrame>> TransportSession::decrypt_packet(
              recv_seq_obfuscation_key_[2], recv_seq_obfuscation_key_[3],
              ciphertext[0], ciphertext[1], ciphertext[2], ciphertext[3],
              ciphertext[4], ciphertext[5], ciphertext[6], ciphertext[7]);
+
+    // Issue #78: Unmark sequence in replay window to allow legitimate retransmission
+    // If decryption fails (e.g., due to wrong session keys after session rotation),
+    // we should allow the server to retransmit this packet rather than permanently
+    // rejecting it as a replay.
+    replay_window_.unmark(sequence);
+    LOG_WARN("  Unmarked sequence {} in replay window to allow retransmission", sequence);
+
     ++stats_.packets_dropped_decrypt;
     return std::nullopt;
   }

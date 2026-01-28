@@ -27,6 +27,46 @@ TEST(ReplayWindowTests, SlidesWindowForward) {
   EXPECT_FALSE(window.mark_and_check(1));
 }
 
+// Issue #78: Test unmark functionality for retransmission after decryption failure
+TEST(ReplayWindowTests, UnmarkAllowsRetransmission) {
+  session::ReplayWindow window(64);
+
+  // Mark sequence 100
+  EXPECT_TRUE(window.mark_and_check(100));
+
+  // Duplicate should be rejected
+  EXPECT_FALSE(window.mark_and_check(100));
+
+  // Unmark (simulating decryption failure)
+  window.unmark(100);
+
+  // Should now be accepted again
+  EXPECT_TRUE(window.mark_and_check(100));
+
+  // And rejected again as duplicate
+  EXPECT_FALSE(window.mark_and_check(100));
+}
+
+// Issue #78: Test unmark with window advancement
+TEST(ReplayWindowTests, UnmarkWithWindowAdvancement) {
+  session::ReplayWindow window(64);
+
+  // Mark several sequences
+  EXPECT_TRUE(window.mark_and_check(100));
+  EXPECT_TRUE(window.mark_and_check(101));
+  EXPECT_TRUE(window.mark_and_check(102));
+
+  // Advance window
+  EXPECT_TRUE(window.mark_and_check(130));
+
+  // Sequence 100 is within window but already marked
+  EXPECT_FALSE(window.mark_and_check(100));
+
+  // Unmark and verify retransmission works
+  window.unmark(100);
+  EXPECT_TRUE(window.mark_and_check(100));
+}
+
 TEST(SessionRotatorTests, RotatesAfterThresholds) {
   using namespace std::chrono_literals;
   session::SessionRotator rotator(1s, 2);
