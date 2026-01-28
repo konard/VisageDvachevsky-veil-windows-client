@@ -192,8 +192,10 @@ class ThreadPool {
         try {
           task();
         } catch (const std::exception& e) {
+          // NOLINTNEXTLINE(bugprone-lambda-function-name) - LOG_ERROR macro uses __FUNCTION__
           LOG_ERROR("ThreadPool worker {} caught exception: {}", thread_id, e.what());
         } catch (...) {
+          // NOLINTNEXTLINE(bugprone-lambda-function-name) - LOG_ERROR macro uses __FUNCTION__
           LOG_ERROR("ThreadPool worker {} caught unknown exception", thread_id);
         }
 
@@ -271,8 +273,10 @@ class DedicatedWorker {
       try {
         fn();
       } catch (const std::exception& e) {
+        // NOLINTNEXTLINE(bugprone-lambda-function-name) - LOG_ERROR macro uses __FUNCTION__
         LOG_ERROR("{} thread caught exception: {}", name_, e.what());
       } catch (...) {
+        // NOLINTNEXTLINE(bugprone-lambda-function-name) - LOG_ERROR macro uses __FUNCTION__
         LOG_ERROR("{} thread caught unknown exception", name_);
       }
       // Ensure running_ is false when thread exits (even on exception)

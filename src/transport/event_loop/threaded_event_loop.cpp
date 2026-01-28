@@ -167,6 +167,7 @@ void ThreadedEventLoop::run() {
         if (info.on_error) {
           info.on_error(sid, std::make_error_code(std::errc::io_error));
         }
+        // NOLINTNEXTLINE(bugprone-lambda-function-name) - LOG_ERROR macro uses __FUNCTION__
         LOG_ERROR("Pipeline error for session {}: {}", sid, error);
       };
 
