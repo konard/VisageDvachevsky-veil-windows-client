@@ -485,20 +485,24 @@ int main(int argc, char* argv[]) {
                     // cannot be routed back to the correct client because the destination IP
                     // in return packets matches the client's source IP, not the server-assigned IP.
                     const auto& payload = frame.data.payload;
-                    if (payload.size() >= 20) {  // Minimum IPv4 header size
+                    // Check for valid IPv4 packet: minimum 20 bytes header AND IPv4 version (first nibble == 4)
+                    if (payload.size() >= 20 && ((payload[0] >> 4) == 4)) {
                       // Extract source IP from IPv4 header (bytes 12-15)
                       std::uint32_t src_ip = (static_cast<std::uint32_t>(payload[12]) << 24) |
                                              (static_cast<std::uint32_t>(payload[13]) << 16) |
                                              (static_cast<std::uint32_t>(payload[14]) << 8) |
                                              static_cast<std::uint32_t>(payload[15]);
-                      struct in_addr src_addr {};
-                      src_addr.s_addr = htonl(src_ip);
-                      char src_ip_str[INET_ADDRSTRLEN];
-                      inet_ntop(AF_INET, &src_addr, src_ip_str, sizeof(src_ip_str));
+                      // Only update if source IP is non-zero (valid)
+                      if (src_ip != 0) {
+                        struct in_addr src_addr {};
+                        src_addr.s_addr = htonl(src_ip);
+                        char src_ip_str[INET_ADDRSTRLEN];
+                        inet_ntop(AF_INET, &src_addr, src_ip_str, sizeof(src_ip_str));
 
-                      // Update session's tunnel IP if it differs from the packet's source IP
-                      // This ensures return packets can be routed back to this client
-                      session_table.update_tunnel_ip(session->session_id, src_ip_str);
+                        // Update session's tunnel IP if it differs from the packet's source IP
+                        // This ensures return packets can be routed back to this client
+                        session_table.update_tunnel_ip(session->session_id, src_ip_str);
+                      }
                     }
 
                     // Write to TUN device
@@ -563,49 +567,56 @@ int main(int argc, char* argv[]) {
     if (tun_read > 0) {
       // Parse IP header to find destination
       if (tun_read >= 20) {
-        // Extract source IP from IPv4 header (bytes 12-15)
-        std::uint32_t src_ip = (static_cast<std::uint32_t>(buffer[12]) << 24) |
-                               (static_cast<std::uint32_t>(buffer[13]) << 16) |
-                               (static_cast<std::uint32_t>(buffer[14]) << 8) |
-                               static_cast<std::uint32_t>(buffer[15]);
-        // Extract destination IP from IPv4 header (bytes 16-19)
-        std::uint32_t dst_ip = (static_cast<std::uint32_t>(buffer[16]) << 24) |
-                               (static_cast<std::uint32_t>(buffer[17]) << 16) |
-                               (static_cast<std::uint32_t>(buffer[18]) << 8) |
-                               static_cast<std::uint32_t>(buffer[19]);
-
-        // Convert to string
-        char src_ip_str[INET_ADDRSTRLEN];
-        char dst_ip_str[INET_ADDRSTRLEN];
-        struct in_addr src_addr {};
-        struct in_addr dst_addr {};
-        src_addr.s_addr = htonl(src_ip);
-        dst_addr.s_addr = htonl(dst_ip);
-        inet_ntop(AF_INET, &src_addr, src_ip_str, sizeof(src_ip_str));
-        inet_ntop(AF_INET, &dst_addr, dst_ip_str, sizeof(dst_ip_str));
-
-        LOG_DEBUG("TUN read: {} bytes, {} -> {}", tun_read, src_ip_str, dst_ip_str);
-
-        // Find session by tunnel IP
-        auto* session = session_table.find_by_tunnel_ip(dst_ip_str);
-        if (session != nullptr && session->transport) {
-          LOG_DEBUG("Routing {} bytes to session {} ({}:{})",
-                    tun_read, session->session_id, session->endpoint.host, session->endpoint.port);
-          // Encrypt and send
-          auto packets = session->transport->encrypt_data(
-              std::span<const std::uint8_t>(buffer.data(), static_cast<std::size_t>(tun_read)));
-          for (const auto& pkt : packets) {
-            if (!udp_socket.send(pkt, session->endpoint, ec)) {
-              LOG_ERROR("Failed to send to client: {}", ec.message());
-            } else {
-              session->packets_sent++;
-              session->bytes_sent += pkt.size();
-              g_stats.total_packets_sent++;
-              g_stats.total_bytes_sent += pkt.size();
-            }
-          }
+        // Check if this is an IPv4 packet (version nibble == 4)
+        std::uint8_t version = (buffer[0] >> 4);
+        if (version != 4) {
+          LOG_DEBUG("TUN read: {} bytes, non-IPv4 packet (version={}), skipping", tun_read, version);
         } else {
-          LOG_DEBUG("No session found for tunnel IP {}, packet dropped", dst_ip_str);
+          // Extract source IP from IPv4 header (bytes 12-15)
+          std::uint32_t src_ip = (static_cast<std::uint32_t>(buffer[12]) << 24) |
+                                 (static_cast<std::uint32_t>(buffer[13]) << 16) |
+                                 (static_cast<std::uint32_t>(buffer[14]) << 8) |
+                                 static_cast<std::uint32_t>(buffer[15]);
+          // Extract destination IP from IPv4 header (bytes 16-19)
+          std::uint32_t dst_ip = (static_cast<std::uint32_t>(buffer[16]) << 24) |
+                                 (static_cast<std::uint32_t>(buffer[17]) << 16) |
+                                 (static_cast<std::uint32_t>(buffer[18]) << 8) |
+                                 static_cast<std::uint32_t>(buffer[19]);
+
+          // Convert to string
+          char src_ip_str[INET_ADDRSTRLEN];
+          char dst_ip_str[INET_ADDRSTRLEN];
+          struct in_addr src_addr {};
+          struct in_addr dst_addr {};
+          src_addr.s_addr = htonl(src_ip);
+          dst_addr.s_addr = htonl(dst_ip);
+          inet_ntop(AF_INET, &src_addr, src_ip_str, sizeof(src_ip_str));
+          inet_ntop(AF_INET, &dst_addr, dst_ip_str, sizeof(dst_ip_str));
+
+          // Use WARN level temporarily for Issue #74 debugging (return traffic routing)
+          LOG_WARN("TUN read: {} bytes, {} -> {}", tun_read, src_ip_str, dst_ip_str);
+
+          // Find session by tunnel IP
+          auto* session = session_table.find_by_tunnel_ip(dst_ip_str);
+          if (session != nullptr && session->transport) {
+            LOG_WARN("Routing {} bytes to session {} ({}:{})",
+                      tun_read, session->session_id, session->endpoint.host, session->endpoint.port);
+            // Encrypt and send
+            auto packets = session->transport->encrypt_data(
+                std::span<const std::uint8_t>(buffer.data(), static_cast<std::size_t>(tun_read)));
+            for (const auto& pkt : packets) {
+              if (!udp_socket.send(pkt, session->endpoint, ec)) {
+                LOG_ERROR("Failed to send to client: {}", ec.message());
+              } else {
+                session->packets_sent++;
+                session->bytes_sent += pkt.size();
+                g_stats.total_packets_sent++;
+                g_stats.total_bytes_sent += pkt.size();
+              }
+            }
+          } else {
+            LOG_WARN("No session found for tunnel IP {}, packet dropped", dst_ip_str);
+          }
         }
       }
     }
