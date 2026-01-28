@@ -13,7 +13,8 @@ namespace veil::mux {
 // Configuration for ACK scheduling.
 struct AckSchedulerConfig {
   // Maximum delay before sending ACK (delayed ACK).
-  std::chrono::milliseconds max_ack_delay{50};
+  // Issue #79: Reduced from 50ms to 20ms to decrease retransmit buffer pending count.
+  std::chrono::milliseconds max_ack_delay{20};
 
   // Number of packets to receive before sending immediate ACK.
   std::uint32_t ack_every_n_packets{2};
