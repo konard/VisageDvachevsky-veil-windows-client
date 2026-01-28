@@ -194,11 +194,68 @@ std::optional<std::vector<mux::MuxFrame>> TransportSession::decrypt_packet(
     LOG_WARN("  Frame decoded: kind={}, payload_size={}",
              static_cast<int>(frame->kind),
              frame->kind == mux::FrameKind::kData ? frame->data.payload.size() : 0);
-    frames.push_back(std::move(*frame));
 
     if (frame->kind == mux::FrameKind::kData) {
       ++stats_.fragments_received;
       recv_ack_bitmap_.ack(sequence);
+
+      // Issue #74: Fragment reassembly
+      // For fragmented messages, sequence is encoded as (msg_id << 32) | frag_idx.
+      // For non-fragmented messages (or first fragment of msg_id=0), we detect by fin flag.
+      // - If fin=true: complete message, return directly
+      // - If fin=false: fragment, accumulate and try reassembly
+      const std::uint64_t frame_seq = frame->data.sequence;
+      const std::uint64_t msg_id = frame_seq >> 32;
+      const std::uint32_t frag_idx = static_cast<std::uint32_t>(frame_seq & 0xFFFFFFFF);
+
+      // Determine if this is a fragment vs complete message:
+      // Issue #74: The sender uses msg_id >= 1 for fragmented messages, encoding as (msg_id << 32) | frag_idx.
+      // Non-fragmented messages use msg_id = 0 (raw sequence numbers like 0, 1, 2, ...).
+      // So we can simply check if msg_id > 0 to detect fragments.
+      const std::uint64_t reassembly_id = msg_id;  // Use msg_id as reassembly key
+      const bool is_fragment = (msg_id > 0);
+
+      if (is_fragment) {
+        // This is a fragment - push to reassembly buffer using msg_id as the key
+
+        // Calculate offset from fragment index
+        // We track cumulative size per message to compute offsets
+        // For simplicity, use frag_idx as offset (works when fragments arrive in order)
+        // TODO: For out-of-order fragments, we'd need more sophisticated tracking
+        mux::Fragment frag{
+            .offset = static_cast<std::uint16_t>(frag_idx * config_.max_fragment_size),
+            .data = std::move(frame->data.payload),
+            .last = frame->data.fin};
+
+        LOG_WARN("  Fragment: msg_id={}, frag_idx={}, offset={}, size={}, last={}",
+                 msg_id, frag_idx, frag.offset, frag.data.size(), frag.last);
+
+        fragment_reassembly_.push(reassembly_id, std::move(frag), now_fn_());
+
+        // Try to reassemble the complete message
+        auto reassembled = fragment_reassembly_.try_reassemble(reassembly_id);
+        if (reassembled) {
+          // Successfully reassembled - create a new data frame with complete payload
+          LOG_WARN("  Reassembled complete message: msg_id={}, size={}", msg_id, reassembled->size());
+          ++stats_.messages_reassembled;
+
+          mux::MuxFrame complete_frame{};
+          complete_frame.kind = mux::FrameKind::kData;
+          complete_frame.data.stream_id = frame->data.stream_id;
+          complete_frame.data.sequence = frame_seq;  // Use original sequence
+          complete_frame.data.fin = true;
+          complete_frame.data.payload = std::move(*reassembled);
+          frames.push_back(std::move(complete_frame));
+        }
+        // If not yet complete, don't add to frames - wait for more fragments
+      } else {
+        // Complete non-fragmented message - return directly
+        LOG_WARN("  Complete message: sequence={}, size={}", frame_seq, frame->data.payload.size());
+        frames.push_back(std::move(*frame));
+      }
+    } else {
+      // Non-data frames (ACK, control, heartbeat) - return directly
+      frames.push_back(std::move(*frame));
     }
   } else {
     // Log frame decode failure for debugging (Issue #72)
@@ -377,31 +434,45 @@ std::vector<std::uint8_t> TransportSession::build_encrypted_packet(const mux::Mu
 
 std::vector<mux::MuxFrame> TransportSession::fragment_data(std::span<const std::uint8_t> data,
                                                             std::uint64_t stream_id, bool fin) {
+  // Issue #74: The 'fin' parameter is intentionally ignored. We always set fin=true on the
+  // last fragment (or single message) to ensure the receiver can properly detect message
+  // completion and perform fragment reassembly. This fixes packet loss caused by fragments
+  // not being reassembled before TUN write.
+  (void)fin;
+
   std::vector<mux::MuxFrame> frames;
 
   if (data.size() <= config_.max_fragment_size) {
-    // No fragmentation needed.
+    // No fragmentation needed. Always set fin=true to indicate complete message.
+    // Issue #74: Without fin=true, receiver can't distinguish complete messages from fragments.
     frames.push_back(mux::make_data_frame(
-        stream_id, message_id_counter_++, fin,
+        stream_id, message_id_counter_++, true,
         std::vector<std::uint8_t>(data.begin(), data.end())));
     return frames;
   }
 
   // Fragment the data.
-  const std::uint64_t msg_id = message_id_counter_++;
+  // Issue #74: Use (msg_id + 1) to ensure the encoded sequence has msg_id >= 1.
+  // This distinguishes fragmented message sequences (e.g., (1<<32)|0 = 4294967296)
+  // from non-fragmented message sequences (e.g., 0, 1, 2, ...).
+  // Without this, fragment sequences for msg_id=0 would be 0, 1, 2, ... which collide
+  // with non-fragmented message sequences.
+  const std::uint64_t msg_id = message_id_counter_++ + 1;
   std::size_t offset = 0;
   std::uint64_t frag_seq = 0;
 
   while (offset < data.size()) {
     const std::size_t chunk_size = std::min(config_.max_fragment_size, data.size() - offset);
     const bool is_last = (offset + chunk_size >= data.size());
-    const bool frag_fin = is_last && fin;
+    // Issue #74: Always set fin=true on last fragment so receiver can detect message completion.
+    // This enables proper fragment reassembly regardless of caller's fin parameter.
+    const bool frag_fin = is_last;
 
     std::vector<std::uint8_t> chunk(data.begin() + static_cast<std::ptrdiff_t>(offset),
                                      data.begin() + static_cast<std::ptrdiff_t>(offset + chunk_size));
 
     // For fragmented messages, we use a special encoding in the sequence field.
-    // High 32 bits: message ID, Low 32 bits: fragment index.
+    // High 32 bits: message ID (>= 1), Low 32 bits: fragment index.
     const std::uint64_t encoded_seq = (msg_id << 32) | frag_seq;
 
     frames.push_back(mux::make_data_frame(stream_id, encoded_seq, frag_fin, std::move(chunk)));

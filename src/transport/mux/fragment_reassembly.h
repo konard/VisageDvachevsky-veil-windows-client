@@ -35,6 +35,11 @@ class FragmentReassembly {
   // Get number of incomplete messages currently buffered.
   [[nodiscard]] std::size_t pending_count() const { return state_.size(); }
 
+  // Check if there are pending fragments for a specific message ID.
+  [[nodiscard]] bool has_pending(std::uint64_t message_id) const {
+    return state_.find(message_id) != state_.end();
+  }
+
   // Get total memory used by incomplete fragments.
   [[nodiscard]] std::size_t memory_usage() const;
 
