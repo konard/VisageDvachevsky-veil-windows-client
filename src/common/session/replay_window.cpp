@@ -86,6 +86,31 @@ void ReplayWindow::set_bit(std::size_t index) {
   bits_[word] |= (std::uint64_t(1) << bit);
 }
 
+void ReplayWindow::clear_bit(std::size_t index) {
+  const auto word = index / kBitsPerWord;
+  const auto bit = index % kBitsPerWord;
+  bits_[word] &= ~(std::uint64_t(1) << bit);
+}
+
+void ReplayWindow::unmark(std::uint64_t sequence) {
+  if (!initialized_) {
+    return;
+  }
+
+  // Can only unmark sequences <= highest_
+  if (sequence > highest_) {
+    return;
+  }
+
+  const std::uint64_t diff = highest_ - sequence;
+  if (diff >= window_size_) {
+    return;
+  }
+
+  const std::size_t index = static_cast<std::size_t>(diff);
+  clear_bit(index);
+}
+
 void ReplayWindow::mask_tail() {
   const auto remainder = window_size_ % kBitsPerWord;
   if (remainder == 0) {
