@@ -148,8 +148,10 @@ void ThreadedEventLoop::run() {
     init_pipeline_mode();
 
     // Start all pipeline processors
-    for (auto& [session_id, info] : pipeline_sessions_) {
-      (void)session_id;  // Used in next loop iteration
+    // Note: Using iterator-based loop instead of structured bindings to avoid
+    // lambda capture issues with some compilers (clang < 16)
+    for (auto& kv : pipeline_sessions_) {
+      auto& info = kv.second;
       // Create callbacks that route to the session's handlers
       auto on_rx = [&info](std::uint64_t sid,
                             const std::vector<mux::MuxFrame>& frames,
@@ -176,7 +178,9 @@ void ThreadedEventLoop::run() {
 
     // In pipeline mode, we still run the base event loop for socket I/O
     // The event loop handles the raw socket reads and feeds them to pipelines
-    for (auto& [session_id, info] : pipeline_sessions_) {
+    for (auto& kv : pipeline_sessions_) {
+      SessionId session_id = kv.first;
+      auto& info = kv.second;
       // Register socket for receiving
       auto packet_handler = [this, session_id](SessionId sid,
                                                 std::span<const std::uint8_t> data,
