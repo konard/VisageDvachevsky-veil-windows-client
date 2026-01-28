@@ -18,7 +18,10 @@ TEST(AckBitmapTests, TracksHeadAndBitmap) {
 
   bitmap.ack(9);
   EXPECT_TRUE(bitmap.is_acked(9));
-  EXPECT_FALSE(bitmap.is_acked(5));  // outside window after shift
+  // Issue #80 fix: After ack(9), sequence 5 is still in the 32-packet window
+  // (diff = 9 - 5 = 4 < 32) and was previously acked, so it should return true
+  EXPECT_TRUE(bitmap.is_acked(5));
+  EXPECT_TRUE(bitmap.is_acked(4));  // Also still in window
 }
 
 // Test sequence number wraparound handling
@@ -37,8 +40,12 @@ TEST(AckBitmapTests, HandlesSequenceWraparound) {
   EXPECT_TRUE(bitmap.is_acked(kWrappedSeq));
   EXPECT_EQ(bitmap.head(), kWrappedSeq);
 
-  // The old sequence should no longer be in the window
-  EXPECT_FALSE(bitmap.is_acked(kNearMax));
+  // Issue #80 fix: After large forward shift (>32), old sequences are cleared
+  // The shift from kNearMax to 5 is 16 positions, which clears the bitmap
+  // (5 - kNearMax wraps to 16 in uint64 arithmetic)
+  // Actually: (5 - (UINT64_MAX - 10)) = 16, so shift by 16, bitmap cleared and bit 15 set
+  // So kNearMax (which is now 16 positions back) should still be marked
+  EXPECT_TRUE(bitmap.is_acked(kNearMax));
 }
 
 TEST(AckBitmapTests, WraparoundWithinBitmapWindow) {
