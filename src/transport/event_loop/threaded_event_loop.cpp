@@ -149,10 +149,11 @@ void ThreadedEventLoop::run() {
 
     // Start all pipeline processors
     for (auto& [session_id, info] : pipeline_sessions_) {
+      (void)session_id;  // Used in next loop iteration
       // Create callbacks that route to the session's handlers
-      auto on_rx = [&info, session_id](std::uint64_t sid,
-                                        const std::vector<mux::MuxFrame>& frames,
-                                        const UdpEndpoint& source) {
+      auto on_rx = [&info](std::uint64_t sid,
+                            const std::vector<mux::MuxFrame>& frames,
+                            const UdpEndpoint& source) {
         if (info.on_packet) {
           for (const auto& frame : frames) {
             if (frame.kind == mux::FrameKind::kData) {
