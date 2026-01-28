@@ -112,6 +112,14 @@ void log_decryption_failure(std::uint64_t session_id, const std::string& host,
            session_id, host, port, size);
 }
 
+// Helper function to log packet processing - avoids clang-tidy bugprone-lambda-function-name
+// warning when LOG_WARN is used inside lambdas (Issue #72 debugging)
+void log_processing_packet(std::uint64_t session_id, const std::string& host,
+                           std::uint16_t port, std::size_t size) {
+  LOG_WARN("Processing packet from session {} ({}:{}), size={}",
+           session_id, host, port, size);
+}
+
 void log_new_client(const std::string& host, std::uint16_t port, std::uint64_t session_id) {
   LOG_INFO("New client connected from {}:{}, session {}", host, port, session_id);
 
@@ -428,8 +436,8 @@ int main(int argc, char* argv[]) {
 
             if (session->transport) {
               // Use WARN level temporarily for Issue #72 debugging
-              LOG_WARN("Processing packet from session {} ({}:{}), size={}",
-                       session->session_id, pkt.remote.host, pkt.remote.port, pkt.data.size());
+              log_processing_packet(session->session_id, pkt.remote.host,
+                                    pkt.remote.port, pkt.data.size());
               auto frames = session->transport->decrypt_packet(pkt.data);
               if (frames) {
                 LOG_DEBUG("Decrypted {} frame(s) from session {}", frames->size(), session->session_id);
