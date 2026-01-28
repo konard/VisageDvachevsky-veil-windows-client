@@ -478,6 +478,29 @@ int main(int argc, char* argv[]) {
                   log_frame_info(static_cast<int>(frame.kind),
                                  frame.kind == mux::FrameKind::kData);
                   if (frame.kind == mux::FrameKind::kData) {
+                    // Issue #74 fix: Extract source IP from the IP packet header and update
+                    // session's tunnel_ip. This is necessary because the client may use its
+                    // own configured tunnel IP (e.g., 10.8.0.2) instead of the server-assigned
+                    // IP (e.g., 10.8.0.254). Without this fix, return packets from the internet
+                    // cannot be routed back to the correct client because the destination IP
+                    // in return packets matches the client's source IP, not the server-assigned IP.
+                    const auto& payload = frame.data.payload;
+                    if (payload.size() >= 20) {  // Minimum IPv4 header size
+                      // Extract source IP from IPv4 header (bytes 12-15)
+                      std::uint32_t src_ip = (static_cast<std::uint32_t>(payload[12]) << 24) |
+                                             (static_cast<std::uint32_t>(payload[13]) << 16) |
+                                             (static_cast<std::uint32_t>(payload[14]) << 8) |
+                                             static_cast<std::uint32_t>(payload[15]);
+                      struct in_addr src_addr {};
+                      src_addr.s_addr = htonl(src_ip);
+                      char src_ip_str[INET_ADDRSTRLEN];
+                      inet_ntop(AF_INET, &src_addr, src_ip_str, sizeof(src_ip_str));
+
+                      // Update session's tunnel IP if it differs from the packet's source IP
+                      // This ensures return packets can be routed back to this client
+                      session_table.update_tunnel_ip(session->session_id, src_ip_str);
+                    }
+
                     // Write to TUN device
                     log_tun_write_attempt(frame.data.payload.size(), session->session_id);
                     if (!tun_device.write(frame.data.payload, ec)) {

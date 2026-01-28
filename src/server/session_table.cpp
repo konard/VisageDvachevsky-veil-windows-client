@@ -145,6 +145,33 @@ void SessionTable::update_activity(std::uint64_t session_id) {
   }
 }
 
+bool SessionTable::update_tunnel_ip(std::uint64_t session_id, const std::string& new_ip) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = sessions_.find(session_id);
+  if (it == sessions_.end()) {
+    return false;
+  }
+
+  const std::string& old_ip = it->second->tunnel_ip;
+
+  // Skip if IP hasn't changed
+  if (old_ip == new_ip) {
+    return true;
+  }
+
+  // Update the IP index: remove old mapping, add new one
+  ip_index_.erase(old_ip);
+  ip_index_[new_ip] = session_id;
+
+  // Update the session's tunnel IP
+  it->second->tunnel_ip = new_ip;
+
+  LOG_INFO("Updated tunnel IP for session {} from {} to {} (client uses own IP)",
+           session_id, old_ip, new_ip);
+
+  return true;
+}
+
 bool SessionTable::remove_session(std::uint64_t session_id) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto it = sessions_.find(session_id);

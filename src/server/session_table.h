@@ -89,6 +89,11 @@ class SessionTable {
   // Update last activity timestamp.
   void update_activity(std::uint64_t session_id);
 
+  // Update tunnel IP for a session (when client uses different IP than server-assigned).
+  // This is needed because clients may use their own configured tunnel IP instead of
+  // the server-assigned one. Returns true if the IP was updated, false if session not found.
+  bool update_tunnel_ip(std::uint64_t session_id, const std::string& new_ip);
+
   // Remove a session.
   bool remove_session(std::uint64_t session_id);
 
