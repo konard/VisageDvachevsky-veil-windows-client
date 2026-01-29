@@ -89,6 +89,7 @@ TEST_F(PacketPoolTest, MultipleAcquireRelease) {
 
   // Acquire all pre-allocated buffers
   std::vector<std::vector<std::uint8_t>> buffers;
+  buffers.reserve(3);
   for (int i = 0; i < 3; ++i) {
     buffers.push_back(pool.acquire());
   }
@@ -131,6 +132,7 @@ TEST_F(PacketPoolTest, HitRate) {
 
   // Acquire 5 more without releasing -> forces allocations after pool is empty
   std::vector<std::vector<std::uint8_t>> buffers;
+  buffers.reserve(5);
   for (int i = 0; i < 5; ++i) {
     buffers.push_back(pool.acquire());
   }
@@ -151,6 +153,7 @@ TEST_F(PacketPoolTest, MaxPoolSize) {
 
   // First, acquire 3 buffers (allocates new ones since pool is empty)
   std::vector<std::vector<std::uint8_t>> buffers;
+  buffers.reserve(3);
   for (int i = 0; i < 3; ++i) {
     buffers.push_back(pool.acquire());
   }
@@ -227,6 +230,7 @@ TEST_F(ThreadSafePacketPoolTest, ConcurrentAccess) {
   constexpr int kIterations = 1000;
 
   std::vector<std::thread> threads;
+  threads.reserve(kThreads);
   for (int t = 0; t < kThreads; ++t) {
     threads.emplace_back([&pool]() {
       for (int i = 0; i < kIterations; ++i) {
