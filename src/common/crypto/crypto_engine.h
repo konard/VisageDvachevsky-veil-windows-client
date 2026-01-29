@@ -55,12 +55,14 @@ std::array<std::uint8_t, kAeadKeyLen> derive_sequence_obfuscation_key(
     std::span<const std::uint8_t, kNonceLen> send_nonce);
 
 // Obfuscate sequence number for transmission (sender side).
-// Uses ChaCha20 with the obfuscation key to make sequences indistinguishable from random.
+// Uses ChaCha20 stream cipher with the obfuscation key to make sequences indistinguishable from random.
+// Optimized for performance (Issue #93) - replaces 3-round Feistel network with hardware-accelerated ChaCha20.
 std::uint64_t obfuscate_sequence(std::uint64_t sequence,
                                   std::span<const std::uint8_t, kAeadKeyLen> obfuscation_key);
 
 // Deobfuscate sequence number after reception (receiver side).
 // Reverses the obfuscation to recover the original sequence for nonce derivation.
+// ChaCha20 is symmetric, so deobfuscation is identical to obfuscation (XOR is its own inverse).
 std::uint64_t deobfuscate_sequence(std::uint64_t obfuscated_sequence,
                                     std::span<const std::uint8_t, kAeadKeyLen> obfuscation_key);
 
