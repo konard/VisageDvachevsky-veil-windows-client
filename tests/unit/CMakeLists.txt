@@ -49,6 +49,8 @@ add_executable(veil_unit_tests
   constrained_logging_tests.cpp
   metrics_tests.cpp
   thread_checker_tests.cpp
+  spsc_queue_tests.cpp
+  thread_pool_tests.cpp
   ${VEIL_PLATFORM_TEST_SOURCES}
 )
 
