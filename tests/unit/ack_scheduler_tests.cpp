@@ -13,7 +13,8 @@ class AckSchedulerTest : public ::testing::Test {
  protected:
   void SetUp() override {
     now_ = std::chrono::steady_clock::now();
-    config_.max_ack_delay = 50ms;
+    // Issue #79: Updated from 50ms to 20ms to reflect new default
+    config_.max_ack_delay = 20ms;
     config_.ack_every_n_packets = 2;
     config_.enable_coalescing = true;
     config_.max_pending_acks = 8;
@@ -70,7 +71,8 @@ TEST_F(AckSchedulerTest, DelayedAck) {
   EXPECT_FALSE(due.has_value());
 
   // Advance time past delay.
-  now_ += 60ms;
+  // Issue #79: Updated from 60ms to 30ms to reflect new 20ms delay
+  now_ += 30ms;
   due = scheduler.check_ack_timer();
   EXPECT_TRUE(due.has_value());
   EXPECT_EQ(*due, 0U);
@@ -136,13 +138,16 @@ TEST_F(AckSchedulerTest, TimeUntilNextAck) {
   time = scheduler.time_until_next_ack();
   ASSERT_TRUE(time.has_value());
   EXPECT_GT(*time, 0ms);
-  EXPECT_LE(*time, 50ms);
+  // Issue #79: Updated from 50ms to 20ms to reflect new delay
+  EXPECT_LE(*time, 20ms);
 
   // Advance time.
-  now_ += 30ms;
+  // Issue #79: Updated from 30ms to 12ms to reflect new delay
+  now_ += 12ms;
   time = scheduler.time_until_next_ack();
   ASSERT_TRUE(time.has_value());
-  EXPECT_LT(*time, 25ms);
+  // Issue #79: Updated from 25ms to 10ms to reflect new delay
+  EXPECT_LT(*time, 10ms);
 }
 
 TEST_F(AckSchedulerTest, MultipleStreams) {

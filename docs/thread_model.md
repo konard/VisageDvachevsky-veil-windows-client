@@ -5,11 +5,60 @@
 This document describes the thread model used in VEIL, including thread ownership,
 synchronization mechanisms, and memory safety guarantees.
 
+VEIL supports two threading modes:
+1. **Single-threaded** (default): All processing on one thread (~500 Mbps)
+2. **Pipeline mode**: Multi-threaded processing (target: 1-2 Gbps)
+
+## Threading Modes
+
+### Single-Threaded Mode (Default)
+
+The original architecture where all I/O and processing happens on one thread.
+This mode is simpler and has lower latency but limited throughput.
+
+### Pipeline Mode (High-Throughput)
+
+Introduced in Issue #85, pipeline mode separates processing into stages:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        Pipeline Architecture                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ┌─────────────┐     ┌─────────────────┐     ┌─────────────┐           │
+│  │  RX Thread  │────▶│  Process Thread │────▶│  TX Thread  │           │
+│  │  (I/O)      │     │  (Crypto)       │     │  (I/O)      │           │
+│  └─────────────┘     └─────────────────┘     └─────────────┘           │
+│        │                     │                     │                    │
+│        ▼                     ▼                     ▼                    │
+│   UDP receive           Encrypt/              UDP send                  │
+│   TUN read              Decrypt               TUN write                 │
+│                                                                          │
+│  Lock-free SPSC queues between stages                                   │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Performance Characteristics:**
+- Target throughput: 1-2 Gbps (vs ~500 Mbps single-threaded)
+- Additional latency: ~10-20 microseconds per packet
+- CPU usage: Up to 3 cores utilized
+
+**When to Use:**
+- High-throughput requirements (>500 Mbps)
+- Server deployments with multiple clients
+- Systems with available CPU cores
+
+**When NOT to Use:**
+- Low-latency requirements (<1ms)
+- Resource-constrained systems
+- Simple client deployments
+
 ## Component Thread Model
 
 ### 1. Client Application
 
-The VEIL client uses a single-threaded event-driven model:
+The VEIL client supports both single-threaded and pipeline modes:
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -306,7 +355,70 @@ cmake --build build/debug
 ctest --test-dir build/debug --output-on-failure
 ```
 
+## Pipeline Mode Components
+
+### Lock-Free Queues
+
+Pipeline mode uses lock-free SPSC (Single Producer Single Consumer) queues
+for inter-thread communication:
+
+```cpp
+// src/common/utils/spsc_queue.h
+template <typename T>
+class SpscQueue {
+  bool try_push(T&& value);  // Producer only
+  std::optional<T> try_pop();  // Consumer only
+};
+```
+
+**Thread Safety:**
+- `try_push()`: Must be called by exactly ONE producer thread
+- `try_pop()`: Must be called by exactly ONE consumer thread
+- No mutexes, wait-free operations
+
+### Pipeline Processor
+
+The `PipelineProcessor` class manages the three-stage pipeline:
+
+```cpp
+// src/transport/pipeline/pipeline_processor.h
+class PipelineProcessor {
+  // Stage 1: RX (receives packets, queues for processing)
+  void rx_thread_loop();
+
+  // Stage 2: Process (encrypts/decrypts packets)
+  void process_thread_loop();
+
+  // Stage 3: TX (sends encrypted packets)
+  void tx_thread_loop();
+};
+```
+
+**Thread Ownership:**
+- Each stage runs on a dedicated thread
+- Data flows through lock-free queues
+- No shared mutable state between stages
+
+### Threaded Event Loop
+
+The `ThreadedEventLoop` wraps the base `EventLoop` with optional pipeline support:
+
+```cpp
+// src/transport/event_loop/threaded_event_loop.h
+enum class ThreadingMode {
+  kSingleThreaded,  // Original mode
+  kPipeline,        // Multi-threaded pipeline
+};
+
+class ThreadedEventLoop {
+  // Factory function for high-performance mode
+  static auto make_high_performance_event_loop();
+};
+```
+
 ## Appendix: Component Ownership Diagram
+
+### Single-Threaded Mode
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -335,3 +447,43 @@ ctest --test-dir build/debug --output-on-failure
 │   └───────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+### Pipeline Mode
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    ThreadedEventLoop (Pipeline Mode)                  │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  ┌─────────────────────────────────────────────────────────────────┐│
+│  │                    PipelineProcessor                             ││
+│  ├─────────────────────────────────────────────────────────────────┤│
+│  │                                                                  ││
+│  │  ┌───────────┐   SpscQueue   ┌─────────────┐   SpscQueue       ││
+│  │  │ RX Thread │──────────────▶│Process Thread│────────────────▶  ││
+│  │  │           │               │             │                    ││
+│  │  │ UDP recv  │               │ decrypt()   │   ┌──────────┐    ││
+│  │  │ TUN read  │               │ encrypt()   │──▶│ TX Thread│    ││
+│  │  └───────────┘               └─────────────┘   │          │    ││
+│  │                                                │ UDP send │    ││
+│  │                                                │ TUN write│    ││
+│  │                                                └──────────┘    ││
+│  └─────────────────────────────────────────────────────────────────┘│
+│                                                                      │
+│  ┌─────────────────────────────────────────────────────────────────┐│
+│  │                    TransportSession (per session)                ││
+│  │  Thread ownership: Bound to Process Thread                       ││
+│  └─────────────────────────────────────────────────────────────────┘│
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+## Performance Comparison
+
+| Metric | Single-Threaded | Pipeline Mode |
+|--------|-----------------|---------------|
+| Throughput | ~500 Mbps | 1-2 Gbps |
+| Latency | ~5 µs | ~20 µs |
+| CPU cores | 1 | 3 |
+| Complexity | Low | Medium |
+| Use case | Client | Server |

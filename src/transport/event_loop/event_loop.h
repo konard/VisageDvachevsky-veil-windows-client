@@ -38,7 +38,8 @@ struct EventLoopConfig {
   // On Windows: not used directly (select processes all ready sockets).
   int max_events{64};
   // Default ACK send interval.
-  std::chrono::milliseconds ack_interval{50};
+  // Issue #79: Reduced from 50ms to 20ms to decrease retransmit buffer pending count.
+  std::chrono::milliseconds ack_interval{20};
   // Retransmit check interval.
   std::chrono::milliseconds retransmit_interval{100};
   // Idle timeout for session cleanup.

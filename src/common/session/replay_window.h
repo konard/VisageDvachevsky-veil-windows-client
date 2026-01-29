@@ -11,6 +11,9 @@ class ReplayWindow {
   explicit ReplayWindow(std::size_t window_size = 1024);
   bool mark_and_check(std::uint64_t sequence);
 
+  // Issue #78: Unmark sequence to allow retransmission after decryption failure
+  void unmark(std::uint64_t sequence);
+
   // Getter for diagnostic logging (Issue #72)
   [[nodiscard]] std::uint64_t highest() const { return highest_; }
   [[nodiscard]] bool initialized() const { return initialized_; }
@@ -24,6 +27,7 @@ class ReplayWindow {
   void shift(std::size_t delta);
   bool get_bit(std::size_t index) const;
   void set_bit(std::size_t index);
+  void clear_bit(std::size_t index);
   void mask_tail();
 };
 

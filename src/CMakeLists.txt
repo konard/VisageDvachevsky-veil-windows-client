@@ -22,6 +22,8 @@ if(WIN32)
     transport/mux/ack_scheduler.cpp
     transport/session/transport_session.cpp
     transport/event_loop/event_loop_windows.cpp
+    transport/event_loop/threaded_event_loop.cpp
+    transport/pipeline/pipeline_processor.cpp
     transport/stats/transport_stats.cpp
   )
   set(VEIL_TUNNEL_SOURCES
@@ -48,6 +50,8 @@ else()
     transport/mux/ack_scheduler.cpp
     transport/session/transport_session.cpp
     transport/event_loop/event_loop_linux.cpp
+    transport/event_loop/threaded_event_loop.cpp
+    transport/pipeline/pipeline_processor.cpp
     transport/stats/transport_stats.cpp
   )
   set(VEIL_TUNNEL_SOURCES
