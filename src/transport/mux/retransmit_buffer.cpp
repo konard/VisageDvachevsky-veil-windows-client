@@ -20,8 +20,9 @@ RetransmitBuffer::RetransmitBuffer(RetransmitConfig config, std::function<TimePo
       rate_limit_window_start_(now_fn_()) {}
 
 bool RetransmitBuffer::insert(std::uint64_t sequence, std::vector<std::uint8_t> data) {
-  LOG_WARN("RetransmitBuffer::insert: seq={}, size={}, pending_count={}",
-           sequence, data.size(), pending_.size());
+  // Changed to DEBUG level to avoid performance impact in hot path (Issue #92)
+  LOG_DEBUG("RetransmitBuffer::insert: seq={}, size={}, pending_count={}",
+            sequence, data.size(), pending_.size());
   return insert_with_priority(sequence, std::move(data), PacketPriority::kNormal);
 }
 
@@ -106,16 +107,17 @@ bool RetransmitBuffer::acknowledge(std::uint64_t sequence) {
 
 void RetransmitBuffer::acknowledge_cumulative(std::uint64_t sequence) {
   // Debug logging for cumulative ACK (Issue #72)
-  std::uint64_t min_pending = pending_.empty() ? 0 : pending_.begin()->first;
-  std::uint64_t max_pending = pending_.empty() ? 0 : pending_.rbegin()->first;
-  LOG_WARN("acknowledge_cumulative: ack_seq={}, pending_count={}, pending_range=[{}, {}]",
-           sequence, pending_.size(), min_pending, max_pending);
+  // Changed to DEBUG level to avoid performance impact in hot path (Issue #92)
+  [[maybe_unused]] std::uint64_t min_pending = pending_.empty() ? 0 : pending_.begin()->first;
+  [[maybe_unused]] std::uint64_t max_pending = pending_.empty() ? 0 : pending_.rbegin()->first;
+  LOG_DEBUG("acknowledge_cumulative: ack_seq={}, pending_count={}, pending_range=[{}, {}]",
+            sequence, pending_.size(), min_pending, max_pending);
 
-  std::size_t acked_count = 0;
+  [[maybe_unused]] std::size_t acked_count = 0;
   auto it = pending_.begin();
   while (it != pending_.end() && it->first <= sequence) {
     const auto& pkt = it->second;
-    LOG_WARN("  Acknowledging packet seq={}", it->first);
+    LOG_DEBUG("  Acknowledging packet seq={}", it->first);
     if (pkt.retry_count == 0) {
       const auto now = now_fn_();
       const auto rtt_sample =
@@ -127,7 +129,7 @@ void RetransmitBuffer::acknowledge_cumulative(std::uint64_t sequence) {
     ++acked_count;
     it = pending_.erase(it);
   }
-  LOG_WARN("acknowledge_cumulative done: acked={} packets", acked_count);
+  LOG_DEBUG("acknowledge_cumulative done: acked={} packets", acked_count);
 }
 
 std::vector<const PendingPacket*> RetransmitBuffer::get_packets_to_retransmit() {

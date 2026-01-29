@@ -136,23 +136,23 @@ std::optional<std::vector<mux::MuxFrame>> TransportSession::decrypt_packet(
   const std::uint64_t sequence = crypto::deobfuscate_sequence(obfuscated_sequence, recv_seq_obfuscation_key_);
 
   // Enhanced diagnostic logging for decryption debugging (Issue #69, #72)
-  // Use WARN level temporarily to trace decryption flow in production
-  LOG_WARN("Decrypt attempt: session_id={}, pkt_size={}, obfuscated_seq={:#018x}, deobfuscated_seq={}",
-           current_session_id_, ciphertext.size(), obfuscated_sequence, sequence);
-  LOG_WARN("  recv_seq_obfuscation_key_fp={:02x}{:02x}{:02x}{:02x}, first_8_bytes={:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-           recv_seq_obfuscation_key_[0], recv_seq_obfuscation_key_[1],
-           recv_seq_obfuscation_key_[2], recv_seq_obfuscation_key_[3],
-           ciphertext[0], ciphertext[1], ciphertext[2], ciphertext[3],
-           ciphertext[4], ciphertext[5], ciphertext[6], ciphertext[7]);
+  // Changed to DEBUG level to avoid performance impact in hot path (Issue #92)
+  LOG_DEBUG("Decrypt attempt: session_id={}, pkt_size={}, obfuscated_seq={:#018x}, deobfuscated_seq={}",
+            current_session_id_, ciphertext.size(), obfuscated_sequence, sequence);
+  LOG_DEBUG("  recv_seq_obfuscation_key_fp={:02x}{:02x}{:02x}{:02x}, first_8_bytes={:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+            recv_seq_obfuscation_key_[0], recv_seq_obfuscation_key_[1],
+            recv_seq_obfuscation_key_[2], recv_seq_obfuscation_key_[3],
+            ciphertext[0], ciphertext[1], ciphertext[2], ciphertext[3],
+            ciphertext[4], ciphertext[5], ciphertext[6], ciphertext[7]);
 
   // Replay check.
   if (!replay_window_.mark_and_check(sequence)) {
-    LOG_WARN("Packet replay detected or out of window: sequence={}, highest={}",
-             sequence, replay_window_.highest());
+    LOG_DEBUG("Packet replay detected or out of window: sequence={}, highest={}",
+              sequence, replay_window_.highest());
     ++stats_.packets_dropped_replay;
     return std::nullopt;
   }
-  LOG_WARN("Replay check passed, proceeding to decryption");
+  LOG_DEBUG("Replay check passed, proceeding to decryption");
 
   // Derive nonce from sequence.
   const auto nonce = crypto::derive_nonce(keys_.recv_nonce, sequence);
@@ -162,34 +162,35 @@ std::optional<std::vector<mux::MuxFrame>> TransportSession::decrypt_packet(
   auto decrypted = crypto::aead_decrypt(keys_.recv_key, nonce, {}, ciphertext_body);
   if (!decrypted) {
     // Enhanced error logging for decryption failures (Issue #69, #72)
-    // Use WARN level so this always appears, not just in verbose mode
+    // Changed to DEBUG level to avoid performance impact in hot path (Issue #92)
     // Log key fingerprints (first 4 bytes) to help diagnose key mismatch issues
-    LOG_WARN("Decryption FAILED: session_id={}, sequence={}, ciphertext_size={}, "
-             "recv_key_fp={:02x}{:02x}{:02x}{:02x}, recv_nonce_fp={:02x}{:02x}{:02x}{:02x}",
-             current_session_id_, sequence, ciphertext_body.size(),
-             keys_.recv_key[0], keys_.recv_key[1], keys_.recv_key[2], keys_.recv_key[3],
-             keys_.recv_nonce[0], keys_.recv_nonce[1], keys_.recv_nonce[2], keys_.recv_nonce[3]);
+    LOG_DEBUG("Decryption FAILED: session_id={}, sequence={}, ciphertext_size={}, "
+              "recv_key_fp={:02x}{:02x}{:02x}{:02x}, recv_nonce_fp={:02x}{:02x}{:02x}{:02x}",
+              current_session_id_, sequence, ciphertext_body.size(),
+              keys_.recv_key[0], keys_.recv_key[1], keys_.recv_key[2], keys_.recv_key[3],
+              keys_.recv_nonce[0], keys_.recv_nonce[1], keys_.recv_nonce[2], keys_.recv_nonce[3]);
     // Also log the obfuscation key fingerprint and packet header
-    LOG_WARN("  recv_seq_obfuscation_key_fp={:02x}{:02x}{:02x}{:02x}, first_pkt_bytes={:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-             recv_seq_obfuscation_key_[0], recv_seq_obfuscation_key_[1],
-             recv_seq_obfuscation_key_[2], recv_seq_obfuscation_key_[3],
-             ciphertext[0], ciphertext[1], ciphertext[2], ciphertext[3],
-             ciphertext[4], ciphertext[5], ciphertext[6], ciphertext[7]);
+    LOG_DEBUG("  recv_seq_obfuscation_key_fp={:02x}{:02x}{:02x}{:02x}, first_pkt_bytes={:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+              recv_seq_obfuscation_key_[0], recv_seq_obfuscation_key_[1],
+              recv_seq_obfuscation_key_[2], recv_seq_obfuscation_key_[3],
+              ciphertext[0], ciphertext[1], ciphertext[2], ciphertext[3],
+              ciphertext[4], ciphertext[5], ciphertext[6], ciphertext[7]);
 
     // Issue #78: Unmark sequence in replay window to allow legitimate retransmission
     // If decryption fails (e.g., due to wrong session keys after session rotation),
     // we should allow the server to retransmit this packet rather than permanently
     // rejecting it as a replay.
     replay_window_.unmark(sequence);
-    LOG_WARN("  Unmarked sequence {} in replay window to allow retransmission", sequence);
+    LOG_DEBUG("  Unmarked sequence {} in replay window to allow retransmission", sequence);
 
     ++stats_.packets_dropped_decrypt;
     return std::nullopt;
   }
 
   // Enhanced diagnostic logging for decryption success (Issue #72)
-  LOG_WARN("Decryption SUCCESS: session_id={}, sequence={}, decrypted_size={}",
-           current_session_id_, sequence, decrypted->size());
+  // Changed to DEBUG level to avoid performance impact in hot path (Issue #92)
+  LOG_DEBUG("Decryption SUCCESS: session_id={}, sequence={}, decrypted_size={}",
+            current_session_id_, sequence, decrypted->size());
 
   ++stats_.packets_received;
   stats_.bytes_received += ciphertext.size();
@@ -302,8 +303,9 @@ void TransportSession::process_ack(const mux::AckFrame& ack) {
   VEIL_DCHECK_THREAD(thread_checker_);
 
   // Debug logging for ACK processing (Issue #72)
-  LOG_WARN("process_ack called: stream_id={}, ack={}, bitmap={:#010x}, pending_before={}",
-           ack.stream_id, ack.ack, ack.bitmap, retransmit_buffer_.pending_count());
+  // Changed to DEBUG level to avoid performance impact in hot path (Issue #92)
+  LOG_DEBUG("process_ack called: stream_id={}, ack={}, bitmap={:#010x}, pending_before={}",
+            ack.stream_id, ack.ack, ack.bitmap, retransmit_buffer_.pending_count());
 
   // Cumulative ACK.
   retransmit_buffer_.acknowledge_cumulative(ack.ack);
@@ -319,7 +321,8 @@ void TransportSession::process_ack(const mux::AckFrame& ack) {
   }
 
   // Debug logging for ACK processing result (Issue #72)
-  LOG_WARN("process_ack done: pending_after={}", retransmit_buffer_.pending_count());
+  // Changed to DEBUG level to avoid performance impact in hot path (Issue #92)
+  LOG_DEBUG("process_ack done: pending_after={}", retransmit_buffer_.pending_count());
 }
 
 mux::AckFrame TransportSession::generate_ack(std::uint64_t stream_id) {
