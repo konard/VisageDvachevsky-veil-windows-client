@@ -85,35 +85,30 @@ TEST(SessionRotatorTests, RotatesAfterThresholds) {
 // Issue #83: Verify jittered rotation intervals are non-uniform.
 TEST(SessionRotatorTests, JitteredIntervalsAreNonUniform) {
   using namespace std::chrono_literals;
-  // Create multiple rotators and collect their rotation behavior.
-  // With jitter, different rotators should produce varying intervals.
-  // We test this by creating rotators with a short base interval and
-  // checking that not all rotations happen at exactly the same time.
-  constexpr int kTrials = 20;
-  std::vector<bool> rotated_early;
+  // Create multiple rotators and check rotation status at the base interval.
+  // With jitter, some intervals will be shorter than base (rotated) and some
+  // longer (not rotated). We use 100 trials to reduce flakiness.
+  constexpr int kTrials = 100;
+  int rotated_at_base = 0;
 
   for (int i = 0; i < kTrials; ++i) {
     session::SessionRotator rotator(1s, 1000000);
-    // Check at 800ms — some should rotate (interval < 800ms) and some should not.
-    // Base is 1000ms, jitter range is [~667ms, ~1667ms].
+    // Check exactly at base interval (1000ms). With jitter range [~667ms, ~1667ms],
+    // intervals shorter than 1000ms should have expired, and longer ones should not.
     auto start = std::chrono::steady_clock::now();
-    auto check_point = start + 800ms;
-    rotated_early.push_back(rotator.should_rotate(0, check_point));
-  }
-
-  // Count how many rotated early vs not.
-  int early_count = 0;
-  for (bool r : rotated_early) {
-    if (r) ++early_count;
+    auto check_point = start + 1000ms;
+    if (rotator.should_rotate(0, check_point)) {
+      ++rotated_at_base;
+    }
   }
 
   // With jitter, we expect SOME variation: not all true and not all false.
-  // Probabilistically, at 800ms with range [667ms, 1667ms], about 33% of
-  // the time the interval should be <= 800ms.
-  // Allow the test to pass if at least 1 rotated early and at least 1 did not.
-  EXPECT_GT(early_count, 0) << "All intervals exceeded 800ms — jitter may not be applied";
-  EXPECT_LT(early_count, kTrials)
-      << "All intervals were under 800ms — jitter may not be applied";
+  // ~33% of intervals are shorter than base (subtract path).
+  // Allow the test to pass if at least 1 rotated and at least 1 did not.
+  EXPECT_GT(rotated_at_base, 0)
+      << "No intervals were below 1000ms — jitter may not be applied";
+  EXPECT_LT(rotated_at_base, kTrials)
+      << "All intervals were below 1000ms — jitter may not be applied";
 }
 
 // Issue #83: Verify jittered interval stays within bounds.
