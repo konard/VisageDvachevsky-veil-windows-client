@@ -83,6 +83,7 @@ add_library(veil_common STATIC
   common/session/idle_timeout.cpp
   common/handshake/handshake_processor.cpp
   common/handshake/handshake_replay_cache.cpp
+  common/handshake/session_ticket.cpp
   common/auth/client_registry.cpp
   common/utils/rate_limiter.cpp
   common/utils/timer_heap.cpp
