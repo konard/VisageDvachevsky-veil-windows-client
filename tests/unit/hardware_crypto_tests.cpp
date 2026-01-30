@@ -363,7 +363,7 @@ TEST(HardwareCryptoTests, LargeDataEncryption) {
   std::copy(nonce_vec.begin(), nonce_vec.end(), nonce.begin());
 
   // Create large plaintext (1MB)
-  const std::size_t size = 1024 * 1024;
+  const std::size_t size = static_cast<std::size_t>(1024) * 1024;
   std::vector<std::uint8_t> plaintext(size);
   for (std::size_t i = 0; i < size; ++i) {
     plaintext[i] = static_cast<std::uint8_t>(i % 256);
