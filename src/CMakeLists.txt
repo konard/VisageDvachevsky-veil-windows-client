@@ -196,4 +196,18 @@ if(WIN32 AND VEIL_BUILD_SERVICE)
   install(TARGETS veil-service
     RUNTIME DESTINATION bin
   )
+
+  # Unified launcher executable
+  # Single entry point that requests elevation, ensures the service is running,
+  # and launches the GUI client.
+  add_executable(veil-vpn WIN32
+    windows/launcher_main.cpp
+    windows/service_manager.cpp
+  )
+  target_link_libraries(veil-vpn PRIVATE veil_common)
+  veil_set_warnings(veil-vpn)
+
+  install(TARGETS veil-vpn
+    RUNTIME DESTINATION bin
+  )
 endif()

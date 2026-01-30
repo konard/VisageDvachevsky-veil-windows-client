@@ -52,6 +52,10 @@ static tunnel::TunnelConfig g_tunnel_config;
 static bool g_routes_configured{false};
 static bool g_route_all_traffic{false};
 static std::vector<std::string> g_custom_routes;
+static HANDLE g_ready_event{nullptr};
+
+// Name of the Windows Event used to signal that the IPC server is ready
+static constexpr const char* kServiceReadyEventName = "Global\\VEIL_SERVICE_READY";
 
 // Forward declarations
 void WINAPI service_main(DWORD argc, LPSTR* argv);
@@ -257,6 +261,33 @@ void WINAPI service_main(DWORD /*argc*/, LPSTR* /*argv*/) {
 }
 
 // ============================================================================
+// Service Ready Signaling
+// ============================================================================
+// Uses a Windows named event to signal the GUI that the IPC server is ready
+// for connections. This eliminates the race condition where the GUI tries to
+// connect before the Named Pipe is created.
+
+void signal_ready() {
+  g_ready_event = CreateEventA(nullptr, TRUE, FALSE, kServiceReadyEventName);
+  if (g_ready_event) {
+    SetEvent(g_ready_event);
+    LOG_INFO("Service ready event signaled: {}", kServiceReadyEventName);
+  } else {
+    LOG_WARN("Failed to create service ready event (error {}), GUI will "
+             "fall back to Named Pipe polling",
+             GetLastError());
+  }
+}
+
+void close_ready_event() {
+  if (g_ready_event) {
+    CloseHandle(g_ready_event);
+    g_ready_event = nullptr;
+    LOG_DEBUG("Service ready event handle closed");
+  }
+}
+
+// ============================================================================
 // Service Logic
 // ============================================================================
 
@@ -286,6 +317,7 @@ void run_service() {
   } else {
     LOG_INFO("IPC server started successfully");
     LOG_INFO("Listening on named pipe: \\\\.\\pipe\\veil-client");
+    signal_ready();
   }
 
   // Report that we're running
@@ -362,6 +394,9 @@ void run_service() {
 
 void stop_service() {
   g_running = false;
+
+  // Close the service ready event handle
+  close_ready_event();
 
   // Also stop the tunnel if it's running
   if (g_tunnel) {

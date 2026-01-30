@@ -87,6 +87,12 @@ class MainWindow : public QMainWindow {
 #ifdef _WIN32
   /// Ensure the Windows service is running, starting it if necessary
   bool ensureServiceRunning();
+
+  /// Wait for the service IPC server to be ready for connections.
+  /// Uses a two-phase approach: first checks a Windows Event signal from the
+  /// service, then falls back to polling for the Named Pipe existence.
+  /// Returns true if the service is ready within the timeout.
+  bool waitForServiceReady(int timeout_ms = 5000);
 #endif
 
   AnimatedStackedWidget* stackedWidget_;

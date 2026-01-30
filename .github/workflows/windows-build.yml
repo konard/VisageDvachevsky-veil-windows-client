@@ -127,6 +127,7 @@ jobs:
           # Copy executables
           Copy-Item build/src/veil-client.exe artifacts/bin/ -ErrorAction SilentlyContinue
           Copy-Item build/src/veil-service.exe artifacts/bin/ -ErrorAction SilentlyContinue
+          Copy-Item build/src/veil-vpn.exe artifacts/bin/ -ErrorAction SilentlyContinue
           Copy-Item build/src/gui-client/veil-client-gui.exe artifacts/bin/ -ErrorAction SilentlyContinue
 
           # Copy Wintun driver to both locations
