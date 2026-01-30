@@ -53,7 +53,6 @@ class SetupWizard : public QWidget {
   void onFinishClicked();
   void onImportConfig();
   void onBrowseKeyFile();
-  void onGenerateKeyFile();
   void onTestConnection();
 
  private:
@@ -99,7 +98,6 @@ class SetupWizard : public QWidget {
   // === Page 2: Key File ===
   QLineEdit* keyFileEdit_;
   QPushButton* browseKeyFileButton_;
-  QPushButton* generateKeyFileButton_;
   QLabel* keyFileStatusLabel_;
 
   // === Page 3: Features ===

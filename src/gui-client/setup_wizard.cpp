@@ -12,7 +12,6 @@
 #include <QApplication>
 #include <QParallelAnimationGroup>
 #include <QDebug>
-#include <QRandomGenerator>
 #include <QTcpSocket>
 #include <QTimer>
 
@@ -307,7 +306,7 @@ QWidget* SetupWizard::createKeyFilePage() {
 
   auto* subtitleLabel = new QLabel(
       tr("A pre-shared key file is used to authenticate with the server.\n"
-         "You can browse for an existing key or generate a new one."),
+         "The key file is provided by your VPN server administrator."),
       page);
   subtitleLabel->setStyleSheet("color: #8b949e; font-size: 14px;");
   subtitleLabel->setAlignment(Qt::AlignCenter);
@@ -327,7 +326,7 @@ QWidget* SetupWizard::createKeyFilePage() {
 
   auto* fileRow = new QHBoxLayout();
   keyFileEdit_ = new QLineEdit(keyGroup);
-  keyFileEdit_->setPlaceholderText(tr("Select or generate a key file..."));
+  keyFileEdit_->setPlaceholderText(tr("Select key file provided by server..."));
   keyFileEdit_->setReadOnly(true);
   fileRow->addWidget(keyFileEdit_);
 
@@ -342,15 +341,6 @@ QWidget* SetupWizard::createKeyFilePage() {
 
   keyLayout->addLayout(fileRow);
 
-  generateKeyFileButton_ =
-      new QPushButton(tr("Generate New Key File..."), keyGroup);
-  generateKeyFileButton_->setProperty("buttonStyle", "secondary");
-  generateKeyFileButton_->setFixedHeight(40);
-  generateKeyFileButton_->setCursor(Qt::PointingHandCursor);
-  connect(generateKeyFileButton_, &QPushButton::clicked,
-          this, &SetupWizard::onGenerateKeyFile);
-  keyLayout->addWidget(generateKeyFileButton_);
-
   keyFileStatusLabel_ = new QLabel(keyGroup);
   keyFileStatusLabel_->setStyleSheet("font-size: 12px;");
   keyFileStatusLabel_->setVisible(false);
@@ -360,8 +350,8 @@ QWidget* SetupWizard::createKeyFilePage() {
 
   // Info label
   auto* infoLabel = new QLabel(
-      tr("Note: The key file is optional for initial setup. "
-         "You can configure it later in Settings."),
+      tr("Note: The key and seed files are provided by your VPN server. "
+         "You can configure them later in Settings if not available yet."),
       page);
   infoLabel->setStyleSheet(
       "color: #6e7681; font-size: 12px; padding: 8px 12px;"
@@ -805,50 +795,6 @@ void SetupWizard::onBrowseKeyFile() {
     }
     keyFileStatusLabel_->setVisible(true);
   }
-}
-
-void SetupWizard::onGenerateKeyFile() {
-  QString filePath = QFileDialog::getSaveFileName(
-      this, tr("Save Generated Key File"),
-      QDir::homePath() + "/veil-client.key",
-      tr("Key Files (*.key);;All Files (*)"));
-
-  if (filePath.isEmpty()) {
-    return;
-  }
-
-  qDebug() << "[SetupWizard] Generating key file at:" << filePath;
-
-  // Generate 32 bytes of random data for ChaCha20-Poly1305 PSK
-  QFile file(filePath);
-  if (!file.open(QIODevice::WriteOnly)) {
-    QMessageBox::warning(this, tr("Key Generation Failed"),
-                         tr("Could not create key file:\n%1").arg(filePath));
-    return;
-  }
-
-  // Use /dev/urandom or QRandomGenerator for key material
-  QByteArray keyData(32, '\0');
-  QFile urandom("/dev/urandom");
-  if (urandom.open(QIODevice::ReadOnly)) {
-    keyData = urandom.read(32);
-    urandom.close();
-  } else {
-    // Fallback: use Qt's random generator
-    for (int i = 0; i < 32; ++i) {
-      keyData[i] = static_cast<char>(QRandomGenerator::global()->generate() & 0xFF);
-    }
-  }
-
-  file.write(keyData);
-  file.close();
-
-  keyFileEdit_->setText(filePath);
-  keyFileStatusLabel_->setText(tr("New key file generated (32 bytes)"));
-  keyFileStatusLabel_->setStyleSheet("color: #3fb950; font-size: 12px;");
-  keyFileStatusLabel_->setVisible(true);
-
-  qDebug() << "[SetupWizard] Key file generated successfully";
 }
 
 // ===================== Test Connection =====================
