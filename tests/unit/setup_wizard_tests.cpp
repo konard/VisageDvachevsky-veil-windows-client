@@ -14,7 +14,6 @@
 #include <QComboBox>
 #include <QPushButton>
 #include <QLabel>
-#include <QSignalSpy>
 
 #include "gui-client/setup_wizard.h"
 
@@ -25,7 +24,7 @@ namespace {
 class SetupWizardTestEnvironment : public ::testing::Environment {
  public:
   void SetUp() override {
-    if (!QApplication::instance()) {
+    if (QApplication::instance() == nullptr) {
       // QApplication requires argc to remain valid for its lifetime
       static int argc = 1;
       static const char* argv[] = {"test"};
@@ -634,6 +633,7 @@ TEST_F(SetupWizardTest, DpiModeComboHasFourOptions) {
   SetupWizard wizard;
 
   auto combos = wizard.findChildren<QComboBox*>();
+  bool found = false;
   for (auto* combo : combos) {
     if (combo->count() == 4) {
       // This should be the DPI mode combo
@@ -641,10 +641,11 @@ TEST_F(SetupWizardTest, DpiModeComboHasFourOptions) {
       EXPECT_EQ(combo->itemData(1).toInt(), 1);
       EXPECT_EQ(combo->itemData(2).toInt(), 2);
       EXPECT_EQ(combo->itemData(3).toInt(), 3);
-      return;
+      found = true;
+      break;
     }
   }
-  FAIL() << "DPI mode combo box with 4 options not found";
+  EXPECT_TRUE(found) << "DPI mode combo box with 4 options not found";
 }
 
 }  // namespace veil::gui
