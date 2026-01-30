@@ -3,7 +3,18 @@
 #include <QString>
 #include <QColor>
 
+#ifdef _WIN32
+#include <QSettings>
+#endif
+
 namespace veil::gui {
+
+/// Theme selection options
+enum class Theme {
+  kDark,    // Dark theme
+  kLight,   // Light theme
+  kSystem   // Follow system theme (Windows dark mode setting)
+};
 
 /// Color palette as defined in client_ui_design.md
 namespace colors {
@@ -584,6 +595,33 @@ inline QString getLightThemeStylesheet() {
       border-color: #0d6efd;
     }
   )";
+}
+
+/// Detects if the system is using dark mode (Windows only)
+inline bool isSystemDarkMode() {
+#ifdef _WIN32
+  QSettings settings("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                     QSettings::NativeFormat);
+  // AppsUseLightTheme == 0 means dark mode is enabled
+  return settings.value("AppsUseLightTheme", 1).toInt() == 0;
+#else
+  // Default to dark mode on non-Windows platforms
+  return true;
+#endif
+}
+
+/// Resolves the effective theme based on the theme setting
+inline Theme resolveTheme(Theme theme) {
+  if (theme == Theme::kSystem) {
+    return isSystemDarkMode() ? Theme::kDark : Theme::kLight;
+  }
+  return theme;
+}
+
+/// Gets the stylesheet for a specific theme
+inline QString getThemeStylesheet(Theme theme) {
+  Theme effectiveTheme = resolveTheme(theme);
+  return (effectiveTheme == Theme::kDark) ? getDarkThemeStylesheet() : getLightThemeStylesheet();
 }
 
 }  // namespace veil::gui
