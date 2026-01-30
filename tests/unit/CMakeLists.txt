@@ -101,7 +101,13 @@ if(Qt6_FOUND)
 
   veil_set_warnings(veil_gui_tests)
 
-  gtest_discover_tests(veil_gui_tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+  # QT_QPA_PLATFORM=offscreen is needed for headless CI servers.
+  # DISCOVERY_MODE PRE_TEST defers test discovery to ctest run time,
+  # where the ENVIRONMENT property is honored.
+  gtest_discover_tests(veil_gui_tests
+    PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0;QT_QPA_PLATFORM=offscreen"
+    DISCOVERY_MODE PRE_TEST
+  )
 else()
   message(STATUS "Qt6 not found, GUI widget tests will not be built")
 endif()

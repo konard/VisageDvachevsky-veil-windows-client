@@ -11,7 +11,16 @@
 #include <QDateTime>
 #include "statistics_widget.h"
 
-// We need a QApplication for widget tests
+// We need a QApplication for widget tests.
+// Set offscreen platform for headless CI environments.
+static struct OffscreenPlatformSetter {
+  OffscreenPlatformSetter() {
+    if (qgetenv("QT_QPA_PLATFORM").isEmpty()) {
+      qputenv("QT_QPA_PLATFORM", "offscreen");
+    }
+  }
+} offscreenSetter;  // NOLINT(cert-err58-cpp)
+
 static int argc = 1;
 static char appName[] = "statistics_widget_tests";  // NOLINT(cppcoreguidelines-avoid-c-arrays)
 static char* argv[] = {appName, nullptr};  // NOLINT(cppcoreguidelines-avoid-c-arrays)
