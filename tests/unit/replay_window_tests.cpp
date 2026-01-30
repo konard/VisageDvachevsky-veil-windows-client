@@ -76,8 +76,85 @@ TEST(SessionRotatorTests, RotatesAfterThresholds) {
   const auto second = rotator.rotate(std::chrono::steady_clock::now());
   EXPECT_NE(first, second);
   EXPECT_FALSE(rotator.should_rotate(0, std::chrono::steady_clock::now()));
-  std::this_thread::sleep_for(1100ms);
+  // With jitter the interval can be up to ~1.67x base (1s), so wait long enough
+  // to exceed the maximum jittered interval.
+  std::this_thread::sleep_for(2000ms);
   EXPECT_TRUE(rotator.should_rotate(0, std::chrono::steady_clock::now()));
+}
+
+// Issue #83: Verify jittered rotation intervals are non-uniform.
+TEST(SessionRotatorTests, JitteredIntervalsAreNonUniform) {
+  using namespace std::chrono_literals;
+  // Create multiple rotators and collect their rotation behavior.
+  // With jitter, different rotators should produce varying intervals.
+  // We test this by creating rotators with a short base interval and
+  // checking that not all rotations happen at exactly the same time.
+  constexpr int kTrials = 20;
+  std::vector<bool> rotated_early;
+
+  for (int i = 0; i < kTrials; ++i) {
+    session::SessionRotator rotator(1s, 1000000);
+    // Check at 800ms — some should rotate (interval < 800ms) and some should not.
+    // Base is 1000ms, jitter range is [~667ms, ~1667ms].
+    auto start = std::chrono::steady_clock::now();
+    auto check_point = start + 800ms;
+    rotated_early.push_back(rotator.should_rotate(0, check_point));
+  }
+
+  // Count how many rotated early vs not.
+  int early_count = 0;
+  for (bool r : rotated_early) {
+    if (r) ++early_count;
+  }
+
+  // With jitter, we expect SOME variation: not all true and not all false.
+  // Probabilistically, at 800ms with range [667ms, 1667ms], about 33% of
+  // the time the interval should be <= 800ms.
+  // Allow the test to pass if at least 1 rotated early and at least 1 did not.
+  EXPECT_GT(early_count, 0) << "All intervals exceeded 800ms — jitter may not be applied";
+  EXPECT_LT(early_count, kTrials)
+      << "All intervals were under 800ms — jitter may not be applied";
+}
+
+// Issue #83: Verify jittered interval stays within bounds.
+TEST(SessionRotatorTests, JitteredIntervalBounds) {
+  using namespace std::chrono_literals;
+  // With a 3s base interval, jitter range is 1s (base/3).
+  // Minimum: base * 0.67 = ~2s, Maximum: base * 1.67 = ~5s.
+  // Safety floor: base * 0.25 = 0.75s.
+  // So interval should be in [~2s, ~5s].
+  constexpr int kTrials = 50;
+  for (int i = 0; i < kTrials; ++i) {
+    session::SessionRotator rotator(3s, 1000000);
+    auto start = std::chrono::steady_clock::now();
+
+    // Should NOT rotate at 1.5s (well below minimum ~2s).
+    EXPECT_FALSE(rotator.should_rotate(0, start + 1500ms))
+        << "Rotated too early at 1.5s with 3s base";
+
+    // Should rotate at 6s (well above maximum ~5s).
+    EXPECT_TRUE(rotator.should_rotate(0, start + 6000ms))
+        << "Did not rotate at 6s with 3s base";
+  }
+}
+
+// Issue #83: Verify each rotation recomputes a new jittered interval.
+TEST(SessionRotatorTests, RotationRecomputesJitter) {
+  using namespace std::chrono_literals;
+  session::SessionRotator rotator(10s, 1000000);
+
+  // Perform multiple rotations and check that rotation always resets the timer.
+  auto now = std::chrono::steady_clock::now();
+  for (int i = 0; i < 10; ++i) {
+    rotator.rotate(now);
+    // Immediately after rotation, should not need to rotate.
+    EXPECT_FALSE(rotator.should_rotate(0, now))
+        << "Should not rotate immediately after rotation (iteration " << i << ")";
+    // Advance well past maximum jittered interval (base * 1.67 = ~16.7s).
+    now += 20s;
+    EXPECT_TRUE(rotator.should_rotate(0, now))
+        << "Should rotate after 20s with 10s base (iteration " << i << ")";
+  }
 }
 
 }  // namespace veil::tests
