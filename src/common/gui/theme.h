@@ -109,6 +109,12 @@ constexpr int kStatusIndicatorSize = 120;
 /// Returns the complete dark theme stylesheet
 inline QString getDarkThemeStylesheet() {
   return R"(
+    /* === Global Focus Indicator === */
+    *:focus {
+      outline: 2px solid #58a6ff;
+      outline-offset: 2px;
+    }
+
     /* === Main Window & Containers === */
     QMainWindow, QWidget {
       background-color: #0d1117;
@@ -180,6 +186,11 @@ inline QString getDarkThemeStylesheet() {
     QPushButton:pressed {
       background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
                                   stop:0 #1a7f37, stop:1 #238636);
+    }
+
+    QPushButton:focus {
+      outline: 2px solid #58a6ff;
+      outline-offset: 2px;
     }
 
     QPushButton:disabled {
@@ -263,7 +274,8 @@ inline QString getDarkThemeStylesheet() {
 
     QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
       border-color: #58a6ff;
-      outline: none;
+      outline: 2px solid #58a6ff;
+      outline-offset: 2px;
     }
 
     QLineEdit:disabled, QSpinBox:disabled, QComboBox:disabled {
@@ -314,6 +326,11 @@ inline QString getDarkThemeStylesheet() {
 
     QCheckBox::indicator:hover {
       border-color: #58a6ff;
+    }
+
+    QCheckBox:focus {
+      outline: 2px solid #58a6ff;
+      outline-offset: 2px;
     }
 
     /* === Labels === */
@@ -500,6 +517,16 @@ inline QString getDarkThemeStylesheet() {
     QTabBar::tab:hover:!selected {
       background-color: #21262d;
       color: #f0f6fc;
+    }
+
+    QTabBar::tab:focus {
+      outline: 2px solid #58a6ff;
+      outline-offset: 2px;
+    }
+
+    QMenuBar::item:focus {
+      outline: 2px solid #58a6ff;
+      outline-offset: 2px;
     }
   )";
 }

@@ -9,6 +9,7 @@
 #include <QPainterPath>
 #include <QGraphicsDropShadowEffect>
 #include <QSettings>
+#include <QShortcut>
 
 #include "common/gui/theme.h"
 
@@ -159,6 +160,15 @@ ConnectionWidget::ConnectionWidget(QWidget* parent) : QWidget(parent) {
   setupUi();
   setupAnimations();
   loadServerSettings();
+
+  // Add Space shortcut for toggling connection when button is focused
+  auto* spaceShortcut = new QShortcut(QKeySequence(Qt::Key_Space), this);
+  connect(spaceShortcut, &QShortcut::activated, this, [this]() {
+    // Only trigger if connect button has focus
+    if (connectButton_ && connectButton_->hasFocus()) {
+      onConnectClicked();
+    }
+  });
 }
 
 void ConnectionWidget::setupUi() {
@@ -203,7 +213,7 @@ void ConnectionWidget::setupUi() {
   settingsButton_ = new QPushButton(this);
   settingsButton_->setFixedSize(40, 40);
   settingsButton_->setCursor(Qt::PointingHandCursor);
-  settingsButton_->setToolTip("Settings");
+  settingsButton_->setToolTip("Settings (Ctrl+,)");
   settingsButton_->setStyleSheet(R"(
     QPushButton {
       background: rgba(255, 255, 255, 0.04);
@@ -280,6 +290,7 @@ void ConnectionWidget::setupUi() {
   connectButton_ = new QPushButton("Connect", this);
   connectButton_->setMinimumHeight(64);
   connectButton_->setCursor(Qt::PointingHandCursor);
+  connectButton_->setToolTip("Connect to VPN (Ctrl+Enter)");
   connectButton_->setStyleSheet(R"(
     QPushButton {
       background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
@@ -390,6 +401,10 @@ void ConnectionWidget::setupUi() {
   mainLayout->addWidget(sessionInfoGroup_);
 
   mainLayout->addStretch();
+
+  // Set explicit tab order for keyboard navigation
+  // Order: Connect button (primary action) -> Settings button (secondary action)
+  setTabOrder(connectButton_, settingsButton_);
 }
 
 void ConnectionWidget::setupAnimations() {
@@ -509,6 +524,7 @@ void ConnectionWidget::updateStatusDisplay() {
     case ConnectionState::kDisconnected:
     case ConnectionState::kError:
       connectButton_->setText(state_ == ConnectionState::kError ? "Retry Connection" : "Connect");
+      connectButton_->setToolTip("Connect to VPN (Ctrl+Enter)");
       connectButton_->setStyleSheet(R"(
         QPushButton {
           background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
@@ -533,6 +549,7 @@ void ConnectionWidget::updateStatusDisplay() {
     case ConnectionState::kConnecting:
     case ConnectionState::kReconnecting:
       connectButton_->setText("Cancel");
+      connectButton_->setToolTip("Cancel connection attempt");
       connectButton_->setStyleSheet(QString(R"(
         QPushButton {
           background: transparent;
@@ -551,6 +568,7 @@ void ConnectionWidget::updateStatusDisplay() {
       break;
     case ConnectionState::kConnected:
       connectButton_->setText("Disconnect");
+      connectButton_->setToolTip("Disconnect from VPN (Ctrl+D)");
       connectButton_->setStyleSheet(QString(R"(
         QPushButton {
           background: qlineargradient(x1:0, y1:0, x2:1, y2:1,

@@ -719,6 +719,34 @@ void MainWindow::setupMenuBar() {
       onQuickDisconnect();
     }
   });
+
+  // Additional accessibility shortcuts
+  auto* escapeShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
+  connect(escapeShortcut, &QShortcut::activated, this, [this]() {
+    // If on settings or diagnostics view, go back to connection view
+    if (stackedWidget_->currentIndex() != 0) {
+      showConnectionView();
+    }
+  });
+
+  auto* saveSettingsShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_S), this);
+  connect(saveSettingsShortcut, &QShortcut::activated, this, [this]() {
+    // Trigger save if on settings view
+    if (stackedWidget_->currentIndex() == 1 && settingsWidget_) {
+      settingsWidget_->saveSettings();
+    }
+  });
+
+  auto* openSettingsShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma), this);
+  connect(openSettingsShortcut, &QShortcut::activated, this, &MainWindow::showSettingsView);
+
+  auto* refreshDiagnosticsShortcut = new QShortcut(QKeySequence(Qt::Key_F5), this);
+  connect(refreshDiagnosticsShortcut, &QShortcut::activated, this, [this]() {
+    // Refresh diagnostics if on diagnostics view by emitting the request signal
+    if (stackedWidget_->currentIndex() == 2) {
+      showDiagnosticsView();  // Re-showing triggers a refresh
+    }
+  });
 }
 
 void MainWindow::setupStatusBar() {
