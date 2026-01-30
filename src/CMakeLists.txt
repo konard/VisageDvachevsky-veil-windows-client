@@ -69,6 +69,8 @@ endif()
 add_library(veil_common STATIC
   common/crypto/random.cpp
   common/crypto/crypto_engine.cpp
+  common/crypto/hardware_features.cpp
+  common/crypto/hardware_crypto.cpp
   common/logging/logger.cpp
   common/logging/constrained_logger.cpp
   ${VEIL_CLI_CONFIG_SOURCES}
