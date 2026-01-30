@@ -267,10 +267,32 @@ TEST(HardwareCryptoTests, GetRecommendedAlgorithm) {
   EXPECT_TRUE(algo == crypto::AeadAlgorithm::kChaCha20Poly1305 ||
               algo == crypto::AeadAlgorithm::kAesGcm);
 
-  // If hardware AES-GCM is available, should recommend it
-  if (crypto::has_hardware_aes_gcm()) {
-    EXPECT_EQ(algo, crypto::AeadAlgorithm::kAesGcm);
-  }
+  // Note: We cannot directly test that hardware AES-GCM implies kAesGcm algorithm
+  // because has_hardware_aes_gcm() checks CPU features, but the algorithm selection
+  // depends on libsodium's crypto_aead_aes256gcm_is_available() which may differ
+  // based on how libsodium was built.
+
+  // Instead, verify that the recommended algorithm actually works
+  const auto key_vec = crypto::random_bytes(crypto::kAeadKeyLen);
+  const auto nonce_vec = crypto::random_bytes(crypto::kNonceLen);
+
+  std::array<std::uint8_t, crypto::kAeadKeyLen> key{};
+  std::array<std::uint8_t, crypto::kNonceLen> nonce{};
+  std::copy(key_vec.begin(), key_vec.end(), key.begin());
+  std::copy(nonce_vec.begin(), nonce_vec.end(), nonce.begin());
+
+  const std::vector<std::uint8_t> plaintext = {'t', 'e', 's', 't'};
+  const std::vector<std::uint8_t> aad = {'a', 'a', 'd'};
+
+  // Encrypt and decrypt using the recommended algorithm via kAuto
+  const auto ciphertext = crypto::aead_encrypt_with_algorithm(
+      key, nonce, aad, plaintext, crypto::AeadAlgorithm::kAuto);
+  EXPECT_FALSE(ciphertext.empty());
+
+  const auto decrypted = crypto::aead_decrypt_with_algorithm(
+      key, nonce, aad, ciphertext, crypto::AeadAlgorithm::kAuto);
+  ASSERT_TRUE(decrypted.has_value());
+  EXPECT_EQ(decrypted.value(), plaintext);
 }
 
 TEST(HardwareCryptoTests, AlgorithmNameString) {
