@@ -400,6 +400,10 @@ void ConnectionWidget::setupUi() {
   mainLayout->addWidget(sessionInfoGroup_);
 
   mainLayout->addStretch();
+
+  // Set explicit tab order for keyboard navigation
+  // Order: Connect button (primary action) -> Settings button (secondary action)
+  setTabOrder(connectButton_, settingsButton_);
 }
 
 void ConnectionWidget::setupAnimations() {
