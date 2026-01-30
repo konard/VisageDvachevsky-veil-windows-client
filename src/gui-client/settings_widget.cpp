@@ -11,6 +11,7 @@
 #include <QFileInfo>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QApplication>
 
 #include "common/gui/theme.h"
 
@@ -706,6 +707,19 @@ void SettingsWidget::saveSettings() {
     return;
   }
 
+  // Show loading state
+  saveButton_->setEnabled(false);
+  saveButton_->setText("Saving...");
+  saveButton_->setStyleSheet(QString(R"(
+    QPushButton {
+      background: %1;
+      color: %2;
+    }
+  )").arg(colors::dark::kBackgroundSecondary, colors::dark::kTextSecondary));
+
+  // Process events to update UI immediately
+  QApplication::processEvents();
+
   // Save settings to QSettings
   QSettings settings("VEIL", "VPN Client");
 
@@ -744,7 +758,7 @@ void SettingsWidget::saveSettings() {
   settings.sync();
   hasUnsavedChanges_ = false;
 
-  // Show brief confirmation
+  // Show success confirmation
   saveButton_->setText("Saved!");
   saveButton_->setStyleSheet(QString(R"(
     QPushButton {
@@ -756,6 +770,7 @@ void SettingsWidget::saveSettings() {
   QTimer::singleShot(2000, this, [this]() {
     saveButton_->setText("Save Changes");
     saveButton_->setStyleSheet("");
+    saveButton_->setEnabled(true);
   });
 
   emit settingsSaved();

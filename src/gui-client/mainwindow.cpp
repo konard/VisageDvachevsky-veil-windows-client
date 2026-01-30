@@ -21,6 +21,7 @@
 #include <QCoreApplication>
 #include <QStringList>
 #include <QDebug>
+#include <QProgressDialog>
 
 #include "common/gui/theme.h"
 #include "common/ipc/ipc_protocol.h"
@@ -133,22 +134,37 @@ MainWindow::MainWindow(QWidget* parent)
   // With SERVICE_AUTO_START, the service should already be running on Windows.
   // If not yet ready (e.g., delayed auto-start), retry after a brief delay.
   qDebug() << "MainWindow: Attempting to connect to VEIL daemon...";
+
+  // Create progress dialog for initial connection
+  auto* connectionProgress = new QProgressDialog(
+      tr("Connecting to VEIL daemon..."),
+      nullptr,  // No cancel button
+      0, 0,     // Indeterminate progress (0-0 range)
+      this);
+  connectionProgress->setWindowModality(Qt::WindowModal);
+  connectionProgress->setMinimumDuration(500);  // Show after 500ms if still connecting
+  connectionProgress->setValue(0);
+
   if (!ipcManager_->connectToDaemon()) {
     qWarning() << "MainWindow: Failed to connect to daemon on first attempt";
 #ifdef _WIN32
     // Service uses delayed auto-start, so it may still be starting.
     // Retry connection after a short delay before falling back to manual start.
     qDebug() << "MainWindow: Service may still be starting (delayed auto-start), retrying soon...";
+    connectionProgress->setLabelText(tr("Waiting for VEIL service to start..."));
     statusBar()->showMessage(tr("Waiting for VEIL service to start..."));
-    QTimer::singleShot(3000, this, [this]() {
+    QTimer::singleShot(3000, this, [this, connectionProgress]() {
       qDebug() << "MainWindow: Retrying daemon connection...";
       if (!ipcManager_->connectToDaemon()) {
         qWarning() << "MainWindow: Retry failed, attempting to ensure service is running...";
+        connectionProgress->setLabelText(tr("Starting VEIL service..."));
         if (ensureServiceRunning()) {
           qDebug() << "MainWindow: Service startup succeeded, waiting for IPC server to be ready...";
           // Wait for the service's IPC Named Pipe to be available before connecting
+          connectionProgress->setLabelText(tr("Waiting for service to be ready..."));
           if (waitForServiceReady(5000)) {
             qDebug() << "MainWindow: Service IPC is ready, connecting...";
+            connectionProgress->setLabelText(tr("Connecting to daemon..."));
             if (!ipcManager_->connectToDaemon()) {
               qWarning() << "MainWindow: Failed to connect to daemon after service ready";
               statusBar()->showMessage(tr("Failed to connect to daemon after service start"), 5000);
@@ -172,12 +188,19 @@ MainWindow::MainWindow(QWidget* parent)
         qDebug() << "MainWindow: Successfully connected to daemon on retry";
         statusBar()->showMessage(tr("Connected to daemon"), 3000);
       }
+      // Close the progress dialog
+      connectionProgress->close();
+      connectionProgress->deleteLater();
     });
 #else
     statusBar()->showMessage(tr("Daemon not running - start veil-client first"), 5000);
+    connectionProgress->close();
+    connectionProgress->deleteLater();
 #endif
   } else {
     qDebug() << "MainWindow: Successfully connected to daemon";
+    connectionProgress->close();
+    connectionProgress->deleteLater();
   }
 
   // Check for updates on startup (delayed)
@@ -1039,6 +1062,39 @@ void MainWindow::setupUpdateChecker() {
 
 void MainWindow::checkForUpdates() {
   statusBar()->showMessage(tr("Checking for updates..."));
+
+  // Create progress dialog for update check
+  auto* progress = new QProgressDialog(
+      tr("Checking for updates..."),
+      tr("Cancel"),
+      0, 0,  // Indeterminate progress
+      this);
+  progress->setWindowModality(Qt::WindowModal);
+  progress->setMinimumDuration(500);  // Show after 500ms if still checking
+  progress->setValue(0);
+
+  // Connect to cancel button
+  connect(progress, &QProgressDialog::canceled, [progress]() {
+    progress->close();
+    progress->deleteLater();
+  });
+
+  // Connect to update checker signals to close progress dialog
+  connect(updateChecker_.get(), &UpdateChecker::updateAvailable, progress, [progress](const UpdateInfo&) {
+    progress->close();
+    progress->deleteLater();
+  }, Qt::UniqueConnection);
+
+  connect(updateChecker_.get(), &UpdateChecker::noUpdateAvailable, progress, [progress]() {
+    progress->close();
+    progress->deleteLater();
+  }, Qt::UniqueConnection);
+
+  connect(updateChecker_.get(), &UpdateChecker::checkFailed, progress, [progress](const QString&) {
+    progress->close();
+    progress->deleteLater();
+  }, Qt::UniqueConnection);
+
   updateChecker_->checkForUpdates();
 }
 
@@ -1194,20 +1250,39 @@ bool MainWindow::ensureServiceRunning() {
 
         if (QFile::exists(servicePath)) {
           qDebug() << "ensureServiceRunning: Service executable found, requesting elevation...";
+
+          // Create progress dialog for service installation
+          auto* progress = new QProgressDialog(
+              tr("Installing VEIL service..."),
+              nullptr,  // No cancel button
+              0, 0,     // Indeterminate progress
+              this);
+          progress->setWindowModality(Qt::WindowModal);
+          progress->setMinimumDuration(0);  // Show immediately
+          progress->setValue(0);
+
           // Request elevation and install
           statusBar()->showMessage(tr("Installing VEIL service..."));
           if (elevation::run_elevated(servicePath.toStdString(), "--install", true)) {
             qDebug() << "ensureServiceRunning: Elevation succeeded, service installation requested";
-            statusBar()->showMessage(tr("VEIL service installed successfully"), 3000);
+
+            progress->setLabelText(tr("Verifying service installation..."));
+            QApplication::processEvents();  // Update UI
 
             // Verify installation succeeded
             if (ServiceManager::is_installed()) {
               qDebug() << "ensureServiceRunning: Service installation verified, attempting to start...";
+
+              progress->setLabelText(tr("Starting VEIL service..."));
+              QApplication::processEvents();  // Update UI
+
               // Try to start the service and wait for it to be ready
               std::string error;
               if (ServiceManager::start_and_wait(error)) {
                 qDebug() << "ensureServiceRunning: Service started and is now running";
                 statusBar()->showMessage(tr("VEIL service started successfully"), 3000);
+                progress->close();
+                progress->deleteLater();
                 return true;
               } else {
                 qWarning() << "ensureServiceRunning: Failed to start service after installation:" << QString::fromStdString(error);
@@ -1215,8 +1290,13 @@ bool MainWindow::ensureServiceRunning() {
             } else {
               qWarning() << "ensureServiceRunning: Service installation verification failed";
             }
+
+            progress->close();
+            progress->deleteLater();
           } else {
             qWarning() << "ensureServiceRunning: Elevation failed or was denied";
+            progress->close();
+            progress->deleteLater();
 
             QMessageBox::warning(
                 this,
@@ -1248,21 +1328,42 @@ bool MainWindow::ensureServiceRunning() {
 
       if (QFile::exists(servicePath)) {
         qDebug() << "ensureServiceRunning: Service executable found, installing...";
+
+        // Create progress dialog for service installation
+        auto* progress = new QProgressDialog(
+            tr("Installing VEIL service..."),
+            nullptr,  // No cancel button
+            0, 0,     // Indeterminate progress
+            this);
+        progress->setWindowModality(Qt::WindowModal);
+        progress->setMinimumDuration(0);  // Show immediately
+        progress->setValue(0);
+
         std::string error;
         if (ServiceManager::install(servicePath.toStdString(), error)) {
           qDebug() << "ensureServiceRunning: Service installed successfully, attempting to start...";
           statusBar()->showMessage(tr("VEIL service installed successfully"), 3000);
 
+          progress->setLabelText(tr("Starting VEIL service..."));
+          QApplication::processEvents();  // Update UI
+
           // Try to start the service and wait for it to be ready
           if (ServiceManager::start_and_wait(error)) {
             qDebug() << "ensureServiceRunning: Service started and is now running";
             statusBar()->showMessage(tr("VEIL service started successfully"), 3000);
+            progress->close();
+            progress->deleteLater();
             return true;
           } else {
             qWarning() << "ensureServiceRunning: Failed to start service after installation:" << QString::fromStdString(error);
           }
+
+          progress->close();
+          progress->deleteLater();
         } else {
           qWarning() << "ensureServiceRunning: Service installation failed:" << QString::fromStdString(error);
+          progress->close();
+          progress->deleteLater();
 
           QMessageBox::warning(
               this,
@@ -1284,6 +1385,17 @@ bool MainWindow::ensureServiceRunning() {
 
   // Service is installed but not running - try to start it and wait for it to be ready
   qDebug() << "ensureServiceRunning: Service is installed but not running, attempting to start...";
+
+  // Create progress dialog for service start
+  auto* progress = new QProgressDialog(
+      tr("Starting VEIL service..."),
+      nullptr,  // No cancel button
+      0, 0,     // Indeterminate progress
+      this);
+  progress->setWindowModality(Qt::WindowModal);
+  progress->setMinimumDuration(0);  // Show immediately
+  progress->setValue(0);
+
   statusBar()->showMessage(tr("Starting VEIL service..."));
 
   std::string error;
@@ -1293,8 +1405,13 @@ bool MainWindow::ensureServiceRunning() {
   if (ServiceManager::start_and_wait(error)) {
     qDebug() << "ensureServiceRunning: Service started and is now running";
     statusBar()->showMessage(tr("VEIL service started successfully"), 3000);
+    progress->close();
+    progress->deleteLater();
     return true;
   }
+
+  progress->close();
+  progress->deleteLater();
 
   qWarning() << "ensureServiceRunning: Failed to start service:" << QString::fromStdString(error);
 
