@@ -415,10 +415,7 @@ void MainWindow::setupIpcConnections() {
         qDebug() << "[MainWindow] Retrying daemon connection after service startup...";
         if (!ipcManager_->connectToDaemon()) {
           qWarning() << "[MainWindow] Failed to connect to daemon even after service start";
-          connectionWidget_->setErrorMessage(
-              tr("Failed to connect to daemon after service start."));
-          connectionWidget_->setConnectionState(ConnectionState::kError);
-          updateTrayIcon(TrayConnectionState::kError);
+          showError(errors::daemon_not_running(), true);
         } else {
           qDebug() << "[MainWindow] Successfully connected to daemon after service start";
           qDebug() << "[MainWindow] Now building and sending connection configuration...";
@@ -431,11 +428,7 @@ void MainWindow::setupIpcConnections() {
 #else
         // Failed to connect to daemon - show error
         qWarning() << "[MainWindow] Platform: Non-Windows - cannot auto-start daemon";
-        connectionWidget_->setErrorMessage(
-            tr("Cannot connect: VEIL daemon is not running.\n"
-               "Please start the daemon first."));
-        connectionWidget_->setConnectionState(ConnectionState::kError);
-        updateTrayIcon(TrayConnectionState::kError);
+        showError(errors::daemon_not_running(), true);
         return;
 #endif
       }
@@ -461,12 +454,7 @@ void MainWindow::setupIpcConnections() {
         qWarning() << "[MainWindow]   Is File:" << keyFileInfo.isFile();
         qWarning() << "[MainWindow]   Path:" << keyFileInfo.absoluteFilePath();
 
-        connectionWidget_->setErrorMessage(
-            tr("Pre-shared key file not found: %1\n"
-               "Please configure a valid key file in Settings.")
-                .arg(QString::fromStdString(config.key_file)));
-        connectionWidget_->setConnectionState(ConnectionState::kError);
-        updateTrayIcon(TrayConnectionState::kError);
+        showError(errors::missing_key_file(config.key_file), false);
         return;
       } else {
         qDebug() << "[MainWindow] Key file validation PASSED";
@@ -481,10 +469,7 @@ void MainWindow::setupIpcConnections() {
     if (!ipcManager_->sendConnect(config)) {
       // Failed to send connect command
       qWarning() << "[MainWindow] Failed to send connect command to daemon";
-      connectionWidget_->setErrorMessage(
-          tr("Failed to send connect command to daemon."));
-      connectionWidget_->setConnectionState(ConnectionState::kError);
-      updateTrayIcon(TrayConnectionState::kError);
+      showError(errors::ipc_error("Failed to send connect command"), false);
     } else {
       qDebug() << "[MainWindow] Connect command sent successfully, waiting for response...";
     }
@@ -613,8 +598,10 @@ void MainWindow::setupIpcConnections() {
     qWarning() << "[MainWindow] Details:" << details;
     qWarning() << "[MainWindow] ========================================";
 
-    connectionWidget_->setErrorMessage(error);
-    statusBar()->showMessage(error + ": " + details, 5000);
+    // Create structured error from IPC error
+    ErrorMessage ipcError = errors::ipc_error(details.toStdString());
+    ipcError.title = error.toStdString();
+    showError(ipcError, false);
   });
 
   connect(ipcManager_.get(), &IpcClientManager::daemonConnectionChanged,
@@ -1569,5 +1556,36 @@ bool MainWindow::waitForServiceReady(int timeout_ms) {
   }
 }
 #endif
+
+void MainWindow::showError(const ErrorMessage& error, bool showTrayNotification) {
+  // Update connection widget with structured error
+  connectionWidget_->setError(error);
+  connectionWidget_->setConnectionState(ConnectionState::kError);
+
+  // Update tray icon state
+  updateTrayIcon(TrayConnectionState::kError);
+
+  // Show system tray notification for critical errors
+  if (showTrayNotification && trayIcon_ && trayIcon_->isVisible()) {
+    QString title = QString::fromStdString(error.category_name());
+    QString message = QString::fromStdString(error.title);
+    if (!error.description.empty()) {
+      message += "\n" + QString::fromStdString(error.description);
+    }
+
+    QSystemTrayIcon::MessageIcon icon = QSystemTrayIcon::Critical;
+    if (error.category == ErrorCategory::kConfiguration) {
+      icon = QSystemTrayIcon::Warning;
+    }
+
+    trayIcon_->showMessage(title, message, icon, 5000);
+  }
+
+  // Update status bar with error title
+  statusBar()->showMessage(
+      QString::fromStdString(error.title) + " - " +
+          QString::fromStdString(error.category_name()),
+      5000);
+}
 
 }  // namespace veil::gui

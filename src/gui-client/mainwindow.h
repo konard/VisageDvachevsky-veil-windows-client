@@ -13,6 +13,7 @@
 #include <memory>
 
 #include "update_checker.h"
+#include "common/gui/error_message.h"
 #include "common/gui/theme.h"
 
 namespace veil::gui {
@@ -59,6 +60,9 @@ class MainWindow : public QMainWindow {
  public slots:
   /// Update the system tray icon based on connection state
   void updateTrayIcon(TrayConnectionState state);
+
+  /// Show error with system tray notification for critical errors
+  void showError(const ErrorMessage& error, bool showTrayNotification = false);
 
   /// Apply the specified theme to the application
   void applyTheme(Theme theme);

@@ -9,6 +9,9 @@
 #include <QPainterPath>
 #include <QGraphicsDropShadowEffect>
 #include <QSettings>
+#include <QClipboard>
+#include <QApplication>
+#include <QToolTip>
 #include <QShortcut>
 
 #include "common/gui/theme.h"
@@ -269,21 +272,72 @@ void ConnectionWidget::setupUi() {
   subtitleLabel_->setWordWrap(true);
   statusContainerLayout->addWidget(subtitleLabel_);
 
-  // Error label (hidden by default)
+  // Error display widget (hidden by default)
+  errorWidget_ = new QWidget(this);
+  errorWidget_->setStyleSheet(QString(R"(
+    QWidget {
+      background: rgba(248, 81, 73, 0.1);
+      border: 1px solid rgba(248, 81, 73, 0.3);
+      border-radius: 12px;
+    }
+  )"));
+  errorWidget_->hide();
+
+  auto* errorLayout = new QVBoxLayout(errorWidget_);
+  errorLayout->setContentsMargins(16, 12, 16, 12);
+  errorLayout->setSpacing(10);
+
+  // Error text label
   errorLabel_ = new QLabel(this);
   errorLabel_->setWordWrap(true);
-  errorLabel_->setAlignment(Qt::AlignCenter);
+  errorLabel_->setAlignment(Qt::AlignLeft);
   errorLabel_->setStyleSheet(QString(R"(
     color: %1;
     font-size: 13px;
-    padding: 12px 20px;
-    background: rgba(248, 81, 73, 0.1);
-    border: 1px solid rgba(248, 81, 73, 0.3);
-    border-radius: 10px;
-    margin: 8px 20px;
+    background: transparent;
+    border: none;
+    padding: 0;
   )").arg(colors::dark::kAccentError));
-  errorLabel_->hide();
-  statusContainerLayout->addWidget(errorLabel_);
+  errorLayout->addWidget(errorLabel_);
+
+  // Copy error button
+  copyErrorButton_ = new QPushButton("Copy Error Details", this);
+  copyErrorButton_->setCursor(Qt::PointingHandCursor);
+  copyErrorButton_->setFixedHeight(32);
+  copyErrorButton_->setStyleSheet(QString(R"(
+    QPushButton {
+      background: rgba(248, 81, 73, 0.15);
+      border: 1px solid rgba(248, 81, 73, 0.4);
+      border-radius: 8px;
+      color: %1;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 16px;
+    }
+    QPushButton:hover {
+      background: rgba(248, 81, 73, 0.25);
+      border-color: rgba(248, 81, 73, 0.6);
+    }
+    QPushButton:pressed {
+      background: rgba(248, 81, 73, 0.35);
+    }
+  )").arg(colors::dark::kAccentError));
+  connect(copyErrorButton_, &QPushButton::clicked, this, [this]() {
+    QString detailsText;
+    if (currentError_.category != ErrorCategory::kUnknown) {
+      detailsText = QString::fromStdString(currentError_.to_detailed_string());
+    } else {
+      detailsText = errorMessage_;
+    }
+    QApplication::clipboard()->setText(detailsText);
+
+    // Show tooltip feedback
+    QToolTip::showText(copyErrorButton_->mapToGlobal(QPoint(0, 0)),
+                       "Error details copied to clipboard", copyErrorButton_, QRect(), 2000);
+  });
+  errorLayout->addWidget(copyErrorButton_);
+
+  statusContainerLayout->addWidget(errorWidget_);
 
   mainLayout->addWidget(statusContainer, 1);
 
@@ -600,12 +654,21 @@ void ConnectionWidget::updateStatusDisplay() {
       break;
   }
 
-  // Show/hide error label
-  if (state_ == ConnectionState::kError && !errorMessage_.isEmpty()) {
-    errorLabel_->setText(errorMessage_);
-    errorLabel_->show();
+  // Show/hide error widget
+  if (state_ == ConnectionState::kError) {
+    if (currentError_.category != ErrorCategory::kUnknown) {
+      // Use structured error message
+      errorLabel_->setText(QString::fromStdString(currentError_.to_user_string()));
+      errorWidget_->show();
+    } else if (!errorMessage_.isEmpty()) {
+      // Fall back to legacy error message
+      errorLabel_->setText(errorMessage_);
+      errorWidget_->show();
+    } else {
+      errorWidget_->hide();
+    }
   } else {
-    errorLabel_->hide();
+    errorWidget_->hide();
   }
 
   // Update session info display based on state
@@ -672,9 +735,17 @@ void ConnectionWidget::setServerAddress(const QString& server, uint16_t port) {
 
 void ConnectionWidget::setErrorMessage(const QString& message) {
   errorMessage_ = message;
+  currentError_ = ErrorMessage();  // Reset structured error
   if (state_ == ConnectionState::kError) {
-    errorLabel_->setText(message);
-    errorLabel_->show();
+    updateStatusDisplay();
+  }
+}
+
+void ConnectionWidget::setError(const ErrorMessage& error) {
+  currentError_ = error;
+  errorMessage_.clear();  // Clear legacy message
+  if (state_ == ConnectionState::kError) {
+    updateStatusDisplay();
   }
 }
 
@@ -700,8 +771,7 @@ void ConnectionWidget::onUptimeUpdate() {
 void ConnectionWidget::onConnectionTimeout() {
   // Connection attempt timed out - transition to error state
   if (state_ == ConnectionState::kConnecting || state_ == ConnectionState::kReconnecting) {
-    setErrorMessage(tr("Connection timed out. The VEIL daemon may not be running.\n"
-                       "Please ensure the VEIL service is started before connecting."));
+    setError(errors::connection_timeout());
     setConnectionState(ConnectionState::kError);
   }
 }
