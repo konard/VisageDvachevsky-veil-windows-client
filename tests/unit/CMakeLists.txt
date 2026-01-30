@@ -101,7 +101,7 @@ if(Qt6_FOUND)
 
   veil_set_warnings(veil_gui_tests)
 
-  gtest_discover_tests(veil_gui_tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0;QT_QPA_PLATFORM=offscreen")
+  gtest_discover_tests(veil_gui_tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0\;QT_QPA_PLATFORM=offscreen")
 else()
   message(STATUS "Qt6 not found, GUI tests will not be built")
 endif()
