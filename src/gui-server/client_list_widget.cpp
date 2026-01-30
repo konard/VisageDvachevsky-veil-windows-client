@@ -73,12 +73,12 @@ void ClientListWidget::setupUi() {
 
   auto* titleLabel = new QLabel("Connected Clients", this);
   titleLabel->setStyleSheet(QString("font-size: %1px; font-weight: 600;")
-                                .arg(fonts::kFontSizeTitle));
+                                .arg(fonts::kFontSizeTitle()));
   headerRow->addWidget(titleLabel);
 
   clientCountLabel_ = new QLabel("(0)", this);
   clientCountLabel_->setStyleSheet(QString("font-size: %1px; color: %2;")
-                                       .arg(fonts::kFontSizeBody)
+                                       .arg(fonts::kFontSizeBody())
                                        .arg(colors::dark::kTextSecondary));
   headerRow->addWidget(clientCountLabel_);
 
@@ -99,7 +99,7 @@ void ClientListWidget::setupUi() {
     QLineEdit:focus {
       border-color: %3;
     }
-  )").arg(spacing::kBorderRadiusSmall)
+  )").arg(spacing::kBorderRadiusSmall())
     .arg(colors::dark::kTextPrimary)
     .arg(colors::dark::kAccentPrimary));
   connect(searchEdit_, &QLineEdit::textChanged, this, &ClientListWidget::onSearchTextChanged);
@@ -120,7 +120,7 @@ void ClientListWidget::setupUi() {
       background: rgba(255, 255, 255, 0.05);
       border-color: %3;
     }
-  )").arg(spacing::kBorderRadiusSmall)
+  )").arg(spacing::kBorderRadiusSmall())
     .arg(colors::dark::kTextSecondary)
     .arg(colors::dark::kAccentPrimary));
   headerRow->addWidget(refreshButton_);
@@ -140,7 +140,7 @@ void ClientListWidget::setupUi() {
       background: rgba(255, 107, 107, 0.1);
     }
   )").arg(colors::dark::kAccentError)
-    .arg(spacing::kBorderRadiusSmall));
+    .arg(spacing::kBorderRadiusSmall()));
   connect(disconnectAllButton_, &QPushButton::clicked, this, [this]() {
     if (tableWidget_->rowCount() > 0) {
       auto reply = QMessageBox::question(this, "Disconnect All Clients",
@@ -163,7 +163,7 @@ void ClientListWidget::setupUi() {
       border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: %1px;
     }
-  )").arg(spacing::kBorderRadiusMedium));
+  )").arg(spacing::kBorderRadiusMedium()));
 
   auto* tableLayout = new QVBoxLayout(tableContainer);
   tableLayout->setContentsMargins(0, 0, 0, 0);

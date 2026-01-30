@@ -4,6 +4,7 @@
 #include <QColor>
 #include <QApplication>
 #include <QScreen>
+#include <cmath>
 
 namespace veil::gui {
 
@@ -18,7 +19,7 @@ inline qreal getDpiScaleFactor() {
 
 /// Scale a value based on DPI
 inline int scaleDpi(int baseValue) {
-  return static_cast<int>(baseValue * getDpiScaleFactor() + 0.5);
+  return std::lround(baseValue * getDpiScaleFactor());
 }
 
 /// Color palette as defined in client_ui_design.md

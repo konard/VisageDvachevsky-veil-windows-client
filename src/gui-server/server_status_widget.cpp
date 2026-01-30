@@ -111,7 +111,7 @@ void ServerStatusWidget::setupUi() {
 
   // === Metrics Grid ===
   auto* metricsGrid = new QHBoxLayout();
-  metricsGrid->setSpacing(spacing::kPaddingLarge);
+  metricsGrid->setSpacing(spacing::kPaddingLarge());
 
   // Listen Address
   auto* listenBox = new QVBoxLayout();
@@ -122,7 +122,7 @@ void ServerStatusWidget::setupUi() {
 
   listenAddressLabel_ = new QLabel("0.0.0.0:4433", this);
   listenAddressLabel_->setStyleSheet(QString("font-size: %1px; font-weight: 500;")
-                                         .arg(fonts::kFontSizeBody));
+                                         .arg(fonts::kFontSizeBody()));
   listenBox->addWidget(listenAddressLabel_);
   metricsGrid->addLayout(listenBox);
 
@@ -137,13 +137,13 @@ void ServerStatusWidget::setupUi() {
   auto* clientsRow = new QHBoxLayout();
   activeClientsLabel_ = new QLabel("0", this);
   activeClientsLabel_->setStyleSheet(QString("font-size: %1px; font-weight: 600; color: %2;")
-                                         .arg(fonts::kFontSizeTitle)
+                                         .arg(fonts::kFontSizeTitle())
                                          .arg(colors::dark::kAccentPrimary));
   clientsRow->addWidget(activeClientsLabel_);
 
   maxClientsLabel_ = new QLabel("/ 100", this);
   maxClientsLabel_->setStyleSheet(QString("font-size: %1px; color: %2;")
-                                      .arg(fonts::kFontSizeCaption)
+                                      .arg(fonts::kFontSizeCaption())
                                       .arg(colors::dark::kTextSecondary));
   clientsRow->addWidget(maxClientsLabel_);
   clientsRow->addStretch();
@@ -160,7 +160,7 @@ void ServerStatusWidget::setupUi() {
 
   uptimeLabel_ = new QLabel("--:--:--", this);
   uptimeLabel_->setStyleSheet(QString("font-size: %1px; font-weight: 500;")
-                                  .arg(fonts::kFontSizeBody));
+                                  .arg(fonts::kFontSizeBody()));
   uptimeBox->addWidget(uptimeLabel_);
   metricsGrid->addLayout(uptimeBox);
 
@@ -176,19 +176,19 @@ void ServerStatusWidget::setupUi() {
       border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: %1px;
     }
-  )").arg(spacing::kBorderRadiusMedium));
+  )").arg(spacing::kBorderRadiusMedium()));
 
   auto* trafficLayout = new QVBoxLayout(trafficCard);
-  trafficLayout->setContentsMargins(spacing::kPaddingMedium, spacing::kPaddingMedium,
-                                     spacing::kPaddingMedium, spacing::kPaddingMedium);
+  trafficLayout->setContentsMargins(spacing::kPaddingMedium(), spacing::kPaddingMedium(),
+                                     spacing::kPaddingMedium(), spacing::kPaddingMedium());
 
   auto* trafficTitle = new QLabel("Traffic Statistics", this);
   trafficTitle->setStyleSheet(QString("font-size: %1px; font-weight: 600; margin-bottom: 8px;")
-                                  .arg(fonts::kFontSizeBody));
+                                  .arg(fonts::kFontSizeBody()));
   trafficLayout->addWidget(trafficTitle);
 
   auto* trafficRow = new QHBoxLayout();
-  trafficRow->setSpacing(spacing::kPaddingXLarge);
+  trafficRow->setSpacing(spacing::kPaddingXLarge());
 
   // Bytes Sent
   auto* sentBox = new QVBoxLayout();
@@ -198,7 +198,7 @@ void ServerStatusWidget::setupUi() {
 
   bytesSentLabel_ = new QLabel("0 B", this);
   bytesSentLabel_->setStyleSheet(QString("font-size: %1px; font-weight: 500; color: %2;")
-                                     .arg(fonts::kFontSizeBody)
+                                     .arg(fonts::kFontSizeBody())
                                      .arg(colors::dark::kAccentSuccess));
   sentBox->addWidget(bytesSentLabel_);
   trafficRow->addLayout(sentBox);
@@ -211,7 +211,7 @@ void ServerStatusWidget::setupUi() {
 
   bytesReceivedLabel_ = new QLabel("0 B", this);
   bytesReceivedLabel_->setStyleSheet(QString("font-size: %1px; font-weight: 500; color: %2;")
-                                         .arg(fonts::kFontSizeBody)
+                                         .arg(fonts::kFontSizeBody())
                                          .arg(colors::dark::kAccentPrimary));
   recvBox->addWidget(bytesReceivedLabel_);
   trafficRow->addLayout(recvBox);
@@ -248,7 +248,7 @@ void ServerStatusWidget::setServerState(ServerState state) {
             stop:0 %2, stop:1 %1);
         }
       )").arg(colors::dark::kAccentSuccess, colors::dark::kAccentPrimary)
-        .arg(spacing::kBorderRadiusMedium));
+        .arg(spacing::kBorderRadiusMedium()));
       pulseTimer_->stop();
       uptimeTimer_->stop();
       uptimeLabel_->setText("--:--:--");
@@ -278,7 +278,7 @@ void ServerStatusWidget::setServerState(ServerState state) {
           background: %3;
         }
       )").arg(colors::dark::kAccentError)
-        .arg(spacing::kBorderRadiusMedium)
+        .arg(spacing::kBorderRadiusMedium())
         .arg("#ff8080"));
       pulseTimer_->stop();
       indicatorOpacity_->setOpacity(1.0);
@@ -313,7 +313,7 @@ void ServerStatusWidget::updateMetrics(uint64_t bytesSent, uint64_t bytesReceive
     color = colors::dark::kAccentError;
   }
   activeClientsLabel_->setStyleSheet(QString("font-size: %1px; font-weight: 600; color: %2;")
-                                         .arg(fonts::kFontSizeTitle)
+                                         .arg(fonts::kFontSizeTitle())
                                          .arg(color));
 }
 

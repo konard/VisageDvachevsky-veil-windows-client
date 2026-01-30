@@ -34,8 +34,8 @@ DiagnosticsWidget::DiagnosticsWidget(QWidget* parent) : QWidget(parent) {
 void DiagnosticsWidget::setupUi() {
   auto* mainLayout = new QVBoxLayout(this);
   mainLayout->setSpacing(16);
-  mainLayout->setContentsMargins(spacing::kPaddingXLarge, spacing::kPaddingMedium,
-                                  spacing::kPaddingXLarge, spacing::kPaddingMedium);
+  mainLayout->setContentsMargins(spacing::kPaddingXLarge(), spacing::kPaddingMedium(),
+                                  spacing::kPaddingXLarge(), spacing::kPaddingMedium());
 
   // === Header ===
   auto* headerLayout = new QHBoxLayout();
@@ -64,7 +64,7 @@ void DiagnosticsWidget::setupUi() {
   // Title
   auto* titleLabel = new QLabel("Diagnostics", this);
   titleLabel->setStyleSheet(QString("font-size: %1px; font-weight: 700; color: #f0f6fc; margin-bottom: 8px;")
-                                .arg(fonts::kFontSizeHeadline));
+                                .arg(fonts::kFontSizeHeadline()));
   mainLayout->addWidget(titleLabel);
 
   // === Scrollable content ===
