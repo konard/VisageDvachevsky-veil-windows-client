@@ -32,7 +32,7 @@
 !define PRODUCT_PUBLISHER "VEIL Project"
 !define PRODUCT_WEB_SITE "https://github.com/VisageDvachevsky/veil-windows-client"
 !define PRODUCT_UPDATE_URL "https://api.github.com/repos/VisageDvachevsky/veil-windows-client/releases/latest"
-!define PRODUCT_DIR_REGKEY "Software\Microsoft\Windows\CurrentVersion\App Paths\veil-client-gui.exe"
+!define PRODUCT_DIR_REGKEY "Software\Microsoft\Windows\CurrentVersion\App Paths\veil-vpn.exe"
 !define PRODUCT_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
 !define PRODUCT_UNINST_ROOT_KEY "HKLM"
 !define PRODUCT_SETTINGS_KEY "Software\VEIL VPN"
@@ -98,7 +98,7 @@ Page custom UpgradePageCreate UpgradePageLeave
 !insertmacro MUI_PAGE_INSTFILES
 
 ; Finish page
-!define MUI_FINISHPAGE_RUN "$INSTDIR\veil-client-gui.exe"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\veil-vpn.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "Launch ${PRODUCT_NAME}"
 !define MUI_FINISHPAGE_SHOWREADME ""
 !define MUI_FINISHPAGE_SHOWREADME_TEXT "View release notes"
@@ -237,6 +237,7 @@ Section "VEIL VPN Client (required)" SecMain
 
   ; Main application files
   File "bin\veil-client-gui.exe"
+  File /nonfatal "bin\veil-vpn.exe"
   File /nonfatal "bin\veil-service.exe"
   ; Note: veil-client.exe requires the transport layer which is Linux-only
 
@@ -282,7 +283,7 @@ Section "VEIL VPN Client (required)" SecMain
   File /nonfatal "translations\veil_*.qm"
 
   ; Write installation directory to registry
-  WriteRegStr HKLM "${PRODUCT_DIR_REGKEY}" "" "$INSTDIR\veil-client-gui.exe"
+  WriteRegStr HKLM "${PRODUCT_DIR_REGKEY}" "" "$INSTDIR\veil-vpn.exe"
 
   ; Create uninstaller
   WriteUninstaller "$INSTDIR\uninstall.exe"
@@ -291,7 +292,7 @@ Section "VEIL VPN Client (required)" SecMain
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "DisplayName" "${PRODUCT_NAME}"
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "QuietUninstallString" '"$INSTDIR\uninstall.exe" /S'
-  WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "DisplayIcon" "$INSTDIR\veil-client-gui.exe"
+  WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "DisplayIcon" "$INSTDIR\veil-vpn.exe"
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "DisplayVersion" "${PRODUCT_VERSION}"
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "URLInfoAbout" "${PRODUCT_WEB_SITE}"
   WriteRegStr ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "URLUpdateInfo" "${PRODUCT_WEB_SITE}/releases"
@@ -395,16 +396,16 @@ SectionEnd
 
 Section "Start Menu Shortcuts" SecStartMenu
   CreateDirectory "$SMPROGRAMS\${PRODUCT_NAME}"
-  CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk" "$INSTDIR\veil-client-gui.exe"
+  CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk" "$INSTDIR\veil-vpn.exe"
   CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\Uninstall.lnk" "$INSTDIR\uninstall.exe"
 SectionEnd
 
 Section "Desktop Shortcut" SecDesktop
-  CreateShortCut "$DESKTOP\${PRODUCT_NAME}.lnk" "$INSTDIR\veil-client-gui.exe"
+  CreateShortCut "$DESKTOP\${PRODUCT_NAME}.lnk" "$INSTDIR\veil-vpn.exe"
 SectionEnd
 
 Section "Auto-start with Windows" SecAutoStart
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${PRODUCT_NAME}" "$INSTDIR\veil-client-gui.exe --minimized"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${PRODUCT_NAME}" "$INSTDIR\veil-vpn.exe"
 SectionEnd
 
 ; ============================================================================
@@ -441,6 +442,7 @@ Section "Uninstall"
 
   ; Remove files
   Delete "$INSTDIR\veil-client-gui.exe"
+  Delete "$INSTDIR\veil-vpn.exe"
   Delete "$INSTDIR\veil-service.exe"
   Delete "$INSTDIR\wintun.dll"
   Delete "$INSTDIR\Qt6Core.dll"
