@@ -15,6 +15,7 @@
 #include <QShortcut>
 
 #include "common/gui/theme.h"
+#include "quick_actions_widget.h"
 #include "server_selector_widget.h"
 
 namespace veil::gui {
@@ -378,7 +379,17 @@ void ConnectionWidget::setupUi() {
   connect(connectButton_, &QPushButton::clicked, this, &ConnectionWidget::onConnectClicked);
   mainLayout->addWidget(connectButton_);
 
-  mainLayout->addSpacing(spacing::kPaddingLarge);
+  mainLayout->addSpacing(spacing::kPaddingMedium);
+
+  // === Quick Actions Panel ===
+  quickActionsWidget_ = new QuickActionsWidget(this);
+  connect(quickActionsWidget_, &QuickActionsWidget::diagnosticsRequested,
+          this, &ConnectionWidget::diagnosticsRequested);
+  connect(quickActionsWidget_, &QuickActionsWidget::settingsRequested,
+          this, &ConnectionWidget::settingsRequested);
+  mainLayout->addWidget(quickActionsWidget_);
+
+  mainLayout->addSpacing(spacing::kPaddingMedium);
 
   // === Session Info Card ===
   statusCard_ = new QWidget(this);
@@ -515,6 +526,11 @@ void ConnectionWidget::setConnectionState(ConnectionState state) {
   // Update the status ring
   if (statusRing_) {
     static_cast<StatusRing*>(statusRing_)->setState(state);
+  }
+
+  // Update quick actions widget
+  if (quickActionsWidget_) {
+    quickActionsWidget_->setConnectionState(state);
   }
 
   // Handle state transitions
@@ -731,6 +747,11 @@ void ConnectionWidget::setServerAddress(const QString& server, uint16_t port) {
   serverAddress_ = server;
   serverPort_ = port;
   serverLabel_->setText(QString("%1:%2").arg(server).arg(port));
+
+  // Update quick actions with server info
+  if (quickActionsWidget_) {
+    quickActionsWidget_->setIpAddress(server, port);
+  }
 }
 
 void ConnectionWidget::setErrorMessage(const QString& message) {

@@ -4,6 +4,7 @@
 #include <QStatusBar>
 #include <QVBoxLayout>
 #include <QApplication>
+#include <QClipboard>
 #include <QIcon>
 #include <QMessageBox>
 #include <QShortcut>
@@ -33,6 +34,7 @@
 #include "statistics_widget.h"
 #include "update_checker.h"
 #include "server_list_widget.h"
+#include "quick_actions_widget.h"
 
 #ifdef _WIN32
 #include <chrono>
@@ -239,6 +241,8 @@ void MainWindow::setupUi() {
           this, &MainWindow::showSettingsView);
   connect(connectionWidget_, &ConnectionWidget::serversRequested,
           this, &MainWindow::showServerListView);
+  connect(connectionWidget_, &ConnectionWidget::diagnosticsRequested,
+          this, &MainWindow::showDiagnosticsView);
   connect(settingsWidget_, &SettingsWidget::backRequested,
           this, &MainWindow::showConnectionView);
   connect(diagnosticsWidget_, &DiagnosticsWidget::backRequested,
@@ -771,6 +775,15 @@ void MainWindow::setupMenuBar() {
   auto* openSettingsShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma), this);
   connect(openSettingsShortcut, &QShortcut::activated, this, &MainWindow::showSettingsView);
 
+  // Quick actions shortcut
+  auto* quickActionsShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Q), this);
+  connect(quickActionsShortcut, &QShortcut::activated, this, [this]() {
+    // Ensure we are on the connection view first
+    if (stackedWidget_->currentIndex() != 0) {
+      showConnectionView();
+    }
+  });
+
   auto* refreshDiagnosticsShortcut = new QShortcut(QKeySequence(Qt::Key_F5), this);
   connect(refreshDiagnosticsShortcut, &QShortcut::activated, this, [this]() {
     // Refresh diagnostics if on diagnostics view by emitting the request signal
@@ -1016,6 +1029,54 @@ void MainWindow::setupSystemTray() {
 
   trayMenu_->addSeparator();
 
+  // Quick actions in tray
+  trayKillSwitchAction_ = trayMenu_->addAction(tr("Kill Switch: OFF"));
+  trayKillSwitchAction_->setCheckable(true);
+  connect(trayKillSwitchAction_, &QAction::triggered, this, [this](bool checked) {
+    QSettings settings("VEIL", "VPN Client");
+    settings.setValue("quickActions/killSwitch", checked);
+    trayKillSwitchAction_->setText(checked ? tr("Kill Switch: ON") : tr("Kill Switch: OFF"));
+  });
+
+  trayObfuscationAction_ = trayMenu_->addAction(tr("Obfuscation: ON"));
+  trayObfuscationAction_->setCheckable(true);
+  trayObfuscationAction_->setChecked(true);
+  {
+    QSettings settings("VEIL", "VPN Client");
+    bool obfEnabled = settings.value("advanced/obfuscation", true).toBool();
+    trayObfuscationAction_->setChecked(obfEnabled);
+    trayObfuscationAction_->setText(obfEnabled ? tr("Obfuscation: ON") : tr("Obfuscation: OFF"));
+    bool ksEnabled = settings.value("quickActions/killSwitch", false).toBool();
+    trayKillSwitchAction_->setChecked(ksEnabled);
+    trayKillSwitchAction_->setText(ksEnabled ? tr("Kill Switch: ON") : tr("Kill Switch: OFF"));
+  }
+  connect(trayObfuscationAction_, &QAction::triggered, this, [this](bool checked) {
+    QSettings settings("VEIL", "VPN Client");
+    settings.setValue("advanced/obfuscation", checked);
+    trayObfuscationAction_->setText(checked ? tr("Obfuscation: ON") : tr("Obfuscation: OFF"));
+  });
+
+  trayCopyIpAction_ = trayMenu_->addAction(tr("Copy IP Address"));
+  trayCopyIpAction_->setEnabled(false);
+  connect(trayCopyIpAction_, &QAction::triggered, this, [this]() {
+    QSettings settings("VEIL", "VPN Client");
+    QString ip = settings.value("server/address", "").toString();
+    int port = settings.value("server/port", 4433).toInt();
+    if (!ip.isEmpty()) {
+      QApplication::clipboard()->setText(QString("%1:%2").arg(ip).arg(port));
+    }
+  });
+
+  trayDiagnosticsAction_ = trayMenu_->addAction(tr("Open Diagnostics"));
+  connect(trayDiagnosticsAction_, &QAction::triggered, this, [this]() {
+    show();
+    raise();
+    activateWindow();
+    showDiagnosticsView();
+  });
+
+  trayMenu_->addSeparator();
+
   // Show window action
   auto* showAction = trayMenu_->addAction(tr("Show Window"));
   connect(showAction, &QAction::triggered, this, [this]() {
@@ -1123,6 +1184,9 @@ void MainWindow::updateTrayIcon(TrayConnectionState state) {
   }
   if (trayDisconnectAction_) {
     trayDisconnectAction_->setEnabled(disconnectEnabled);
+  }
+  if (trayCopyIpAction_) {
+    trayCopyIpAction_->setEnabled(state == TrayConnectionState::kConnected);
   }
 
   // Update the status label in the menu

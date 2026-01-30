@@ -121,6 +121,10 @@ class MainWindow : public QMainWindow {
   QMenu* trayMenu_;
   QAction* trayConnectAction_;
   QAction* trayDisconnectAction_;
+  QAction* trayKillSwitchAction_;
+  QAction* trayObfuscationAction_;
+  QAction* trayCopyIpAction_;
+  QAction* trayDiagnosticsAction_;
   bool minimizeToTray_{true};
   TrayConnectionState currentTrayState_{TrayConnectionState::kDisconnected};
 

@@ -36,6 +36,8 @@ add_executable(veil-client-gui
   server_list_widget.h
   server_selector_widget.cpp
   server_selector_widget.h
+  quick_actions_widget.cpp
+  quick_actions_widget.h
   resources/resources.qrc
 )
 

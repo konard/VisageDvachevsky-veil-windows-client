@@ -12,6 +12,7 @@
 
 namespace veil::gui {
 
+class QuickActionsWidget;
 class ServerSelectorWidget;
 
 /// Connection states as defined in the UI design spec
@@ -35,6 +36,7 @@ class ConnectionWidget : public QWidget {
   void serversRequested();
   void connectRequested();
   void disconnectRequested();
+  void diagnosticsRequested();
 
  public slots:
   /// Update connection state from IPC manager
@@ -97,6 +99,7 @@ class ConnectionWidget : public QWidget {
   // Navigation
   QPushButton* settingsButton_;
   ServerSelectorWidget* serverSelector_;
+  QuickActionsWidget* quickActionsWidget_;
 
   // State
   ConnectionState state_{ConnectionState::kDisconnected};
