@@ -25,6 +25,8 @@ class StatisticsWidget;
 class IpcClientManager;
 class SetupWizard;
 class ServerListWidget;
+class DataUsageWidget;
+class UsageTracker;
 
 /// Connection state for system tray icon updates
 enum class TrayConnectionState {
@@ -79,6 +81,7 @@ class MainWindow : public QMainWindow {
   void showDiagnosticsView();
   void showStatisticsView();
   void showServerListView();
+  void showDataUsageView();
   void showAboutDialog();
   void onTrayIconActivated(QSystemTrayIcon::ActivationReason reason);
   void onQuickConnect();
@@ -118,6 +121,8 @@ class MainWindow : public QMainWindow {
   SetupWizard* setupWizard_;
   StatisticsWidget* statisticsWidget_;
   ServerListWidget* serverListWidget_;
+  DataUsageWidget* dataUsageWidget_;
+  UsageTracker* usageTracker_;
   std::unique_ptr<IpcClientManager> ipcManager_;
 
   // System tray

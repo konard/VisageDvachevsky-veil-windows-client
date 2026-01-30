@@ -44,6 +44,10 @@ add_executable(veil-client-gui
   server_selector_widget.h
   app_split_tunnel_widget.cpp
   app_split_tunnel_widget.h
+  usage_tracker.cpp
+  usage_tracker.h
+  data_usage_widget.cpp
+  data_usage_widget.h
   resources/resources.qrc
 )
 

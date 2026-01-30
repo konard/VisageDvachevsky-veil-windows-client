@@ -35,6 +35,8 @@
 #include "statistics_widget.h"
 #include "update_checker.h"
 #include "server_list_widget.h"
+#include "data_usage_widget.h"
+#include "usage_tracker.h"
 
 #ifdef _WIN32
 #include <chrono>
@@ -121,12 +123,18 @@ MainWindow::MainWindow(QWidget* parent)
       setupWizard_(new SetupWizard(this)),
       statisticsWidget_(new StatisticsWidget(this)),
       serverListWidget_(new ServerListWidget(this)),
+      dataUsageWidget_(nullptr),
+      usageTracker_(new UsageTracker(this)),
       ipcManager_(std::make_unique<IpcClientManager>(this)),
       trayIcon_(nullptr),
       trayMenu_(nullptr),
       trayConnectAction_(nullptr),
       trayDisconnectAction_(nullptr),
       updateChecker_(std::make_unique<UpdateChecker>(this)) {
+  // Load persistent usage data
+  usageTracker_->load();
+  dataUsageWidget_ = new DataUsageWidget(usageTracker_, this);
+
   qDebug() << "MainWindow: Initializing GUI components...";
   setupUi();
   setupIpcConnections();
@@ -279,6 +287,7 @@ void MainWindow::setupUi() {
   stackedWidget_->addWidget(diagnosticsWidget_);
   stackedWidget_->addWidget(statisticsWidget_);
   stackedWidget_->addWidget(serverListWidget_);
+  stackedWidget_->addWidget(dataUsageWidget_);
 
   // Set central widget
   setCentralWidget(stackedWidget_);
@@ -301,6 +310,8 @@ void MainWindow::setupUi() {
   connect(statisticsWidget_, &StatisticsWidget::backRequested,
           this, &MainWindow::showConnectionView);
   connect(serverListWidget_, &ServerListWidget::backRequested,
+          this, &MainWindow::showConnectionView);
+  connect(dataUsageWidget_, &DataUsageWidget::backRequested,
           this, &MainWindow::showConnectionView);
 
   // Update connection widget when settings are saved
@@ -576,6 +587,7 @@ void MainWindow::setupIpcConnections() {
 
         // Record session end in statistics with accumulated byte counts
         statisticsWidget_->onSessionEnded(lastTotalTxBytes_, lastTotalRxBytes_);
+        usageTracker_->onSessionEnded();
         lastTotalTxBytes_ = 0;
         lastTotalRxBytes_ = 0;
         break;
@@ -588,6 +600,7 @@ void MainWindow::setupIpcConnections() {
         qDebug() << "[MainWindow] New state: CONNECTED";
         guiState = ConnectionState::kConnected;
         updateTrayIcon(TrayConnectionState::kConnected);
+        usageTracker_->onSessionStarted();
 
         // Show connection established notification if enabled
         {
@@ -613,6 +626,7 @@ void MainWindow::setupIpcConnections() {
         updateTrayIcon(TrayConnectionState::kError);
         // Record session end in statistics with accumulated byte counts
         statisticsWidget_->onSessionEnded(lastTotalTxBytes_, lastTotalRxBytes_);
+        usageTracker_->onSessionEnded();
         lastTotalTxBytes_ = 0;
         lastTotalRxBytes_ = 0;
         break;
@@ -662,6 +676,9 @@ void MainWindow::setupIpcConnections() {
     // Track accumulated totals for session history
     lastTotalTxBytes_ = metrics.total_tx_bytes;
     lastTotalRxBytes_ = metrics.total_rx_bytes;
+
+    // Feed persistent usage tracker with total bytes
+    usageTracker_->recordBytes(metrics.total_tx_bytes, metrics.total_rx_bytes);
   });
 
   connect(ipcManager_.get(), &IpcClientManager::diagnosticsReceived,
@@ -734,6 +751,43 @@ void MainWindow::setupIpcConnections() {
     }
   });
 
+  // Connect usage tracker alert signals
+  connect(usageTracker_, &UsageTracker::warningThresholdReached,
+          this, [this](uint64_t currentUsage, uint64_t threshold) {
+    Q_UNUSED(threshold);
+    auto& prefs = NotificationPreferences::instance();
+    if (prefs.shouldShowNotification("usage_warning") && trayIcon_) {
+      QString msg = QString("Monthly data usage has reached %1")
+                        .arg(currentUsage >= 1073741824ULL
+                                 ? QString("%1 GB").arg(static_cast<double>(currentUsage) / 1073741824.0, 0, 'f', 1)
+                                 : QString("%1 MB").arg(static_cast<double>(currentUsage) / 1048576.0, 0, 'f', 1));
+      trayIcon_->showMessage("VEIL VPN - Usage Warning", msg,
+                             QSystemTrayIcon::Warning, 5000);
+      prefs.addToHistory("VEIL VPN - Usage Warning", msg, "usage_warning");
+    }
+  });
+
+  connect(usageTracker_, &UsageTracker::limitThresholdReached,
+          this, [this](uint64_t currentUsage, uint64_t limit) {
+    Q_UNUSED(limit);
+    auto& prefs = NotificationPreferences::instance();
+    if (trayIcon_) {
+      QString msg = QString("Monthly data usage limit reached (%1). ")
+                        .arg(currentUsage >= 1073741824ULL
+                                 ? QString("%1 GB").arg(static_cast<double>(currentUsage) / 1073741824.0, 0, 'f', 1)
+                                 : QString("%1 MB").arg(static_cast<double>(currentUsage) / 1048576.0, 0, 'f', 1));
+
+      if (usageTracker_->alertSettings().autoDisconnectAtLimit) {
+        msg += "Auto-disconnecting.";
+        ipcManager_->sendDisconnect();
+      }
+
+      trayIcon_->showMessage("VEIL VPN - Usage Limit", msg,
+                             QSystemTrayIcon::Critical, 5000);
+      prefs.addToHistory("VEIL VPN - Usage Limit", msg, "usage_limit");
+    }
+  });
+
   // Connect diagnostics widget request to IPC manager
   connect(diagnosticsWidget_, &DiagnosticsWidget::diagnosticsRequested,
           this, [this]() {
@@ -801,6 +855,10 @@ void MainWindow::setupMenuBar() {
   auto* statisticsAction = viewMenu->addAction(tr("S&tatistics"));
   statisticsAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_4));
   connect(statisticsAction, &QAction::triggered, this, &MainWindow::showStatisticsView);
+
+  auto* dataUsageAction = viewMenu->addAction(tr("Data &Usage"));
+  dataUsageAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_5));
+  connect(dataUsageAction, &QAction::triggered, this, &MainWindow::showDataUsageView);
 
   viewMenu->addSeparator();
 
@@ -966,6 +1024,12 @@ void MainWindow::showStatisticsView() {
 void MainWindow::showServerListView() {
   stackedWidget_->setCurrentWidgetAnimated(stackedWidget_->indexOf(serverListWidget_));
   statusBar()->showMessage(tr("Server Management"));
+}
+
+void MainWindow::showDataUsageView() {
+  dataUsageWidget_->refresh();
+  stackedWidget_->setCurrentWidgetAnimated(stackedWidget_->indexOf(dataUsageWidget_));
+  statusBar()->showMessage(tr("Data Usage"));
 }
 
 void MainWindow::showSetupWizardIfNeeded() {
