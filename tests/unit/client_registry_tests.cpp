@@ -388,6 +388,7 @@ TEST(ClientRegistryTests, ConcurrentReads) {
 
   // Concurrent reads should not crash
   std::vector<std::thread> threads;
+  threads.reserve(4);
   for (int t = 0; t < 4; ++t) {
     threads.emplace_back([&registry]() {
       for (int i = 0; i < 1000; ++i) {

@@ -355,7 +355,7 @@ bool load_config_file(const std::string& path, ServerConfig& config, std::error_
       bool valid_id =
           !key.empty() && key.size() <= 64 &&
           std::all_of(key.begin(), key.end(), [](char c) {
-            return std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_';
+            return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '-' || c == '_';
           });
 
       if (!valid_id) {
