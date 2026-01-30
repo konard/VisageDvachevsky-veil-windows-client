@@ -75,6 +75,9 @@ std::vector<std::vector<std::uint8_t>> TransportSession::encrypt_data(
   // Fragment data if necessary.
   auto frames = fragment_data(plaintext, stream_id, fin);
 
+  // PERFORMANCE (Issue #94): Pre-allocate result vector to avoid reallocations.
+  result.reserve(frames.size());
+
   for (auto& frame : frames) {
     auto encrypted = build_encrypted_packet(frame);
 
@@ -286,6 +289,9 @@ std::vector<std::vector<std::uint8_t>> TransportSession::get_retransmit_packets(
   std::vector<std::vector<std::uint8_t>> result;
   auto to_retransmit = retransmit_buffer_.get_packets_to_retransmit();
 
+  // PERFORMANCE (Issue #94): Pre-allocate result vector to avoid reallocations.
+  result.reserve(to_retransmit.size());
+
   for (const auto* pkt : to_retransmit) {
     if (retransmit_buffer_.mark_retransmitted(pkt->sequence)) {
       result.push_back(pkt->data);
@@ -453,6 +459,13 @@ std::vector<mux::MuxFrame> TransportSession::fragment_data(std::span<const std::
   (void)fin;
 
   std::vector<mux::MuxFrame> frames;
+
+  // PERFORMANCE (Issue #94): Pre-calculate number of fragments and reserve capacity.
+  // This avoids vector reallocations during fragment generation.
+  if (data.size() > config_.max_fragment_size) {
+    const std::size_t num_fragments = (data.size() + config_.max_fragment_size - 1) / config_.max_fragment_size;
+    frames.reserve(num_fragments);
+  }
 
   if (data.size() <= config_.max_fragment_size) {
     // No fragmentation needed. Always set fin=true to indicate complete message.

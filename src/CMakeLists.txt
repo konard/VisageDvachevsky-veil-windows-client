@@ -83,6 +83,7 @@ add_library(veil_common STATIC
   common/utils/timer_heap.cpp
   common/utils/advanced_rate_limiter.cpp
   common/utils/graceful_degradation.cpp
+  common/utils/packet_pool.cpp
   common/metrics/metrics.cpp
   common/obfuscation/obfuscation_profile.cpp
   common/protocol_wrapper/websocket_wrapper.cpp

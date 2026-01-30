@@ -51,6 +51,7 @@ add_executable(veil_unit_tests
   thread_checker_tests.cpp
   spsc_queue_tests.cpp
   thread_pool_tests.cpp
+  packet_pool_tests.cpp
   ${VEIL_PLATFORM_TEST_SOURCES}
 )
 

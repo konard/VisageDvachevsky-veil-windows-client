@@ -341,4 +341,58 @@ std::optional<std::vector<std::uint8_t>> aead_decrypt(
   return plaintext;
 }
 
+// PERFORMANCE (Issue #94): Output buffer variants that avoid allocations.
+
+std::size_t aead_encrypt_to(std::span<const std::uint8_t, kAeadKeyLen> key,
+                            std::span<const std::uint8_t, kNonceLen> nonce,
+                            std::span<const std::uint8_t> aad,
+                            std::span<const std::uint8_t> plaintext,
+                            std::span<std::uint8_t> output) {
+  ensure_sodium_ready();
+
+  const std::size_t required_size = plaintext.size() + crypto_aead_chacha20poly1305_ietf_ABYTES;
+  if (output.size() < required_size) {
+    return 0;  // Output buffer too small
+  }
+
+  unsigned long long out_len = 0;
+  const auto rc = crypto_aead_chacha20poly1305_ietf_encrypt(
+      output.data(), &out_len, plaintext.data(), plaintext.size(),
+      aad.data(), aad.size(), nullptr, nonce.data(), key.data());
+
+  if (rc != 0) {
+    return 0;  // Encryption failed
+  }
+
+  return static_cast<std::size_t>(out_len);
+}
+
+std::size_t aead_decrypt_to(std::span<const std::uint8_t, kAeadKeyLen> key,
+                            std::span<const std::uint8_t, kNonceLen> nonce,
+                            std::span<const std::uint8_t> aad,
+                            std::span<const std::uint8_t> ciphertext,
+                            std::span<std::uint8_t> output) {
+  ensure_sodium_ready();
+
+  if (ciphertext.size() < crypto_aead_chacha20poly1305_ietf_ABYTES) {
+    return 0;  // Ciphertext too small
+  }
+
+  const std::size_t required_size = ciphertext.size() - crypto_aead_chacha20poly1305_ietf_ABYTES;
+  if (output.size() < required_size) {
+    return 0;  // Output buffer too small
+  }
+
+  unsigned long long out_len = 0;
+  const auto rc = crypto_aead_chacha20poly1305_ietf_decrypt(
+      output.data(), &out_len, nullptr, ciphertext.data(), ciphertext.size(),
+      aad.data(), aad.size(), nonce.data(), key.data());
+
+  if (rc != 0) {
+    return 0;  // Decryption/authentication failed
+  }
+
+  return static_cast<std::size_t>(out_len);
+}
+
 }  // namespace veil::crypto
