@@ -19,14 +19,6 @@ set(TS_FILES
   translations/veil_zh.ts
 )
 
-# Generate .qm files from .ts files
-if(Qt6LinguistTools_FOUND)
-  qt_add_translations(veil-client-gui
-    TS_FILES ${TS_FILES}
-    QM_FILES_OUTPUT_VARIABLE QM_FILES
-  )
-endif()
-
 add_executable(veil-client-gui
   main.cpp
   mainwindow.cpp
@@ -53,6 +45,14 @@ add_executable(veil-client-gui
   server_selector_widget.h
   resources/resources.qrc
 )
+
+# Generate .qm files from .ts files (must be after add_executable)
+if(Qt6LinguistTools_FOUND)
+  qt_add_translations(veil-client-gui
+    TS_FILES ${TS_FILES}
+    QM_FILES_OUTPUT_VARIABLE QM_FILES
+  )
+endif()
 
 target_link_libraries(veil-client-gui
   PRIVATE
