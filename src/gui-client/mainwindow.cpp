@@ -30,6 +30,7 @@
 #include "diagnostics_widget.h"
 #include "ipc_client_manager.h"
 #include "settings_widget.h"
+#include "statistics_widget.h"
 #include "update_checker.h"
 #include "server_list_widget.h"
 
@@ -115,6 +116,7 @@ MainWindow::MainWindow(QWidget* parent)
       connectionWidget_(new ConnectionWidget(this)),
       settingsWidget_(new SettingsWidget(this)),
       diagnosticsWidget_(new DiagnosticsWidget(this)),
+      statisticsWidget_(new StatisticsWidget(this)),
       serverListWidget_(new ServerListWidget(this)),
       ipcManager_(std::make_unique<IpcClientManager>(this)),
       trayIcon_(nullptr),
@@ -226,6 +228,7 @@ void MainWindow::setupUi() {
   stackedWidget_->addWidget(connectionWidget_);
   stackedWidget_->addWidget(settingsWidget_);
   stackedWidget_->addWidget(diagnosticsWidget_);
+  stackedWidget_->addWidget(statisticsWidget_);
   stackedWidget_->addWidget(serverListWidget_);
 
   // Set central widget
@@ -239,6 +242,8 @@ void MainWindow::setupUi() {
   connect(settingsWidget_, &SettingsWidget::backRequested,
           this, &MainWindow::showConnectionView);
   connect(diagnosticsWidget_, &DiagnosticsWidget::backRequested,
+          this, &MainWindow::showConnectionView);
+  connect(statisticsWidget_, &StatisticsWidget::backRequested,
           this, &MainWindow::showConnectionView);
   connect(serverListWidget_, &ServerListWidget::backRequested,
           this, &MainWindow::showConnectionView);
@@ -497,6 +502,10 @@ void MainWindow::setupIpcConnections() {
         qDebug() << "[MainWindow] New state: DISCONNECTED";
         guiState = ConnectionState::kDisconnected;
         updateTrayIcon(TrayConnectionState::kDisconnected);
+        // Record session end in statistics with accumulated byte counts
+        statisticsWidget_->onSessionEnded(lastTotalTxBytes_, lastTotalRxBytes_);
+        lastTotalTxBytes_ = 0;
+        lastTotalRxBytes_ = 0;
         break;
       case ipc::ConnectionState::kConnecting:
         qDebug() << "[MainWindow] New state: CONNECTING";
@@ -517,6 +526,10 @@ void MainWindow::setupIpcConnections() {
         qDebug() << "[MainWindow] New state: ERROR";
         guiState = ConnectionState::kError;
         updateTrayIcon(TrayConnectionState::kError);
+        // Record session end in statistics with accumulated byte counts
+        statisticsWidget_->onSessionEnded(lastTotalTxBytes_, lastTotalRxBytes_);
+        lastTotalTxBytes_ = 0;
+        lastTotalRxBytes_ = 0;
         break;
     }
 
@@ -538,6 +551,10 @@ void MainWindow::setupIpcConnections() {
                << ":" << status.server_port;
       connectionWidget_->setServerAddress(
           QString::fromStdString(status.server_address), status.server_port);
+
+      // Update statistics widget with actual server info from daemon
+      statisticsWidget_->onSessionStarted(
+          QString::fromStdString(status.server_address), status.server_port);
     }
 
     if (!status.error_message.empty()) {
@@ -552,6 +569,14 @@ void MainWindow::setupIpcConnections() {
         static_cast<int>(metrics.latency_ms),
         metrics.tx_bytes_per_sec,
         metrics.rx_bytes_per_sec);
+
+    // Feed real-time data to statistics graphs
+    statisticsWidget_->recordBandwidth(metrics.tx_bytes_per_sec, metrics.rx_bytes_per_sec);
+    statisticsWidget_->recordLatency(static_cast<int>(metrics.latency_ms));
+
+    // Track accumulated totals for session history
+    lastTotalTxBytes_ = metrics.total_tx_bytes;
+    lastTotalRxBytes_ = metrics.total_rx_bytes;
   });
 
   connect(ipcManager_.get(), &IpcClientManager::diagnosticsReceived,
@@ -687,6 +712,10 @@ void MainWindow::setupMenuBar() {
   auto* diagnosticsAction = viewMenu->addAction(tr("&Diagnostics"));
   diagnosticsAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_3));
   connect(diagnosticsAction, &QAction::triggered, this, &MainWindow::showDiagnosticsView);
+
+  auto* statisticsAction = viewMenu->addAction(tr("S&tatistics"));
+  statisticsAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_4));
+  connect(statisticsAction, &QAction::triggered, this, &MainWindow::showStatisticsView);
 
   viewMenu->addSeparator();
 
@@ -839,6 +868,11 @@ void MainWindow::showSettingsView() {
 void MainWindow::showDiagnosticsView() {
   stackedWidget_->setCurrentWidgetAnimated(stackedWidget_->indexOf(diagnosticsWidget_));
   statusBar()->showMessage(tr("Diagnostics"));
+}
+
+void MainWindow::showStatisticsView() {
+  stackedWidget_->setCurrentWidgetAnimated(stackedWidget_->indexOf(statisticsWidget_));
+  statusBar()->showMessage(tr("Statistics"));
 }
 
 void MainWindow::showServerListView() {

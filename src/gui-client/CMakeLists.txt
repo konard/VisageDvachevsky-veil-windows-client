@@ -24,6 +24,8 @@ add_executable(veil-client-gui
   collapsible_section.h
   diagnostics_widget.cpp
   diagnostics_widget.h
+  statistics_widget.cpp
+  statistics_widget.h
   ipc_client_manager.cpp
   ipc_client_manager.h
   update_checker.cpp

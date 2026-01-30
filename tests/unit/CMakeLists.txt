@@ -76,3 +76,39 @@ veil_set_warnings(veil_unit_tests)
 
 include(GoogleTest)
 gtest_discover_tests(veil_unit_tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+
+# GUI widget tests (requires Qt6)
+find_package(Qt6 COMPONENTS Core Widgets QUIET)
+if(Qt6_FOUND)
+  set(CMAKE_AUTOMOC ON)
+
+  add_executable(veil_gui_tests
+    statistics_widget_tests.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui-client/statistics_widget.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui-client/statistics_widget.h
+  )
+
+  target_include_directories(veil_gui_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/gui-client
+    ${CMAKE_SOURCE_DIR}/src
+  )
+
+  target_link_libraries(veil_gui_tests PRIVATE
+    veil_common
+    GTest::gtest_main
+    Qt6::Core
+    Qt6::Widgets
+  )
+
+  veil_set_warnings(veil_gui_tests)
+
+  # QT_QPA_PLATFORM=offscreen is needed for headless CI servers.
+  # DISCOVERY_MODE PRE_TEST defers test discovery to ctest run time,
+  # where the ENVIRONMENT property is honored.
+  gtest_discover_tests(veil_gui_tests
+    PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0;QT_QPA_PLATFORM=offscreen"
+    DISCOVERY_MODE PRE_TEST
+  )
+else()
+  message(STATUS "Qt6 not found, GUI widget tests will not be built")
+endif()
