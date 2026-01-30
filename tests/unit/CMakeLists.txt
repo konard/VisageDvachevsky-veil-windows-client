@@ -73,3 +73,33 @@ veil_set_warnings(veil_unit_tests)
 
 include(GoogleTest)
 gtest_discover_tests(veil_unit_tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+
+# GUI tests (requires Qt6)
+find_package(Qt6 COMPONENTS Core Widgets Network QUIET)
+if(Qt6_FOUND)
+  set(CMAKE_AUTOMOC ON)
+
+  add_executable(veil_gui_tests
+    setup_wizard_tests.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui-client/setup_wizard.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui-client/setup_wizard.h
+  )
+
+  target_include_directories(veil_gui_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+  )
+
+  target_link_libraries(veil_gui_tests PRIVATE
+    veil_common
+    GTest::gtest_main
+    Qt6::Core
+    Qt6::Widgets
+    Qt6::Network
+  )
+
+  veil_set_warnings(veil_gui_tests)
+
+  gtest_discover_tests(veil_gui_tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0;QT_QPA_PLATFORM=offscreen")
+else()
+  message(STATUS "Qt6 not found, GUI tests will not be built")
+endif()

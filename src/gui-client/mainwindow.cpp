@@ -30,6 +30,7 @@
 #include "diagnostics_widget.h"
 #include "ipc_client_manager.h"
 #include "settings_widget.h"
+#include "setup_wizard.h"
 #include "update_checker.h"
 
 #ifdef _WIN32
@@ -114,6 +115,7 @@ MainWindow::MainWindow(QWidget* parent)
       connectionWidget_(new ConnectionWidget(this)),
       settingsWidget_(new SettingsWidget(this)),
       diagnosticsWidget_(new DiagnosticsWidget(this)),
+      setupWizard_(new SetupWizard(this)),
       ipcManager_(std::make_unique<IpcClientManager>(this)),
       trayIcon_(nullptr),
       trayMenu_(nullptr),
@@ -221,12 +223,23 @@ void MainWindow::setupUi() {
   setWindowFlags(windowFlags() | Qt::WindowMinMaxButtonsHint);
 
   // Add widgets to stacked widget
+  // Index 0: Setup wizard (shown on first run)
+  // Index 1: Connection view (main view)
+  // Index 2: Settings view
+  // Index 3: Diagnostics view
+  stackedWidget_->addWidget(setupWizard_);
   stackedWidget_->addWidget(connectionWidget_);
   stackedWidget_->addWidget(settingsWidget_);
   stackedWidget_->addWidget(diagnosticsWidget_);
 
   // Set central widget
   setCentralWidget(stackedWidget_);
+
+  // Connect wizard signals
+  connect(setupWizard_, &SetupWizard::wizardCompleted,
+          this, &MainWindow::onWizardFinished);
+  connect(setupWizard_, &SetupWizard::wizardSkipped,
+          this, &MainWindow::onWizardFinished);
 
   // Connect signals
   connect(connectionWidget_, &ConnectionWidget::settingsRequested,
@@ -239,6 +252,9 @@ void MainWindow::setupUi() {
   // Update connection widget when settings are saved
   connect(settingsWidget_, &SettingsWidget::settingsSaved,
           connectionWidget_, &ConnectionWidget::loadServerSettings);
+
+  // Show wizard on first run, otherwise show connection view
+  showSetupWizardIfNeeded();
 }
 
 // Helper function to build ConnectionConfig from QSettings
@@ -724,7 +740,10 @@ void MainWindow::setupMenuBar() {
   auto* escapeShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
   connect(escapeShortcut, &QShortcut::activated, this, [this]() {
     // If on settings or diagnostics view, go back to connection view
-    if (stackedWidget_->currentIndex() != 0) {
+    int currentIdx = stackedWidget_->currentIndex();
+    int connectionIdx = stackedWidget_->indexOf(connectionWidget_);
+    if (currentIdx != connectionIdx &&
+        currentIdx != stackedWidget_->indexOf(setupWizard_)) {
       showConnectionView();
     }
   });
@@ -732,7 +751,7 @@ void MainWindow::setupMenuBar() {
   auto* saveSettingsShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_S), this);
   connect(saveSettingsShortcut, &QShortcut::activated, this, [this]() {
     // Trigger save if on settings view
-    if (stackedWidget_->currentIndex() == 1 && settingsWidget_) {
+    if (stackedWidget_->currentWidget() == settingsWidget_ && settingsWidget_) {
       settingsWidget_->saveSettings();
     }
   });
@@ -743,7 +762,7 @@ void MainWindow::setupMenuBar() {
   auto* refreshDiagnosticsShortcut = new QShortcut(QKeySequence(Qt::Key_F5), this);
   connect(refreshDiagnosticsShortcut, &QShortcut::activated, this, [this]() {
     // Refresh diagnostics if on diagnostics view by emitting the request signal
-    if (stackedWidget_->currentIndex() == 2) {
+    if (stackedWidget_->currentWidget() == diagnosticsWidget_) {
       showDiagnosticsView();  // Re-showing triggers a refresh
     }
   });
@@ -797,6 +816,25 @@ void MainWindow::showSettingsView() {
 void MainWindow::showDiagnosticsView() {
   stackedWidget_->setCurrentWidgetAnimated(stackedWidget_->indexOf(diagnosticsWidget_));
   statusBar()->showMessage(tr("Diagnostics"));
+}
+
+void MainWindow::showSetupWizardIfNeeded() {
+  if (SetupWizard::isFirstRun()) {
+    qDebug() << "[MainWindow] First run detected, showing setup wizard";
+    stackedWidget_->setCurrentWidget(setupWizard_);
+  } else {
+    qDebug() << "[MainWindow] Not first run, showing connection view";
+    stackedWidget_->setCurrentWidget(connectionWidget_);
+  }
+}
+
+void MainWindow::onWizardFinished() {
+  qDebug() << "[MainWindow] Setup wizard finished, switching to connection view";
+  // Reload settings in the settings widget and connection widget
+  settingsWidget_->loadSettings();
+  connectionWidget_->loadServerSettings();
+  stackedWidget_->setCurrentWidgetAnimated(stackedWidget_->indexOf(connectionWidget_));
+  statusBar()->showMessage(tr("Setup complete - ready to connect"), 5000);
 }
 
 void MainWindow::showAboutDialog() {

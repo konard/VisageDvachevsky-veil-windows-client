@@ -20,6 +20,7 @@ class ConnectionWidget;
 class SettingsWidget;
 class DiagnosticsWidget;
 class IpcClientManager;
+class SetupWizard;
 
 /// Connection state for system tray icon updates
 enum class TrayConnectionState {
@@ -83,6 +84,8 @@ class MainWindow : public QMainWindow {
   void setupSystemTray();
   void setupUpdateChecker();
   void applyDarkTheme();
+  void showSetupWizardIfNeeded();
+  void onWizardFinished();
 
 #ifdef _WIN32
   /// Ensure the Windows service is running, starting it if necessary
@@ -99,6 +102,7 @@ class MainWindow : public QMainWindow {
   ConnectionWidget* connectionWidget_;
   SettingsWidget* settingsWidget_;
   DiagnosticsWidget* diagnosticsWidget_;
+  SetupWizard* setupWizard_;
   std::unique_ptr<IpcClientManager> ipcManager_;
 
   // System tray
