@@ -126,17 +126,14 @@ TEST_F(SetupWizardTest, WizardHasNavigationButtons) {
   auto buttons = wizard.findChildren<QPushButton*>();
   bool hasSkip = false;
   bool hasNext = false;
-  bool hasBack = false;
 
   for (auto* btn : buttons) {
     if (btn->text().contains("Skip")) hasSkip = true;
     if (btn->text().contains("Next")) hasNext = true;
-    if (btn->text().contains("Back")) hasBack = true;
   }
 
   EXPECT_TRUE(hasSkip);
   EXPECT_TRUE(hasNext);
-  // Back button exists but may not be visible on first page
 }
 
 // ===================== Signal Tests =====================
