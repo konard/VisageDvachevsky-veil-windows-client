@@ -567,4 +567,310 @@ TEST_F(TransportSessionTest, DifferentSessionsProduceDifferentObfuscation) {
       << "Different sessions should produce different obfuscated sequences";
 }
 
+// =============================================================================
+// ZERO-COPY PROCESSING TESTS (Issue #97)
+// These tests verify the zero-copy packet processing methods for performance
+// optimization while maintaining correctness.
+// =============================================================================
+
+TEST_F(TransportSessionTest, ZeroCopyDecryptBasic) {
+  // Verifies zero-copy decryption produces the same result as regular decrypt.
+  auto client_now_fn = [this]() { return steady_now_; };
+  auto server_now_fn = [this]() { return steady_now_; };
+
+  transport::TransportSession client(client_handshake_, {}, client_now_fn);
+  transport::TransportSession server(server_handshake_, {}, server_now_fn);
+
+  std::vector<std::uint8_t> plaintext{0x01, 0x02, 0x03, 0x04, 0x05};
+  auto encrypted_packets = client.encrypt_data(plaintext, 0, false);
+  ASSERT_EQ(encrypted_packets.size(), 1U);
+
+  // Use zero-copy decryption
+  std::vector<std::uint8_t> decrypt_buffer(2048);
+  auto result = server.decrypt_packet_zero_copy(encrypted_packets[0], decrypt_buffer);
+
+  ASSERT_TRUE(result.has_value());
+  auto& [frame_view, plaintext_size] = *result;
+
+  EXPECT_EQ(frame_view.kind, mux::FrameKind::kData);
+  EXPECT_EQ(frame_view.data.payload.size(), plaintext.size());
+  EXPECT_EQ(std::vector<std::uint8_t>(frame_view.data.payload.begin(), frame_view.data.payload.end()), plaintext);
+}
+
+TEST_F(TransportSessionTest, ZeroCopyDecryptReplayProtection) {
+  // Verifies zero-copy decryption still enforces replay protection.
+  auto now_fn = [this]() { return steady_now_; };
+
+  transport::TransportSession client(client_handshake_, {}, now_fn);
+  transport::TransportSession server(server_handshake_, {}, now_fn);
+
+  std::vector<std::uint8_t> plaintext{0x01, 0x02};
+  auto encrypted_packets = client.encrypt_data(plaintext, 0, false);
+  ASSERT_EQ(encrypted_packets.size(), 1U);
+
+  std::vector<std::uint8_t> decrypt_buffer(2048);
+
+  // First decryption should succeed.
+  auto result1 = server.decrypt_packet_zero_copy(encrypted_packets[0], decrypt_buffer);
+  ASSERT_TRUE(result1.has_value());
+
+  // Replay should be rejected.
+  auto result2 = server.decrypt_packet_zero_copy(encrypted_packets[0], decrypt_buffer);
+  EXPECT_FALSE(result2.has_value());
+  EXPECT_EQ(server.stats().packets_dropped_replay, 1U);
+}
+
+TEST_F(TransportSessionTest, ZeroCopyDecryptTamperedPacket) {
+  // Verifies zero-copy decryption rejects tampered packets.
+  auto now_fn = [this]() { return steady_now_; };
+
+  transport::TransportSession client(client_handshake_, {}, now_fn);
+  transport::TransportSession server(server_handshake_, {}, now_fn);
+
+  std::vector<std::uint8_t> plaintext{0x01, 0x02, 0x03};
+  auto encrypted_packets = client.encrypt_data(plaintext, 0, false);
+  ASSERT_EQ(encrypted_packets.size(), 1U);
+
+  // Tamper with the ciphertext.
+  encrypted_packets[0][10] ^= 0xFF;
+
+  std::vector<std::uint8_t> decrypt_buffer(2048);
+  auto result = server.decrypt_packet_zero_copy(encrypted_packets[0], decrypt_buffer);
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(server.stats().packets_dropped_decrypt, 1U);
+}
+
+TEST_F(TransportSessionTest, ZeroCopyDecryptBufferTooSmall) {
+  // Verifies zero-copy decryption fails gracefully when buffer is too small.
+  auto now_fn = [this]() { return steady_now_; };
+
+  transport::TransportSession client(client_handshake_, {}, now_fn);
+  transport::TransportSession server(server_handshake_, {}, now_fn);
+
+  std::vector<std::uint8_t> plaintext{0x01, 0x02, 0x03, 0x04, 0x05};
+  auto encrypted_packets = client.encrypt_data(plaintext, 0, false);
+  ASSERT_EQ(encrypted_packets.size(), 1U);
+
+  // Buffer too small for plaintext
+  std::vector<std::uint8_t> small_buffer(2);
+  auto result = server.decrypt_packet_zero_copy(encrypted_packets[0], small_buffer);
+  EXPECT_FALSE(result.has_value());
+}
+
+TEST_F(TransportSessionTest, ZeroCopyDecryptPayloadViewIntoBuffer) {
+  // Verifies the frame view's payload points into the provided buffer (zero-copy).
+  auto client_now_fn = [this]() { return steady_now_; };
+  auto server_now_fn = [this]() { return steady_now_; };
+
+  transport::TransportSession client(client_handshake_, {}, client_now_fn);
+  transport::TransportSession server(server_handshake_, {}, server_now_fn);
+
+  std::vector<std::uint8_t> plaintext{0x01, 0x02, 0x03, 0x04, 0x05};
+  auto encrypted_packets = client.encrypt_data(plaintext, 0, false);
+  ASSERT_EQ(encrypted_packets.size(), 1U);
+
+  std::vector<std::uint8_t> decrypt_buffer(2048);
+  auto result = server.decrypt_packet_zero_copy(encrypted_packets[0], decrypt_buffer);
+
+  ASSERT_TRUE(result.has_value());
+  auto& [frame_view, plaintext_size] = *result;
+
+  // The payload span should point within the decrypt_buffer
+  EXPECT_GE(frame_view.data.payload.data(), decrypt_buffer.data());
+  EXPECT_LT(frame_view.data.payload.data(), decrypt_buffer.data() + decrypt_buffer.size());
+}
+
+TEST_F(TransportSessionTest, ZeroCopyEncryptBasic) {
+  // Verifies zero-copy encryption produces valid packets.
+  auto client_now_fn = [this]() { return steady_now_; };
+  auto server_now_fn = [this]() { return steady_now_; };
+
+  transport::TransportSession client(client_handshake_, {}, client_now_fn);
+  transport::TransportSession server(server_handshake_, {}, server_now_fn);
+
+  std::vector<std::uint8_t> payload{0x01, 0x02, 0x03, 0x04, 0x05};
+  auto frame = mux::make_data_frame(0, 0, false, payload);
+
+  std::vector<std::uint8_t> encrypt_buffer(2048);
+  auto encrypted_size = client.encrypt_frame_zero_copy(frame, encrypt_buffer);
+
+  EXPECT_GT(encrypted_size, 0U);
+
+  // The encrypted packet should be decryptable by the server
+  std::span<const std::uint8_t> encrypted_packet(encrypt_buffer.data(), encrypted_size);
+  auto decrypted = server.decrypt_packet(encrypted_packet);
+
+  ASSERT_TRUE(decrypted.has_value());
+  ASSERT_EQ(decrypted->size(), 1U);
+  EXPECT_EQ((*decrypted)[0].kind, mux::FrameKind::kData);
+  EXPECT_EQ((*decrypted)[0].data.payload, payload);
+}
+
+TEST_F(TransportSessionTest, ZeroCopyEncryptBufferTooSmall) {
+  // Verifies zero-copy encryption fails gracefully when buffer is too small.
+  auto now_fn = [this]() { return steady_now_; };
+
+  transport::TransportSession client(client_handshake_, {}, now_fn);
+
+  std::vector<std::uint8_t> payload{0x01, 0x02, 0x03, 0x04, 0x05};
+  auto frame = mux::make_data_frame(0, 0, false, payload);
+
+  std::vector<std::uint8_t> small_buffer(5);  // Too small
+  auto encrypted_size = client.encrypt_frame_zero_copy(frame, small_buffer);
+
+  EXPECT_EQ(encrypted_size, 0U);  // Should fail gracefully
+}
+
+TEST_F(TransportSessionTest, ZeroCopyEncryptSequenceIncrements) {
+  // Verifies zero-copy encryption increments the sequence counter.
+  auto now_fn = [this]() { return steady_now_; };
+
+  transport::TransportSession client(client_handshake_, {}, now_fn);
+
+  EXPECT_EQ(client.send_sequence(), 0U);
+
+  std::vector<std::uint8_t> payload{0x01};
+  auto frame = mux::make_data_frame(0, 0, false, payload);
+
+  std::vector<std::uint8_t> buffer(2048);
+
+  client.encrypt_frame_zero_copy(frame, buffer);
+  EXPECT_EQ(client.send_sequence(), 1U);
+
+  client.encrypt_frame_zero_copy(frame, buffer);
+  EXPECT_EQ(client.send_sequence(), 2U);
+}
+
+TEST_F(TransportSessionTest, ZeroCopyRoundTrip) {
+  // Full round-trip test using zero-copy methods.
+  auto client_now_fn = [this]() { return steady_now_; };
+  auto server_now_fn = [this]() { return steady_now_; };
+
+  transport::TransportSession client(client_handshake_, {}, client_now_fn);
+  transport::TransportSession server(server_handshake_, {}, server_now_fn);
+
+  std::vector<std::uint8_t> original_payload{0xDE, 0xAD, 0xBE, 0xEF};
+
+  // Client encrypts using zero-copy
+  auto frame = mux::make_data_frame(42, 100, true, original_payload);
+  std::vector<std::uint8_t> encrypt_buffer(2048);
+  auto encrypted_size = client.encrypt_frame_zero_copy(frame, encrypt_buffer);
+  ASSERT_GT(encrypted_size, 0U);
+
+  // Server decrypts using zero-copy
+  std::span<const std::uint8_t> encrypted_packet(encrypt_buffer.data(), encrypted_size);
+  std::vector<std::uint8_t> decrypt_buffer(2048);
+  auto result = server.decrypt_packet_zero_copy(encrypted_packet, decrypt_buffer);
+
+  ASSERT_TRUE(result.has_value());
+  auto& [frame_view, plaintext_size] = *result;
+
+  EXPECT_EQ(frame_view.kind, mux::FrameKind::kData);
+  EXPECT_EQ(frame_view.data.stream_id, 42U);
+  EXPECT_TRUE(frame_view.data.fin);
+  EXPECT_EQ(std::vector<std::uint8_t>(frame_view.data.payload.begin(), frame_view.data.payload.end()), original_payload);
+}
+
+TEST_F(TransportSessionTest, ZeroCopyAckFrame) {
+  // Test zero-copy encryption/decryption of ACK frames.
+  auto client_now_fn = [this]() { return steady_now_; };
+  auto server_now_fn = [this]() { return steady_now_; };
+
+  transport::TransportSession client(client_handshake_, {}, client_now_fn);
+  transport::TransportSession server(server_handshake_, {}, server_now_fn);
+
+  auto ack_frame = mux::make_ack_frame(7, 200, 0xDEADBEEF);
+
+  std::vector<std::uint8_t> encrypt_buffer(2048);
+  auto encrypted_size = client.encrypt_frame_zero_copy(ack_frame, encrypt_buffer);
+  ASSERT_GT(encrypted_size, 0U);
+
+  std::span<const std::uint8_t> encrypted_packet(encrypt_buffer.data(), encrypted_size);
+  std::vector<std::uint8_t> decrypt_buffer(2048);
+  auto result = server.decrypt_packet_zero_copy(encrypted_packet, decrypt_buffer);
+
+  ASSERT_TRUE(result.has_value());
+  auto& [frame_view, plaintext_size] = *result;
+
+  EXPECT_EQ(frame_view.kind, mux::FrameKind::kAck);
+  EXPECT_EQ(frame_view.ack.stream_id, 7U);
+  EXPECT_EQ(frame_view.ack.ack, 200U);
+  EXPECT_EQ(frame_view.ack.bitmap, 0xDEADBEEFU);
+}
+
+TEST_F(TransportSessionTest, ZeroCopyPacketPoolIntegration) {
+  // Test that packet pool can be used with zero-copy methods.
+  auto now_fn = [this]() { return steady_now_; };
+
+  transport::TransportSession client(client_handshake_, {}, now_fn);
+  transport::TransportSession server(server_handshake_, {}, now_fn);
+
+  // Acquire buffer from client's packet pool
+  auto& pool = client.packet_pool();
+  auto encrypt_buffer = pool.acquire();
+  encrypt_buffer.resize(2048);
+
+  std::vector<std::uint8_t> payload{0x01, 0x02, 0x03};
+  auto frame = mux::make_data_frame(0, 0, false, payload);
+
+  auto encrypted_size = client.encrypt_frame_zero_copy(frame, encrypt_buffer);
+  ASSERT_GT(encrypted_size, 0U);
+
+  // Decrypt
+  std::span<const std::uint8_t> encrypted_packet(encrypt_buffer.data(), encrypted_size);
+  auto decrypt_buffer = server.packet_pool().acquire();
+  decrypt_buffer.resize(2048);
+
+  auto result = server.decrypt_packet_zero_copy(encrypted_packet, decrypt_buffer);
+  ASSERT_TRUE(result.has_value());
+
+  auto& [frame_view, plaintext_size] = *result;
+  EXPECT_EQ(std::vector<std::uint8_t>(frame_view.data.payload.begin(), frame_view.data.payload.end()), payload);
+
+  // Release buffers back to pools
+  client.packet_pool().release(std::move(encrypt_buffer));
+  server.packet_pool().release(std::move(decrypt_buffer));
+
+  // Verify pool has buffers available again
+  EXPECT_GE(client.packet_pool().available(), 1U);
+  EXPECT_GE(server.packet_pool().available(), 1U);
+}
+
+TEST_F(TransportSessionTest, ZeroCopyMultiplePackets) {
+  // Test zero-copy methods with multiple packets in sequence.
+  auto client_now_fn = [this]() { return steady_now_; };
+  auto server_now_fn = [this]() { return steady_now_; };
+
+  transport::TransportSession client(client_handshake_, {}, client_now_fn);
+  transport::TransportSession server(server_handshake_, {}, server_now_fn);
+
+  const int num_packets = 50;
+  std::vector<std::uint8_t> encrypt_buffer(2048);
+  std::vector<std::uint8_t> decrypt_buffer(2048);
+
+  for (int i = 0; i < num_packets; ++i) {
+    std::vector<std::uint8_t> payload(100);
+    for (int j = 0; j < 100; ++j) {
+      payload[static_cast<std::size_t>(j)] = static_cast<std::uint8_t>((i + j) & 0xFF);
+    }
+
+    auto frame = mux::make_data_frame(static_cast<std::uint64_t>(i), static_cast<std::uint64_t>(i), false, payload);
+
+    auto encrypted_size = client.encrypt_frame_zero_copy(frame, encrypt_buffer);
+    ASSERT_GT(encrypted_size, 0U) << "Failed to encrypt packet " << i;
+
+    std::span<const std::uint8_t> encrypted_packet(encrypt_buffer.data(), encrypted_size);
+    auto result = server.decrypt_packet_zero_copy(encrypted_packet, decrypt_buffer);
+
+    ASSERT_TRUE(result.has_value()) << "Failed to decrypt packet " << i;
+    auto& [frame_view, plaintext_size] = *result;
+
+    EXPECT_EQ(std::vector<std::uint8_t>(frame_view.data.payload.begin(), frame_view.data.payload.end()), payload)
+        << "Payload mismatch for packet " << i;
+  }
+
+  EXPECT_EQ(server.stats().packets_received, static_cast<std::uint64_t>(num_packets));
+  EXPECT_EQ(server.stats().packets_dropped_decrypt, 0U);
+}
+
 }  // namespace veil::tests

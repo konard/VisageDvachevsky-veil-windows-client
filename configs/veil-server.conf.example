@@ -142,3 +142,39 @@ max_migrations_per_session = 5
 
 # Minimum time between migrations (seconds)
 migration_cooldown_sec = 10
+
+[clients]
+# Per-client PSK configuration (Issue #87)
+#
+# This enables individual client authentication and revocation.
+# Each client has its own PSK, allowing:
+# - Individual client revocation without affecting others
+# - Audit trail showing which client authenticated
+# - Selective key rotation
+#
+# Option 1: Directory-based configuration
+# Place PSK files named {client_id}.key in this directory
+# Each file should contain 32-64 bytes of random binary data
+# Generate with: head -c 32 /dev/urandom > /etc/veil/clients/{client_id}.key
+# keys_dir = /etc/veil/clients
+#
+# Option 2: Explicit key file mappings
+# Map each client_id to a PSK file path directly in this section
+# Format: client_id = /path/to/key/file
+#
+# Example:
+# alice = /etc/veil/clients/alice.key
+# bob = /etc/veil/clients/bob.key
+# carol = /etc/veil/clients/carol.key
+#
+# Note: The [crypto] preshared_key_file setting becomes a fallback PSK
+# that is used when no client_id matches. This provides backward compatibility
+# with legacy clients that don't send a client_id.
+#
+# Authentication modes:
+# 1. Legacy mode: Only [crypto] preshared_key_file configured
+#    -> All clients use the same PSK (original behavior)
+# 2. Per-client mode: Only [clients] configured (no fallback)
+#    -> Only registered clients can connect
+# 3. Hybrid mode: Both [crypto] and [clients] configured
+#    -> Registered clients use their PSK, others use fallback

@@ -16,6 +16,7 @@
 #include "common/utils/rate_limiter.h"
 #include "server/server_config.h"
 #include "server/session_table.h"
+#include "transport/mux/ack_scheduler.h"
 #include "transport/mux/frame.h"
 #include "transport/mux/mux_codec.h"
 #include "transport/session/transport_session.h"
@@ -114,38 +115,45 @@ void log_decryption_failure(std::uint64_t session_id, const std::string& host,
 }
 
 // Helper function to log packet processing - avoids clang-tidy bugprone-lambda-function-name
-// warning when LOG_WARN is used inside lambdas (Issue #72 debugging)
-void log_processing_packet(std::uint64_t session_id, const std::string& host,
-                           std::uint16_t port, std::size_t size) {
-  LOG_WARN("Processing packet from session {} ({}:{}), size={}",
-           session_id, host, port, size);
+// warning when LOG_DEBUG is used inside lambdas (Issue #72 debugging)
+// Changed to DEBUG level to avoid performance impact in hot path (Issue #92)
+void log_processing_packet([[maybe_unused]] std::uint64_t session_id,
+                           [[maybe_unused]] const std::string& host,
+                           [[maybe_unused]] std::uint16_t port,
+                           [[maybe_unused]] std::size_t size) {
+  LOG_DEBUG("Processing packet from session {} ({}:{}), size={}",
+            session_id, host, port, size);
 }
 
 // Additional helper functions for Issue #72 debugging - avoid bugprone-lambda-function-name
-void log_decrypted_frames(std::size_t frame_count, std::uint64_t session_id) {
-  LOG_WARN("Decrypted {} frame(s) from session {}", frame_count, session_id);
+// Changed to DEBUG level to avoid performance impact in hot path (Issue #92)
+void log_decrypted_frames([[maybe_unused]] std::size_t frame_count,
+                          [[maybe_unused]] std::uint64_t session_id) {
+  LOG_DEBUG("Decrypted {} frame(s) from session {}", frame_count, session_id);
 }
 
-void log_frame_info(int kind, bool is_data) {
-  LOG_WARN("  Frame kind={}, is_data={}", kind, is_data);
+void log_frame_info([[maybe_unused]] int kind, [[maybe_unused]] bool is_data) {
+  LOG_DEBUG("  Frame kind={}, is_data={}", kind, is_data);
 }
 
-void log_tun_write_attempt(std::size_t bytes, std::uint64_t session_id) {
-  LOG_WARN("Writing {} bytes to TUN from session {}", bytes, session_id);
+void log_tun_write_attempt([[maybe_unused]] std::size_t bytes,
+                           [[maybe_unused]] std::uint64_t session_id) {
+  LOG_DEBUG("Writing {} bytes to TUN from session {}", bytes, session_id);
 }
 
-void log_tun_write_success(std::size_t bytes) {
-  LOG_WARN("TUN write SUCCESS: {} bytes", bytes);
+void log_tun_write_success([[maybe_unused]] std::size_t bytes) {
+  LOG_DEBUG("TUN write SUCCESS: {} bytes", bytes);
 }
 
 void log_ack_processing() {
-  LOG_WARN("Processing ACK frame");
+  LOG_DEBUG("Processing ACK frame");
 }
 
 // Helper functions for ACK sending logging (Issue #72 fix)
 // These avoid the bugprone-lambda-function-name clang-tidy warning
-void log_ack_send_error(const std::error_code& ec) {
-  LOG_WARN("Failed to send ACK to client: {}", ec.message());
+// Changed to DEBUG level to avoid performance impact in hot path (Issue #92)
+void log_ack_send_error([[maybe_unused]] const std::error_code& ec) {
+  LOG_DEBUG("Failed to send ACK to client: {}", ec.message());
 }
 
 void log_ack_sent([[maybe_unused]] std::uint64_t ack, [[maybe_unused]] std::uint32_t bitmap) {
@@ -513,18 +521,29 @@ int main(int argc, char* argv[]) {
                       log_tun_write_success(frame.data.payload.size());
                     }
 
-                    // Send ACK back to client (Issue #72 fix)
-                    // Without ACKs, the client keeps retransmitting packets
-                    // IMPORTANT: Use encrypt_frame() instead of encrypt_data() to preserve the ACK frame kind.
-                    // encrypt_data() wraps data in a DATA frame, which would cause the receiver to
-                    // incorrectly interpret the ACK as data and try to write it to TUN.
-                    auto ack_info = session->transport->generate_ack(frame.data.stream_id);
-                    auto ack_frame = mux::make_ack_frame(ack_info.stream_id, ack_info.ack, ack_info.bitmap);
-                    auto ack_packet = session->transport->encrypt_frame(ack_frame);
-                    if (!udp_socket.send(ack_packet, pkt.remote, ec)) {
-                      log_ack_send_error(ec);
-                    } else {
-                      log_ack_sent(ack_info.ack, ack_info.bitmap);
+                    // Issue #95: ACK coalescing - use AckScheduler to batch ACKs
+                    // Instead of sending ACK immediately on every data packet, the scheduler
+                    // delays ACKs (up to 20ms) or batches them (every 2 packets), reducing overhead.
+                    bool should_send_ack = session->ack_scheduler.on_packet_received(
+                        frame.data.stream_id, frame.data.sequence, frame.data.fin);
+
+                    if (should_send_ack) {
+                      // Scheduler determined immediate ACK is needed (e.g., out-of-order or every N packets)
+                      auto ack_frame_opt = session->ack_scheduler.get_pending_ack(frame.data.stream_id);
+                      if (ack_frame_opt) {
+                        // IMPORTANT: Use encrypt_frame() instead of encrypt_data() to preserve the ACK frame kind.
+                        // encrypt_data() wraps data in a DATA frame, which would cause the receiver to
+                        // incorrectly interpret the ACK as data and try to write it to TUN.
+                        auto ack_mux_frame = mux::make_ack_frame(
+                            ack_frame_opt->stream_id, ack_frame_opt->ack, ack_frame_opt->bitmap);
+                        auto ack_packet = session->transport->encrypt_frame(ack_mux_frame);
+                        if (!udp_socket.send(ack_packet, pkt.remote, ec)) {
+                          log_ack_send_error(ec);
+                        } else {
+                          log_ack_sent(ack_frame_opt->ack, ack_frame_opt->bitmap);
+                        }
+                        session->ack_scheduler.ack_sent(frame.data.stream_id);
+                      }
                     }
                   } else if (frame.kind == mux::FrameKind::kAck) {
                     log_ack_processing();
@@ -593,13 +612,13 @@ int main(int argc, char* argv[]) {
           inet_ntop(AF_INET, &src_addr, src_ip_str, sizeof(src_ip_str));
           inet_ntop(AF_INET, &dst_addr, dst_ip_str, sizeof(dst_ip_str));
 
-          // Use WARN level temporarily for Issue #74 debugging (return traffic routing)
-          LOG_WARN("TUN read: {} bytes, {} -> {}", tun_read, src_ip_str, dst_ip_str);
+          // Changed to DEBUG level to avoid performance impact in hot path (Issue #92)
+          LOG_DEBUG("TUN read: {} bytes, {} -> {}", tun_read, src_ip_str, dst_ip_str);
 
           // Find session by tunnel IP
           auto* session = session_table.find_by_tunnel_ip(dst_ip_str);
           if (session != nullptr && session->transport) {
-            LOG_WARN("Routing {} bytes to session {} ({}:{})",
+            LOG_DEBUG("Routing {} bytes to session {} ({}:{})",
                       tun_read, session->session_id, session->endpoint.host, session->endpoint.port);
             // Encrypt and send
             auto packets = session->transport->encrypt_data(
@@ -615,7 +634,7 @@ int main(int argc, char* argv[]) {
               }
             }
           } else {
-            LOG_WARN("No session found for tunnel IP {}, packet dropped", dst_ip_str);
+            LOG_DEBUG("No session found for tunnel IP {}, packet dropped", dst_ip_str);
           }
         }
       }
@@ -650,6 +669,29 @@ int main(int argc, char* argv[]) {
         for (const auto& pkt : retransmits) {
           if (!udp_socket.send(pkt, session->endpoint, ec)) {
             log_retransmit_error(ec);
+          }
+        }
+      }
+    });
+
+    // Issue #95: Check for delayed ACKs (ACK coalescing).
+    // The scheduler uses a timer to batch ACKs, reducing overhead.
+    // Check each session's ACK scheduler for pending delayed ACKs.
+    session_table.for_each_session([&](server::ClientSession* session) {
+      if (session->transport) {
+        auto stream_id_opt = session->ack_scheduler.check_ack_timer();
+        if (stream_id_opt) {
+          auto ack_frame_opt = session->ack_scheduler.get_pending_ack(*stream_id_opt);
+          if (ack_frame_opt) {
+            auto ack_mux_frame = mux::make_ack_frame(
+                ack_frame_opt->stream_id, ack_frame_opt->ack, ack_frame_opt->bitmap);
+            auto ack_packet = session->transport->encrypt_frame(ack_mux_frame);
+            if (!udp_socket.send(ack_packet, session->endpoint, ec)) {
+              log_ack_send_error(ec);
+            } else {
+              log_ack_sent(ack_frame_opt->ack, ack_frame_opt->bitmap);
+            }
+            session->ack_scheduler.ack_sent(*stream_id_opt);
           }
         }
       }

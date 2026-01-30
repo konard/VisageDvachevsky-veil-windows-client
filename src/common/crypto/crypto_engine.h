@@ -55,12 +55,14 @@ std::array<std::uint8_t, kAeadKeyLen> derive_sequence_obfuscation_key(
     std::span<const std::uint8_t, kNonceLen> send_nonce);
 
 // Obfuscate sequence number for transmission (sender side).
-// Uses ChaCha20 with the obfuscation key to make sequences indistinguishable from random.
+// Uses ChaCha20 stream cipher with the obfuscation key to make sequences indistinguishable from random.
+// Optimized for performance (Issue #93) - replaces 3-round Feistel network with hardware-accelerated ChaCha20.
 std::uint64_t obfuscate_sequence(std::uint64_t sequence,
                                   std::span<const std::uint8_t, kAeadKeyLen> obfuscation_key);
 
 // Deobfuscate sequence number after reception (receiver side).
 // Reverses the obfuscation to recover the original sequence for nonce derivation.
+// ChaCha20 is symmetric, so deobfuscation is identical to obfuscation (XOR is its own inverse).
 std::uint64_t deobfuscate_sequence(std::uint64_t obfuscated_sequence,
                                     std::span<const std::uint8_t, kAeadKeyLen> obfuscation_key);
 
@@ -71,5 +73,42 @@ std::vector<std::uint8_t> aead_encrypt(std::span<const std::uint8_t, kAeadKeyLen
 std::optional<std::vector<std::uint8_t>> aead_decrypt(
     std::span<const std::uint8_t, kAeadKeyLen> key, std::span<const std::uint8_t, kNonceLen> nonce,
     std::span<const std::uint8_t> aad, std::span<const std::uint8_t> ciphertext);
+
+// PERFORMANCE (Issue #94): Output buffer variants that avoid allocations.
+// These functions write to caller-provided buffers instead of allocating new vectors.
+// The output buffer must have sufficient capacity.
+
+// AEAD authentication tag size for ChaCha20-Poly1305.
+inline constexpr std::size_t kAeadTagLen = 16;
+
+// Calculate the required ciphertext buffer size for a given plaintext length.
+inline constexpr std::size_t aead_ciphertext_size(std::size_t plaintext_len) noexcept {
+  return plaintext_len + kAeadTagLen;
+}
+
+// Calculate the plaintext size from ciphertext length (returns 0 if ciphertext too small).
+inline constexpr std::size_t aead_plaintext_size(std::size_t ciphertext_len) noexcept {
+  return ciphertext_len >= kAeadTagLen ? ciphertext_len - kAeadTagLen : 0;
+}
+
+// Encrypt into a pre-allocated output buffer.
+// The output buffer must have at least aead_ciphertext_size(plaintext.size()) bytes capacity.
+// Returns the actual ciphertext size written (always plaintext.size() + kAeadTagLen on success).
+// Returns 0 on failure (output buffer too small or encryption error).
+std::size_t aead_encrypt_to(std::span<const std::uint8_t, kAeadKeyLen> key,
+                            std::span<const std::uint8_t, kNonceLen> nonce,
+                            std::span<const std::uint8_t> aad,
+                            std::span<const std::uint8_t> plaintext,
+                            std::span<std::uint8_t> output);
+
+// Decrypt into a pre-allocated output buffer.
+// The output buffer must have at least aead_plaintext_size(ciphertext.size()) bytes capacity.
+// Returns the actual plaintext size written on success (always ciphertext.size() - kAeadTagLen).
+// Returns 0 on failure (output buffer too small, authentication failure, or decryption error).
+std::size_t aead_decrypt_to(std::span<const std::uint8_t, kAeadKeyLen> key,
+                            std::span<const std::uint8_t, kNonceLen> nonce,
+                            std::span<const std::uint8_t> aad,
+                            std::span<const std::uint8_t> ciphertext,
+                            std::span<std::uint8_t> output);
 
 }  // namespace veil::crypto

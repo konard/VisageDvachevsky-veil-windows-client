@@ -43,6 +43,23 @@ class MuxCodec {
   // Returns the expected size needed to encode this frame (for pre-allocation).
   static std::size_t encoded_size(const MuxFrame& frame);
 
+  // PERFORMANCE (Issue #97): Zero-copy encode/decode methods.
+  // These avoid memory allocations by using pre-allocated buffers or span views.
+
+  // Encode into a pre-allocated buffer. Returns the number of bytes written,
+  // or 0 if the buffer is too small.
+  static std::size_t encode_to(const MuxFrame& frame, std::span<std::uint8_t> output);
+
+  // Decode without copying payload data. Returns a view into the source buffer.
+  // IMPORTANT: The source buffer must outlive the returned MuxFrameView.
+  static std::optional<MuxFrameView> decode_view(std::span<const std::uint8_t> data);
+
+  // Calculate encoded size for a frame view (same logic as encoded_size but for views).
+  static std::size_t encoded_size_view(const MuxFrameView& frame);
+
+  // Encode a frame view into a pre-allocated buffer.
+  static std::size_t encode_view_to(const MuxFrameView& frame, std::span<std::uint8_t> output);
+
   // Minimum sizes for each frame type header (excluding payload).
   static constexpr std::size_t kDataHeaderSize = 1 + 8 + 8 + 1 + 2;    // 20 bytes
   static constexpr std::size_t kAckSize = 1 + 8 + 8 + 4;               // 21 bytes

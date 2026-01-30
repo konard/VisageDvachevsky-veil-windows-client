@@ -1009,6 +1009,9 @@ ObfuscationProfile create_dpi_mode_profile(DPIBypassMode mode) {
       // Enable WebSocket wrapper for real protocol headers
       profile.protocol_wrapper = ProtocolWrapperType::kWebSocket;
       profile.is_client_to_server = true;
+      // Enable HTTP Upgrade handshake emulation for full WebSocket compliance
+      // This makes traffic appear as legitimate WebSocket connection establishment
+      profile.enable_http_handshake_emulation = true;
       return profile;
     }
 

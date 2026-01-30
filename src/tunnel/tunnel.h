@@ -13,6 +13,7 @@
 #include "common/crypto/crypto_engine.h"
 #include "common/obfuscation/obfuscation_profile.h"
 #include "transport/event_loop/event_loop.h"
+#include "transport/mux/ack_scheduler.h"
 #include "transport/mux/frame.h"
 #include "transport/session/transport_session.h"
 #include "transport/udp_socket/udp_socket.h"
@@ -184,6 +185,7 @@ class Tunnel {
   transport::UdpSocket udp_socket_;
   std::unique_ptr<transport::TransportSession> session_;
   std::unique_ptr<transport::EventLoop> event_loop_;
+  mux::AckScheduler ack_scheduler_;
 
   // Crypto.
   crypto::KeyPair key_pair_;

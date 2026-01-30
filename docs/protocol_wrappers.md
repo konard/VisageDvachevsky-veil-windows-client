@@ -250,10 +250,11 @@ Large packet (10000 bytes):
 - VEIL's crypto layer already provides encryption
 - For full TLS mimicry, consider TLS wrapper (future work)
 
-❌ **HTTP Handshake:**
-- Does not include HTTP Upgrade handshake
-- Only wraps data frames, not connection establishment
-- DPI expecting full WebSocket handshake may still detect
+✅ **HTTP Handshake (Now Available!):**
+- HTTP Upgrade handshake emulation is now implemented
+- Enable with `enable_http_handshake_emulation = true`
+- Enabled by default in QUIC-Like mode
+- See "HTTP Handshake Emulation" section below
 
 ❌ **Application-Layer Semantics:**
 - Does not generate realistic WebSocket messages
@@ -265,6 +266,143 @@ Large packet (10000 bytes):
 2. **Consider Network Environment:** WebSocket wrapper most effective against protocol-aware DPI
 3. **Layer Defenses:** Use multiple techniques (timing, size, protocol) together
 4. **Monitor Effectiveness:** Test against specific DPI systems in your region
+
+## HTTP Handshake Emulation
+
+### Overview
+
+The HTTP Handshake Emulator adds RFC 6455 compliant HTTP Upgrade handshake to WebSocket traffic. This makes VEIL traffic appear as legitimate WebSocket connection establishment, defeating DPI systems that expect full WebSocket protocol compliance.
+
+### Problem
+
+Without HTTP handshake:
+```
+Client -> Server: [WebSocket Binary Frame]  (no HTTP handshake)
+Server -> Client: [WebSocket Binary Frame]
+```
+
+DPI Detection: "WebSocket frames without HTTP = VPN/Proxy"
+
+### Solution
+
+With HTTP handshake emulation:
+```
+Client -> Server: GET /path HTTP/1.1
+                  Upgrade: websocket
+                  Connection: Upgrade
+                  Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==
+                  Sec-WebSocket-Version: 13
+
+Server -> Client: HTTP/1.1 101 Switching Protocols
+                  Upgrade: websocket
+                  Connection: Upgrade
+                  Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=
+
+[WebSocket binary frames begin - as before]
+```
+
+### Enabling HTTP Handshake Emulation
+
+**Automatic (QUIC-Like Mode):**
+```cpp
+// QUIC-Like mode now includes HTTP handshake emulation by default
+auto profile = create_dpi_mode_profile(DPIBypassMode::kQUICLike);
+// profile.enable_http_handshake_emulation == true
+```
+
+**Manual Configuration:**
+```cpp
+ObfuscationProfile profile;
+profile.enabled = true;
+profile.protocol_wrapper = ProtocolWrapperType::kWebSocket;
+profile.is_client_to_server = true;
+profile.enable_http_handshake_emulation = true;  // Enable handshake
+```
+
+### API Usage
+
+**Client Side:**
+```cpp
+#include "common/protocol_wrapper/http_handshake_emulator.h"
+
+// Generate upgrade request
+auto [request, key] = HttpHandshakeEmulator::generate_upgrade_request("/", "server.com");
+send(request);
+
+// Receive and validate response
+auto response = receive();
+if (HttpHandshakeEmulator::validate_upgrade_response(response, key)) {
+  // Handshake successful - proceed with WebSocket frames
+  start_websocket_communication();
+}
+```
+
+**Server Side:**
+```cpp
+// Receive and parse upgrade request
+auto request = receive();
+auto parsed = HttpHandshakeEmulator::parse_upgrade_request(request);
+if (parsed) {
+  // Generate response
+  auto response = HttpHandshakeEmulator::generate_upgrade_response(parsed->sec_websocket_key);
+  send(response);
+  // Handshake successful - proceed with WebSocket frames
+}
+```
+
+### HTTP Message Format
+
+**Upgrade Request (Client to Server):**
+```http
+GET / HTTP/1.1
+Host: localhost
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Key: <24-char base64 key>
+Sec-WebSocket-Version: 13
+
+```
+
+**Upgrade Response (Server to Client):**
+```http
+HTTP/1.1 101 Switching Protocols
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Accept: <28-char base64 accept>
+
+```
+
+### Security
+
+The Sec-WebSocket-Accept header is computed per RFC 6455:
+```
+accept = base64(SHA-1(client_key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+```
+
+This ensures:
+- The server actually processed the specific client request
+- Response cannot be replayed from another connection
+- DPI sees cryptographically valid WebSocket handshake
+
+### Performance Impact
+
+| Component | Overhead |
+|-----------|----------|
+| HTTP Request | ~200-300 bytes |
+| HTTP Response | ~150-200 bytes |
+| Total | ~400-500 bytes per connection |
+| Round Trips | 2 (request + response) |
+
+This is a **one-time cost per connection**, not per packet.
+
+### DPI Evasion Effectiveness
+
+| DPI Detection Method | Without Handshake | With Handshake |
+|----------------------|-------------------|----------------|
+| WebSocket frame detection | ⚠️ Detected | ✅ Passes |
+| HTTP protocol check | ❌ Fails | ✅ Passes |
+| Full WebSocket compliance | ❌ Fails | ✅ Passes |
+| TLS-layer inspection | ❌ Fails | ❌ Fails (use TLS wrapper) |
 
 ## Future Wrappers
 
@@ -337,6 +475,7 @@ struct ObfuscationProfile {
 
   ProtocolWrapperType protocol_wrapper{ProtocolWrapperType::kNone};
   bool is_client_to_server{true};  // For WebSocket masking
+  bool enable_http_handshake_emulation{false};  // Enable HTTP Upgrade handshake
 };
 
 // Helper functions
@@ -344,6 +483,49 @@ const char* protocol_wrapper_to_string(ProtocolWrapperType wrapper);
 std::optional<ProtocolWrapperType> protocol_wrapper_from_string(const std::string& str);
 
 }  // namespace veil::obfuscation
+```
+
+### HttpHandshakeEmulator Class
+
+```cpp
+namespace veil::protocol_wrapper {
+
+class HttpHandshakeEmulator {
+ public:
+  // Generate HTTP Upgrade request
+  // Returns: {request_bytes, sec_websocket_key}
+  static std::pair<std::vector<std::uint8_t>, std::string>
+      generate_upgrade_request(std::string_view path = "/",
+                               std::string_view host = "localhost");
+
+  // Validate HTTP Upgrade response from server
+  static bool validate_upgrade_response(std::span<const std::uint8_t> response,
+                                         std::string_view client_key);
+
+  // Parse HTTP Upgrade request from client
+  static std::optional<UpgradeRequest> parse_upgrade_request(
+      std::span<const std::uint8_t> request);
+
+  // Generate HTTP 101 Switching Protocols response
+  static std::vector<std::uint8_t> generate_upgrade_response(
+      std::string_view client_key);
+
+  // Utility: Generate random Sec-WebSocket-Key
+  static std::string generate_websocket_key();
+
+  // Utility: Compute Sec-WebSocket-Accept from client key
+  static std::string compute_accept_key(std::string_view client_key);
+
+  // Utility: Base64 encoding/decoding
+  static std::string base64_encode(std::span<const std::uint8_t> data);
+  static std::vector<std::uint8_t> base64_decode(std::string_view base64);
+
+  // Utility: SHA-1 hash (required by RFC 6455)
+  static std::array<std::uint8_t, 20> sha1(std::span<const std::uint8_t> data);
+  static std::array<std::uint8_t, 20> sha1(std::string_view data);
+};
+
+}  // namespace veil::protocol_wrapper
 ```
 
 ## Testing

@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "common/handshake/handshake_processor.h"
+#include "transport/mux/ack_scheduler.h"
 #include "transport/session/transport_session.h"
 #include "transport/udp_socket/udp_socket.h"
 
@@ -28,6 +29,9 @@ struct ClientSession {
 
   // Transport session.
   std::unique_ptr<transport::TransportSession> transport;
+
+  // ACK scheduler for ACK coalescing (Issue #95).
+  mux::AckScheduler ack_scheduler;
 
   // Timestamps.
   std::chrono::steady_clock::time_point connected_at;

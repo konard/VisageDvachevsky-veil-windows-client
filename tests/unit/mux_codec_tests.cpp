@@ -116,4 +116,182 @@ TEST(MuxCodecTests, LargeStreamIdAndSequence) {
   EXPECT_EQ(decoded->data.sequence, 0x123456789ABCDEF0ULL);
 }
 
+// PERFORMANCE (Issue #97): Zero-copy codec tests
+
+TEST(MuxCodecTests, EncodeToDataFrame) {
+  std::vector<std::uint8_t> payload{0x01, 0x02, 0x03, 0x04};
+  auto frame = mux::make_data_frame(42, 100, false, payload);
+
+  std::vector<std::uint8_t> buffer(mux::MuxCodec::encoded_size(frame));
+  auto size = mux::MuxCodec::encode_to(frame, buffer);
+
+  EXPECT_EQ(size, buffer.size());
+
+  // Verify encoding matches the original encode function
+  auto original = mux::MuxCodec::encode(frame);
+  EXPECT_EQ(buffer, original);
+}
+
+TEST(MuxCodecTests, EncodeToAckFrame) {
+  auto frame = mux::make_ack_frame(7, 200, 0xDEADBEEF);
+
+  std::vector<std::uint8_t> buffer(mux::MuxCodec::encoded_size(frame));
+  auto size = mux::MuxCodec::encode_to(frame, buffer);
+
+  EXPECT_EQ(size, buffer.size());
+
+  // Verify encoding matches
+  auto original = mux::MuxCodec::encode(frame);
+  EXPECT_EQ(buffer, original);
+}
+
+TEST(MuxCodecTests, EncodeToControlFrame) {
+  std::vector<std::uint8_t> payload{0x10, 0x20, 0x30};
+  auto frame = mux::make_control_frame(0x05, payload);
+
+  std::vector<std::uint8_t> buffer(mux::MuxCodec::encoded_size(frame));
+  auto size = mux::MuxCodec::encode_to(frame, buffer);
+
+  EXPECT_EQ(size, buffer.size());
+
+  auto original = mux::MuxCodec::encode(frame);
+  EXPECT_EQ(buffer, original);
+}
+
+TEST(MuxCodecTests, EncodeToHeartbeatFrame) {
+  std::vector<std::uint8_t> payload{0xAA, 0xBB};
+  auto frame = mux::make_heartbeat_frame(123456789, 42, payload);
+
+  std::vector<std::uint8_t> buffer(mux::MuxCodec::encoded_size(frame));
+  auto size = mux::MuxCodec::encode_to(frame, buffer);
+
+  EXPECT_EQ(size, buffer.size());
+
+  auto original = mux::MuxCodec::encode(frame);
+  EXPECT_EQ(buffer, original);
+}
+
+TEST(MuxCodecTests, EncodeToBufferTooSmall) {
+  std::vector<std::uint8_t> payload{0x01, 0x02, 0x03, 0x04};
+  auto frame = mux::make_data_frame(42, 100, false, payload);
+
+  std::vector<std::uint8_t> buffer(5);  // Too small
+  auto size = mux::MuxCodec::encode_to(frame, buffer);
+
+  EXPECT_EQ(size, 0u);  // Should return 0 on failure
+}
+
+TEST(MuxCodecTests, DecodeViewDataFrame) {
+  std::vector<std::uint8_t> payload{0x01, 0x02, 0x03, 0x04};
+  auto frame = mux::make_data_frame(42, 100, true, payload);
+  auto encoded = mux::MuxCodec::encode(frame);
+
+  auto view = mux::MuxCodec::decode_view(encoded);
+
+  ASSERT_TRUE(view.has_value());
+  EXPECT_EQ(view->kind, mux::FrameKind::kData);
+  EXPECT_EQ(view->data.stream_id, 42U);
+  EXPECT_EQ(view->data.sequence, 100U);
+  EXPECT_TRUE(view->data.fin);
+
+  // The payload should be a view into the encoded buffer
+  EXPECT_EQ(view->data.payload.size(), payload.size());
+  EXPECT_EQ(std::vector<std::uint8_t>(view->data.payload.begin(), view->data.payload.end()), payload);
+}
+
+TEST(MuxCodecTests, DecodeViewAckFrame) {
+  auto frame = mux::make_ack_frame(7, 200, 0xDEADBEEF);
+  auto encoded = mux::MuxCodec::encode(frame);
+
+  auto view = mux::MuxCodec::decode_view(encoded);
+
+  ASSERT_TRUE(view.has_value());
+  EXPECT_EQ(view->kind, mux::FrameKind::kAck);
+  EXPECT_EQ(view->ack.stream_id, 7U);
+  EXPECT_EQ(view->ack.ack, 200U);
+  EXPECT_EQ(view->ack.bitmap, 0xDEADBEEFU);
+}
+
+TEST(MuxCodecTests, DecodeViewControlFrame) {
+  std::vector<std::uint8_t> payload{0x10, 0x20, 0x30};
+  auto frame = mux::make_control_frame(0x05, payload);
+  auto encoded = mux::MuxCodec::encode(frame);
+
+  auto view = mux::MuxCodec::decode_view(encoded);
+
+  ASSERT_TRUE(view.has_value());
+  EXPECT_EQ(view->kind, mux::FrameKind::kControl);
+  EXPECT_EQ(view->control.type, 0x05);
+  EXPECT_EQ(std::vector<std::uint8_t>(view->control.payload.begin(), view->control.payload.end()), payload);
+}
+
+TEST(MuxCodecTests, DecodeViewHeartbeatFrame) {
+  std::vector<std::uint8_t> payload{0xAA, 0xBB};
+  auto frame = mux::make_heartbeat_frame(123456789, 42, payload);
+  auto encoded = mux::MuxCodec::encode(frame);
+
+  auto view = mux::MuxCodec::decode_view(encoded);
+
+  ASSERT_TRUE(view.has_value());
+  EXPECT_EQ(view->kind, mux::FrameKind::kHeartbeat);
+  EXPECT_EQ(view->heartbeat.timestamp, 123456789U);
+  EXPECT_EQ(view->heartbeat.sequence, 42U);
+  EXPECT_EQ(std::vector<std::uint8_t>(view->heartbeat.payload.begin(), view->heartbeat.payload.end()), payload);
+}
+
+TEST(MuxCodecTests, DecodeViewRejectsEmptyData) {
+  auto view = mux::MuxCodec::decode_view({});
+  EXPECT_FALSE(view.has_value());
+}
+
+TEST(MuxCodecTests, DecodeViewRejectsTruncatedFrame) {
+  std::vector<std::uint8_t> payload{0x01, 0x02};
+  auto frame = mux::make_data_frame(1, 1, false, payload);
+  auto encoded = mux::MuxCodec::encode(frame);
+  encoded.pop_back();
+
+  auto view = mux::MuxCodec::decode_view(encoded);
+  EXPECT_FALSE(view.has_value());
+}
+
+TEST(MuxCodecTests, DecodeViewPayloadIsViewIntoBuffer) {
+  std::vector<std::uint8_t> payload{0x01, 0x02, 0x03, 0x04};
+  auto frame = mux::make_data_frame(42, 100, false, payload);
+  auto encoded = mux::MuxCodec::encode(frame);
+
+  auto view = mux::MuxCodec::decode_view(encoded);
+  ASSERT_TRUE(view.has_value());
+
+  // The payload span should point into the encoded buffer (zero-copy)
+  const auto payload_start = encoded.data() + mux::MuxCodec::kDataHeaderSize;
+  EXPECT_EQ(view->data.payload.data(), payload_start);
+}
+
+TEST(MuxCodecTests, EncodedSizeViewMatchesEncodedSize) {
+  std::vector<std::uint8_t> payload{1, 2, 3, 4, 5};
+  auto data_frame = mux::make_data_frame(1, 1, true, payload);
+  auto encoded = mux::MuxCodec::encode(data_frame);
+  auto view = mux::MuxCodec::decode_view(encoded);
+  ASSERT_TRUE(view.has_value());
+  EXPECT_EQ(mux::MuxCodec::encoded_size_view(*view), mux::MuxCodec::encoded_size(data_frame));
+}
+
+TEST(MuxCodecTests, EncodeViewToRoundTrip) {
+  std::vector<std::uint8_t> payload{0x01, 0x02, 0x03, 0x04};
+  auto frame = mux::make_data_frame(42, 100, true, payload);
+  auto encoded = mux::MuxCodec::encode(frame);
+
+  // Decode to view
+  auto view = mux::MuxCodec::decode_view(encoded);
+  ASSERT_TRUE(view.has_value());
+
+  // Encode view to new buffer
+  std::vector<std::uint8_t> buffer(mux::MuxCodec::encoded_size_view(*view));
+  auto size = mux::MuxCodec::encode_view_to(*view, buffer);
+  EXPECT_EQ(size, buffer.size());
+
+  // Should match original encoding
+  EXPECT_EQ(buffer, encoded);
+}
+
 }  // namespace veil::tests

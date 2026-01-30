@@ -37,7 +37,8 @@ TransportSession::TransportSession(const handshake::HandshakeSession& handshake_
       session_rotator_(config_.session_rotation_interval, config_.session_rotation_packets),
       reorder_buffer_(0, config_.reorder_buffer_size),
       fragment_reassembly_(config_.fragment_buffer_size),
-      retransmit_buffer_(config_.retransmit_config, now_fn_) {
+      retransmit_buffer_(config_.retransmit_config, now_fn_),
+      congestion_controller_(config_.congestion_config, now_fn_) {
   // Enhanced diagnostic logging for session creation (Issue #69, #72)
   // Use INFO level so key fingerprints are always logged, not just in verbose mode
   // This helps diagnose key mismatch issues between client and server
@@ -74,6 +75,9 @@ std::vector<std::vector<std::uint8_t>> TransportSession::encrypt_data(
 
   // Fragment data if necessary.
   auto frames = fragment_data(plaintext, stream_id, fin);
+
+  // PERFORMANCE (Issue #94): Pre-allocate result vector to avoid reallocations.
+  result.reserve(frames.size());
 
   for (auto& frame : frames) {
     auto encrypted = build_encrypted_packet(frame);
@@ -136,23 +140,23 @@ std::optional<std::vector<mux::MuxFrame>> TransportSession::decrypt_packet(
   const std::uint64_t sequence = crypto::deobfuscate_sequence(obfuscated_sequence, recv_seq_obfuscation_key_);
 
   // Enhanced diagnostic logging for decryption debugging (Issue #69, #72)
-  // Use WARN level temporarily to trace decryption flow in production
-  LOG_WARN("Decrypt attempt: session_id={}, pkt_size={}, obfuscated_seq={:#018x}, deobfuscated_seq={}",
-           current_session_id_, ciphertext.size(), obfuscated_sequence, sequence);
-  LOG_WARN("  recv_seq_obfuscation_key_fp={:02x}{:02x}{:02x}{:02x}, first_8_bytes={:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-           recv_seq_obfuscation_key_[0], recv_seq_obfuscation_key_[1],
-           recv_seq_obfuscation_key_[2], recv_seq_obfuscation_key_[3],
-           ciphertext[0], ciphertext[1], ciphertext[2], ciphertext[3],
-           ciphertext[4], ciphertext[5], ciphertext[6], ciphertext[7]);
+  // Changed to DEBUG level to avoid performance impact in hot path (Issue #92)
+  LOG_DEBUG("Decrypt attempt: session_id={}, pkt_size={}, obfuscated_seq={:#018x}, deobfuscated_seq={}",
+            current_session_id_, ciphertext.size(), obfuscated_sequence, sequence);
+  LOG_DEBUG("  recv_seq_obfuscation_key_fp={:02x}{:02x}{:02x}{:02x}, first_8_bytes={:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+            recv_seq_obfuscation_key_[0], recv_seq_obfuscation_key_[1],
+            recv_seq_obfuscation_key_[2], recv_seq_obfuscation_key_[3],
+            ciphertext[0], ciphertext[1], ciphertext[2], ciphertext[3],
+            ciphertext[4], ciphertext[5], ciphertext[6], ciphertext[7]);
 
   // Replay check.
   if (!replay_window_.mark_and_check(sequence)) {
-    LOG_WARN("Packet replay detected or out of window: sequence={}, highest={}",
-             sequence, replay_window_.highest());
+    LOG_DEBUG("Packet replay detected or out of window: sequence={}, highest={}",
+              sequence, replay_window_.highest());
     ++stats_.packets_dropped_replay;
     return std::nullopt;
   }
-  LOG_WARN("Replay check passed, proceeding to decryption");
+  LOG_DEBUG("Replay check passed, proceeding to decryption");
 
   // Derive nonce from sequence.
   const auto nonce = crypto::derive_nonce(keys_.recv_nonce, sequence);
@@ -162,34 +166,35 @@ std::optional<std::vector<mux::MuxFrame>> TransportSession::decrypt_packet(
   auto decrypted = crypto::aead_decrypt(keys_.recv_key, nonce, {}, ciphertext_body);
   if (!decrypted) {
     // Enhanced error logging for decryption failures (Issue #69, #72)
-    // Use WARN level so this always appears, not just in verbose mode
+    // Changed to DEBUG level to avoid performance impact in hot path (Issue #92)
     // Log key fingerprints (first 4 bytes) to help diagnose key mismatch issues
-    LOG_WARN("Decryption FAILED: session_id={}, sequence={}, ciphertext_size={}, "
-             "recv_key_fp={:02x}{:02x}{:02x}{:02x}, recv_nonce_fp={:02x}{:02x}{:02x}{:02x}",
-             current_session_id_, sequence, ciphertext_body.size(),
-             keys_.recv_key[0], keys_.recv_key[1], keys_.recv_key[2], keys_.recv_key[3],
-             keys_.recv_nonce[0], keys_.recv_nonce[1], keys_.recv_nonce[2], keys_.recv_nonce[3]);
+    LOG_DEBUG("Decryption FAILED: session_id={}, sequence={}, ciphertext_size={}, "
+              "recv_key_fp={:02x}{:02x}{:02x}{:02x}, recv_nonce_fp={:02x}{:02x}{:02x}{:02x}",
+              current_session_id_, sequence, ciphertext_body.size(),
+              keys_.recv_key[0], keys_.recv_key[1], keys_.recv_key[2], keys_.recv_key[3],
+              keys_.recv_nonce[0], keys_.recv_nonce[1], keys_.recv_nonce[2], keys_.recv_nonce[3]);
     // Also log the obfuscation key fingerprint and packet header
-    LOG_WARN("  recv_seq_obfuscation_key_fp={:02x}{:02x}{:02x}{:02x}, first_pkt_bytes={:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-             recv_seq_obfuscation_key_[0], recv_seq_obfuscation_key_[1],
-             recv_seq_obfuscation_key_[2], recv_seq_obfuscation_key_[3],
-             ciphertext[0], ciphertext[1], ciphertext[2], ciphertext[3],
-             ciphertext[4], ciphertext[5], ciphertext[6], ciphertext[7]);
+    LOG_DEBUG("  recv_seq_obfuscation_key_fp={:02x}{:02x}{:02x}{:02x}, first_pkt_bytes={:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+              recv_seq_obfuscation_key_[0], recv_seq_obfuscation_key_[1],
+              recv_seq_obfuscation_key_[2], recv_seq_obfuscation_key_[3],
+              ciphertext[0], ciphertext[1], ciphertext[2], ciphertext[3],
+              ciphertext[4], ciphertext[5], ciphertext[6], ciphertext[7]);
 
     // Issue #78: Unmark sequence in replay window to allow legitimate retransmission
     // If decryption fails (e.g., due to wrong session keys after session rotation),
     // we should allow the server to retransmit this packet rather than permanently
     // rejecting it as a replay.
     replay_window_.unmark(sequence);
-    LOG_WARN("  Unmarked sequence {} in replay window to allow retransmission", sequence);
+    LOG_DEBUG("  Unmarked sequence {} in replay window to allow retransmission", sequence);
 
     ++stats_.packets_dropped_decrypt;
     return std::nullopt;
   }
 
   // Enhanced diagnostic logging for decryption success (Issue #72)
-  LOG_WARN("Decryption SUCCESS: session_id={}, sequence={}, decrypted_size={}",
-           current_session_id_, sequence, decrypted->size());
+  // Changed to DEBUG level to avoid performance impact in hot path (Issue #92)
+  LOG_DEBUG("Decryption SUCCESS: session_id={}, sequence={}, decrypted_size={}",
+            current_session_id_, sequence, decrypted->size());
 
   ++stats_.packets_received;
   stats_.bytes_received += ciphertext.size();
@@ -285,10 +290,23 @@ std::vector<std::vector<std::uint8_t>> TransportSession::get_retransmit_packets(
   std::vector<std::vector<std::uint8_t>> result;
   auto to_retransmit = retransmit_buffer_.get_packets_to_retransmit();
 
+  // PERFORMANCE (Issue #94): Pre-allocate result vector to avoid reallocations.
+  result.reserve(to_retransmit.size());
+
+  // Congestion control (Issue #98): Notify controller of timeout-based retransmits.
+  // This is a timeout loss event, which should trigger multiplicative decrease.
+  bool notified_timeout = false;
+
   for (const auto* pkt : to_retransmit) {
     if (retransmit_buffer_.mark_retransmitted(pkt->sequence)) {
       result.push_back(pkt->data);
       ++stats_.retransmits;
+
+      // Notify congestion controller of timeout loss (once per batch).
+      if (config_.enable_congestion_control && !notified_timeout) {
+        congestion_controller_.on_timeout_loss();
+        notified_timeout = true;
+      }
     } else {
       // Exceeded max retries, drop packet.
       retransmit_buffer_.drop_packet(pkt->sequence);
@@ -302,8 +320,33 @@ void TransportSession::process_ack(const mux::AckFrame& ack) {
   VEIL_DCHECK_THREAD(thread_checker_);
 
   // Debug logging for ACK processing (Issue #72)
-  LOG_WARN("process_ack called: stream_id={}, ack={}, bitmap={:#010x}, pending_before={}",
-           ack.stream_id, ack.ack, ack.bitmap, retransmit_buffer_.pending_count());
+  // Changed to DEBUG level to avoid performance impact in hot path (Issue #92)
+  LOG_DEBUG("process_ack called: stream_id={}, ack={}, bitmap={:#010x}, pending_before={}",
+            ack.stream_id, ack.ack, ack.bitmap, retransmit_buffer_.pending_count());
+
+  // Track bytes acknowledged for congestion control (Issue #98).
+  const std::size_t bytes_before = retransmit_buffer_.buffered_bytes();
+
+  // Check for duplicate ACK (same ack sequence as before).
+  if (config_.enable_congestion_control && ack.ack == last_ack_seq_ && ack.ack > 0) {
+    ++dup_ack_count_;
+    // Notify congestion controller of duplicate ACK.
+    if (congestion_controller_.on_duplicate_ack()) {
+      // Trigger fast retransmit.
+      LOG_DEBUG("Fast retransmit triggered: dup_ack_count={}, ack_seq={}", dup_ack_count_, ack.ack);
+      congestion_controller_.on_fast_retransmit_loss();
+    }
+  } else {
+    // New ACK - reset duplicate count.
+    dup_ack_count_ = 0;
+    last_ack_seq_ = ack.ack;
+
+    // If we were in fast recovery and got a new ACK, recovery is complete.
+    if (config_.enable_congestion_control &&
+        congestion_controller_.state() == mux::CongestionState::kFastRecovery) {
+      congestion_controller_.on_recovery_complete();
+    }
+  }
 
   // Cumulative ACK.
   retransmit_buffer_.acknowledge_cumulative(ack.ack);
@@ -318,8 +361,21 @@ void TransportSession::process_ack(const mux::AckFrame& ack) {
     }
   }
 
+  // Update congestion controller with acknowledged bytes (Issue #98).
+  if (config_.enable_congestion_control) {
+    const std::size_t bytes_after = retransmit_buffer_.buffered_bytes();
+    if (bytes_before > bytes_after) {
+      const std::size_t acked_bytes = bytes_before - bytes_after;
+      congestion_controller_.on_ack(acked_bytes);
+
+      // Update pacing rate based on current RTT.
+      congestion_controller_.set_srtt(retransmit_buffer_.estimated_rtt());
+    }
+  }
+
   // Debug logging for ACK processing result (Issue #72)
-  LOG_WARN("process_ack done: pending_after={}", retransmit_buffer_.pending_count());
+  // Changed to DEBUG level to avoid performance impact in hot path (Issue #92)
+  LOG_DEBUG("process_ack done: pending_after={}", retransmit_buffer_.pending_count());
 }
 
 mux::AckFrame TransportSession::generate_ack(std::uint64_t stream_id) {
@@ -451,6 +507,13 @@ std::vector<mux::MuxFrame> TransportSession::fragment_data(std::span<const std::
 
   std::vector<mux::MuxFrame> frames;
 
+  // PERFORMANCE (Issue #94): Pre-calculate number of fragments and reserve capacity.
+  // This avoids vector reallocations during fragment generation.
+  if (data.size() > config_.max_fragment_size) {
+    const std::size_t num_fragments = (data.size() + config_.max_fragment_size - 1) / config_.max_fragment_size;
+    frames.reserve(num_fragments);
+  }
+
   if (data.size() <= config_.max_fragment_size) {
     // No fragmentation needed. Always set fin=true to indicate complete message.
     // Issue #74: Without fin=true, receiver can't distinguish complete messages from fragments.
@@ -491,6 +554,185 @@ std::vector<mux::MuxFrame> TransportSession::fragment_data(std::span<const std::
   }
 
   return frames;
+}
+
+// ========== Congestion Control API (Issue #98) ==========
+
+bool TransportSession::can_send(std::size_t bytes_in_flight) const {
+  if (!config_.enable_congestion_control) {
+    return true;  // No congestion control, always allow.
+  }
+  return congestion_controller_.can_send(bytes_in_flight);
+}
+
+std::size_t TransportSession::sendable_bytes(std::size_t bytes_in_flight) const {
+  if (!config_.enable_congestion_control) {
+    return std::numeric_limits<std::size_t>::max();
+  }
+  return congestion_controller_.sendable_bytes(bytes_in_flight);
+}
+
+bool TransportSession::check_pacing() {
+  if (!config_.enable_congestion_control) {
+    return true;  // No congestion control, always allow.
+  }
+  return congestion_controller_.check_pacing();
+}
+
+std::optional<std::chrono::microseconds> TransportSession::time_until_next_send() const {
+  if (!config_.enable_congestion_control) {
+    return std::nullopt;  // No congestion control, no pacing delay.
+  }
+  return congestion_controller_.time_until_next_send();
+}
+
+// ========== Zero-Copy Packet Processing API (Issue #97) ==========
+
+std::optional<std::pair<mux::MuxFrameView, std::size_t>> TransportSession::decrypt_packet_zero_copy(
+    std::span<const std::uint8_t> ciphertext,
+    std::span<std::uint8_t> decrypt_buffer) {
+  VEIL_DCHECK_THREAD(thread_checker_);
+
+  // Minimum packet size: sequence (8 bytes) + tag (16 bytes) + header (1 byte minimum)
+  constexpr std::size_t kMinPacketSize = 8 + 16 + 1;
+  if (ciphertext.size() < kMinPacketSize) {
+    LOG_DEBUG("Zero-copy: Packet too small: {} bytes", ciphertext.size());
+    ++stats_.packets_dropped_decrypt;
+    return std::nullopt;
+  }
+
+  // Extract obfuscated sequence from first 8 bytes.
+  std::uint64_t obfuscated_sequence = 0;
+  for (int i = 0; i < 8; ++i) {
+    obfuscated_sequence = (obfuscated_sequence << 8) | ciphertext[static_cast<std::size_t>(i)];
+  }
+
+  // Deobfuscate sequence number.
+  const std::uint64_t sequence = crypto::deobfuscate_sequence(obfuscated_sequence, recv_seq_obfuscation_key_);
+
+  LOG_DEBUG("Zero-copy decrypt: session_id={}, pkt_size={}, seq={}", current_session_id_, ciphertext.size(), sequence);
+
+  // Replay check.
+  if (!replay_window_.mark_and_check(sequence)) {
+    LOG_DEBUG("Zero-copy: Packet replay detected: sequence={}", sequence);
+    ++stats_.packets_dropped_replay;
+    return std::nullopt;
+  }
+
+  // Derive nonce from sequence.
+  const auto nonce = crypto::derive_nonce(keys_.recv_nonce, sequence);
+
+  // Get ciphertext body (skip 8-byte sequence prefix).
+  auto ciphertext_body = ciphertext.subspan(8);
+
+  // Check output buffer has enough space for plaintext.
+  const std::size_t max_plaintext_size = crypto::aead_plaintext_size(ciphertext_body.size());
+  if (decrypt_buffer.size() < max_plaintext_size) {
+    LOG_DEBUG("Zero-copy: Decrypt buffer too small: {} < {}", decrypt_buffer.size(), max_plaintext_size);
+    replay_window_.unmark(sequence);
+    ++stats_.packets_dropped_decrypt;
+    return std::nullopt;
+  }
+
+  // PERFORMANCE (Issue #97): Use zero-copy decryption into provided buffer.
+  const std::size_t plaintext_size = crypto::aead_decrypt_to(
+      keys_.recv_key, nonce, {}, ciphertext_body, decrypt_buffer);
+
+  if (plaintext_size == 0) {
+    LOG_DEBUG("Zero-copy: Decryption failed: sequence={}", sequence);
+    replay_window_.unmark(sequence);
+    ++stats_.packets_dropped_decrypt;
+    return std::nullopt;
+  }
+
+  LOG_DEBUG("Zero-copy decryption SUCCESS: session_id={}, sequence={}, plaintext_size={}",
+            current_session_id_, sequence, plaintext_size);
+
+  ++stats_.packets_received;
+  stats_.bytes_received += ciphertext.size();
+
+  // PERFORMANCE (Issue #97): Use zero-copy frame decoding.
+  // The frame view borrows data from decrypt_buffer, so caller must keep buffer alive.
+  auto frame_view = mux::MuxCodec::decode_view(decrypt_buffer.subspan(0, plaintext_size));
+  if (!frame_view) {
+    LOG_WARN("Zero-copy: Frame decode FAILED: plaintext_size={}", plaintext_size);
+    return std::nullopt;
+  }
+
+  if (frame_view->kind == mux::FrameKind::kData) {
+    ++stats_.fragments_received;
+    recv_ack_bitmap_.ack(sequence);
+  }
+
+  if (sequence > recv_sequence_max_) {
+    recv_sequence_max_ = sequence;
+  }
+
+  return std::make_pair(*frame_view, plaintext_size);
+}
+
+std::size_t TransportSession::encrypt_frame_zero_copy(const mux::MuxFrame& frame,
+                                                        std::span<std::uint8_t> output_buffer) {
+  VEIL_DCHECK_THREAD(thread_checker_);
+
+  // Check for sequence number overflow.
+  if (send_sequence_ >= kNonceOverflowWarningThreshold) {
+    LOG_ERROR("SECURITY WARNING: send_sequence_ approaching overflow (current={})", send_sequence_);
+  }
+
+  // Calculate required sizes.
+  const std::size_t plaintext_size = mux::MuxCodec::encoded_size(frame);
+  const std::size_t ciphertext_size = crypto::aead_ciphertext_size(plaintext_size);
+  const std::size_t total_size = 8 + ciphertext_size;  // 8 bytes for sequence prefix
+
+  if (output_buffer.size() < total_size) {
+    LOG_DEBUG("Zero-copy encrypt: Output buffer too small: {} < {}", output_buffer.size(), total_size);
+    return 0;
+  }
+
+  // PERFORMANCE (Issue #97): Reuse scratch buffer for frame encoding.
+  if (encode_scratch_buffer_.capacity() < plaintext_size) {
+    encode_scratch_buffer_.reserve(std::max(plaintext_size, static_cast<std::size_t>(2048)));
+  }
+  encode_scratch_buffer_.resize(plaintext_size);
+
+  // Encode frame into scratch buffer.
+  const std::size_t encoded_size = mux::MuxCodec::encode_to(frame, encode_scratch_buffer_);
+  if (encoded_size == 0) {
+    LOG_DEBUG("Zero-copy encrypt: Frame encoding failed");
+    return 0;
+  }
+
+  // Derive nonce from current send sequence.
+  const auto nonce = crypto::derive_nonce(keys_.send_nonce, send_sequence_);
+
+  // Obfuscate sequence for DPI resistance.
+  const std::uint64_t obfuscated_sequence = crypto::obfuscate_sequence(send_sequence_, send_seq_obfuscation_key_);
+
+  // Write obfuscated sequence prefix (8 bytes big-endian).
+  for (int i = 7; i >= 0; --i) {
+    output_buffer[static_cast<std::size_t>(7 - i)] =
+        static_cast<std::uint8_t>((obfuscated_sequence >> (8 * i)) & 0xFF);
+  }
+
+  // PERFORMANCE (Issue #97): Use zero-copy encryption into output buffer.
+  const std::size_t encrypted_size = crypto::aead_encrypt_to(
+      keys_.send_key, nonce, {},
+      std::span<const std::uint8_t>(encode_scratch_buffer_.data(), encoded_size),
+      output_buffer.subspan(8));
+
+  if (encrypted_size == 0) {
+    LOG_DEBUG("Zero-copy encrypt: Encryption failed");
+    return 0;
+  }
+
+  LOG_DEBUG("Zero-copy encrypt: session_id={}, sequence={}, plaintext_size={}, total_size={}",
+            current_session_id_, send_sequence_, plaintext_size, 8 + encrypted_size);
+
+  // Increment sequence after successful encryption.
+  ++send_sequence_;
+
+  return 8 + encrypted_size;
 }
 
 }  // namespace veil::transport

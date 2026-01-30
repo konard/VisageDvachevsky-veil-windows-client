@@ -117,7 +117,10 @@ bool load_key_from_file(const std::string& path, std::vector<std::uint8_t>& key,
 }  // namespace
 
 Tunnel::Tunnel(TunnelConfig config, std::function<TimePoint()> now_fn)
-    : config_(std::move(config)), now_fn_(std::move(now_fn)), pmtu_discovery_(config_.pmtu, now_fn_) {}
+    : config_(std::move(config)),
+      now_fn_(std::move(now_fn)),
+      pmtu_discovery_(config_.pmtu, now_fn_),
+      ack_scheduler_(mux::AckSchedulerConfig{}, now_fn_) {}
 
 Tunnel::~Tunnel() { stop(); }
 
@@ -331,6 +334,26 @@ void Tunnel::run() {
         }
       }
 
+      // Issue #95: Check for delayed ACKs (ACK coalescing).
+      // The scheduler uses a timer to batch ACKs, reducing overhead.
+      auto stream_id_opt = ack_scheduler_.check_ack_timer();
+      if (stream_id_opt) {
+        auto ack_frame_opt = ack_scheduler_.get_pending_ack(*stream_id_opt);
+        if (ack_frame_opt) {
+          auto ack_mux_frame = mux::make_ack_frame(
+              ack_frame_opt->stream_id, ack_frame_opt->ack, ack_frame_opt->bitmap);
+          auto ack_packet = session_->encrypt_frame(ack_mux_frame);
+          transport::UdpEndpoint server_endpoint{config_.server_address, config_.server_port};
+          std::error_code send_ec;
+          if (!udp_socket_.send(ack_packet, server_endpoint, send_ec)) {
+            log_ack_send_error(send_ec);
+          } else {
+            log_ack_sent(ack_frame_opt->ack, ack_frame_opt->bitmap);
+          }
+          ack_scheduler_.ack_sent(*stream_id_opt);
+        }
+      }
+
       // Check for session rotation.
       if (session_->should_rotate_session()) {
         session_->rotate_session();
@@ -413,36 +436,47 @@ void Tunnel::on_udp_packet(std::span<const std::uint8_t> packet,
       stats_.tun_bytes_sent += frame.data.payload.size();
 
       // Log successful TUN write for diagnostics (helps debug Issue #74)
-      // Use WARN level so logging is always visible regardless of build type
+      // Changed to DEBUG level to avoid performance impact in hot path (Issue #92)
       if (frame.data.payload.size() >= 20) {
         // Extract destination IP from IPv4 header for logging
-        std::uint32_t dst_ip = 0;
+        [[maybe_unused]] std::uint32_t dst_ip = 0;
         dst_ip |= static_cast<std::uint32_t>(frame.data.payload[16]) << 24;
         dst_ip |= static_cast<std::uint32_t>(frame.data.payload[17]) << 16;
         dst_ip |= static_cast<std::uint32_t>(frame.data.payload[18]) << 8;
         dst_ip |= static_cast<std::uint32_t>(frame.data.payload[19]);
-        LOG_WARN("TUN write: {} bytes -> {}.{}.{}.{}",
-                 frame.data.payload.size(),
-                 (dst_ip >> 24) & 0xFF, (dst_ip >> 16) & 0xFF,
-                 (dst_ip >> 8) & 0xFF, dst_ip & 0xFF);
+        LOG_DEBUG("TUN write: {} bytes -> {}.{}.{}.{}",
+                  frame.data.payload.size(),
+                  (dst_ip >> 24) & 0xFF, (dst_ip >> 16) & 0xFF,
+                  (dst_ip >> 8) & 0xFF, dst_ip & 0xFF);
       } else {
-        LOG_WARN("TUN write: {} bytes (packet too small for IPv4)", frame.data.payload.size());
+        LOG_DEBUG("TUN write: {} bytes (packet too small for IPv4)", frame.data.payload.size());
       }
 
-      // Send ACK back to server (Issue #72 fix)
-      // Without ACKs, the server would keep retransmitting packets
-      // IMPORTANT: Use encrypt_frame() instead of encrypt_data() to preserve the ACK frame kind.
-      // encrypt_data() wraps data in a DATA frame, which would cause the receiver to
-      // incorrectly interpret the ACK as data and try to write it to TUN.
-      auto ack_info = session_->generate_ack(frame.data.stream_id);
-      auto ack_frame = mux::make_ack_frame(ack_info.stream_id, ack_info.ack, ack_info.bitmap);
-      auto ack_packet = session_->encrypt_frame(ack_frame);
-      transport::UdpEndpoint server_endpoint{config_.server_address, config_.server_port};
-      std::error_code send_ec;
-      if (!udp_socket_.send(ack_packet, server_endpoint, send_ec)) {
-        log_ack_send_error(send_ec);
-      } else {
-        log_ack_sent(ack_info.ack, ack_info.bitmap);
+      // Issue #95: ACK coalescing - use AckScheduler to batch ACKs
+      // Instead of sending ACK immediately on every data packet, the scheduler
+      // delays ACKs (up to 20ms) or batches them (every 2 packets), reducing overhead.
+      bool should_send_ack = ack_scheduler_.on_packet_received(
+          frame.data.stream_id, frame.data.sequence, frame.data.fin);
+
+      if (should_send_ack) {
+        // Scheduler determined immediate ACK is needed (e.g., out-of-order or every N packets)
+        auto ack_frame_opt = ack_scheduler_.get_pending_ack(frame.data.stream_id);
+        if (ack_frame_opt) {
+          // IMPORTANT: Use encrypt_frame() instead of encrypt_data() to preserve the ACK frame kind.
+          // encrypt_data() wraps data in a DATA frame, which would cause the receiver to
+          // incorrectly interpret the ACK as data and try to write it to TUN.
+          auto ack_mux_frame = mux::make_ack_frame(
+              ack_frame_opt->stream_id, ack_frame_opt->ack, ack_frame_opt->bitmap);
+          auto ack_packet = session_->encrypt_frame(ack_mux_frame);
+          transport::UdpEndpoint server_endpoint{config_.server_address, config_.server_port};
+          std::error_code send_ec;
+          if (!udp_socket_.send(ack_packet, server_endpoint, send_ec)) {
+            log_ack_send_error(send_ec);
+          } else {
+            log_ack_sent(ack_frame_opt->ack, ack_frame_opt->bitmap);
+          }
+          ack_scheduler_.ack_sent(frame.data.stream_id);
+        }
       }
     } else if (frame.kind == mux::FrameKind::kAck) {
       session_->process_ack(frame.ack);

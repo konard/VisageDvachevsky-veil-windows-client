@@ -20,6 +20,7 @@ if(WIN32)
     transport/mux/mux_codec.cpp
     transport/mux/retransmit_buffer.cpp
     transport/mux/ack_scheduler.cpp
+    transport/mux/congestion_controller.cpp
     transport/session/transport_session.cpp
     transport/event_loop/event_loop_windows.cpp
     transport/event_loop/threaded_event_loop.cpp
@@ -48,6 +49,7 @@ else()
     transport/mux/mux_codec.cpp
     transport/mux/retransmit_buffer.cpp
     transport/mux/ack_scheduler.cpp
+    transport/mux/congestion_controller.cpp
     transport/session/transport_session.cpp
     transport/event_loop/event_loop_linux.cpp
     transport/event_loop/threaded_event_loop.cpp
@@ -69,6 +71,8 @@ endif()
 add_library(veil_common STATIC
   common/crypto/random.cpp
   common/crypto/crypto_engine.cpp
+  common/crypto/hardware_features.cpp
+  common/crypto/hardware_crypto.cpp
   common/logging/logger.cpp
   common/logging/constrained_logger.cpp
   ${VEIL_CLI_CONFIG_SOURCES}
@@ -79,13 +83,16 @@ add_library(veil_common STATIC
   common/session/idle_timeout.cpp
   common/handshake/handshake_processor.cpp
   common/handshake/handshake_replay_cache.cpp
+  common/auth/client_registry.cpp
   common/utils/rate_limiter.cpp
   common/utils/timer_heap.cpp
   common/utils/advanced_rate_limiter.cpp
   common/utils/graceful_degradation.cpp
+  common/utils/packet_pool.cpp
   common/metrics/metrics.cpp
   common/obfuscation/obfuscation_profile.cpp
   common/protocol_wrapper/websocket_wrapper.cpp
+  common/protocol_wrapper/http_handshake_emulator.cpp
   ${VEIL_SIGNAL_SOURCES}
   ${VEIL_DAEMON_SOURCES}
   common/ipc/ipc_protocol.cpp

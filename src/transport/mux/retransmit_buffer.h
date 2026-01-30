@@ -3,8 +3,8 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
-#include <map>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 namespace veil::mux {
@@ -180,7 +180,11 @@ class RetransmitBuffer {
   RetransmitConfig config_;
   std::function<TimePoint()> now_fn_;
 
-  std::map<std::uint64_t, PendingPacket> pending_;
+  // Issue #96: Use unordered_map for O(1) average-case operations instead of O(log n).
+  // Trade-off: No ordered iteration, but cumulative ACK and drop policies handle this
+  // by collecting and sorting keys when needed (these operations are less frequent
+  // than insert/find/erase on the hot path).
+  std::unordered_map<std::uint64_t, PendingPacket> pending_;
   std::size_t buffered_bytes_{0};
 
   // RTT estimation (RFC 6298 style)

@@ -9,6 +9,7 @@ if(WIN32)
     mux_codec_tests.cpp
     retransmit_buffer_tests.cpp
     ack_scheduler_tests.cpp
+    congestion_controller_tests.cpp
     transport_session_tests.cpp
     session_migration_tests.cpp
     console_handler_tests.cpp
@@ -23,6 +24,7 @@ else()
     mux_codec_tests.cpp
     retransmit_buffer_tests.cpp
     ack_scheduler_tests.cpp
+    congestion_controller_tests.cpp
     transport_session_tests.cpp
     signal_handler_tests.cpp
     daemon_tests.cpp
@@ -34,11 +36,15 @@ endif()
 add_executable(veil_unit_tests
   random_tests.cpp
   crypto_tests.cpp
+  hardware_crypto_tests.cpp
   websocket_wrapper_tests.cpp
+  http_handshake_emulator_tests.cpp
   packet_tests.cpp
   replay_window_tests.cpp
   handshake_tests.cpp
   handshake_replay_cache_tests.cpp
+  client_registry_tests.cpp
+  multi_client_handshake_tests.cpp
   timer_heap_tests.cpp
   obfuscation_tests.cpp
   tun_device_tests.cpp
@@ -51,6 +57,7 @@ add_executable(veil_unit_tests
   thread_checker_tests.cpp
   spsc_queue_tests.cpp
   thread_pool_tests.cpp
+  packet_pool_tests.cpp
   ${VEIL_PLATFORM_TEST_SOURCES}
 )
 
