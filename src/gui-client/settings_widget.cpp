@@ -14,6 +14,8 @@
 #include <QApplication>
 
 #include "common/gui/theme.h"
+#include "notification_preferences.h"
+#include "notification_history_dialog.h"
 
 namespace veil::gui {
 
@@ -94,6 +96,8 @@ void SettingsWidget::setupUi() {
                                QString("server address port").contains(lowerText));
     cryptoSection_->setVisible(showAll || cryptoSection_->title().toLower().contains(lowerText) ||
                                QString("key crypto obfuscation seed").contains(lowerText));
+    startupSection_->setVisible(showAll || startupSection_->title().toLower().contains(lowerText) ||
+                                QString("startup minimized auto-connect launch windows tray").contains(lowerText));
     tunInterfaceSection_->setVisible(showAll || tunInterfaceSection_->title().toLower().contains(lowerText) ||
                                      QString("tun interface ip netmask mtu").contains(lowerText));
     routingSection_->setVisible(showAll || routingSection_->title().toLower().contains(lowerText) ||
@@ -102,6 +106,8 @@ void SettingsWidget::setupUi() {
                                    QString("connection reconnect").contains(lowerText));
     dpiBypassSection_->setVisible(showAll || dpiBypassSection_->title().toLower().contains(lowerText) ||
                                   QString("dpi bypass obfuscation mode").contains(lowerText));
+    notificationSection_->setVisible(showAll || notificationSection_->title().toLower().contains(lowerText) ||
+                                     QString("notification alerts sound tray minimize update history").contains(lowerText));
     advancedSection_->setVisible(showAll || advancedSection_->title().toLower().contains(lowerText) ||
                                  QString("advanced developer logging").contains(lowerText));
   });
@@ -164,6 +170,11 @@ void SettingsWidget::setupUi() {
   cryptoSection_->setCollapsedImmediate(true);  // Collapsed by default
   scrollLayout->addWidget(cryptoSection_);
 
+  startupSection_ = new CollapsibleSection("Startup Options", scrollWidget);
+  startupSection_->setContent(createStartupSection());
+  startupSection_->setCollapsedImmediate(true);  // Collapsed by default
+  scrollLayout->addWidget(startupSection_);
+
   tunInterfaceSection_ = new CollapsibleSection("TUN Interface", scrollWidget);
   tunInterfaceSection_->setContent(createTunInterfaceSection());
   tunInterfaceSection_->setCollapsedImmediate(true);  // Collapsed by default (advanced)
@@ -183,6 +194,11 @@ void SettingsWidget::setupUi() {
   dpiBypassSection_->setContent(createDpiBypassSection());
   dpiBypassSection_->setCollapsedImmediate(true);  // Collapsed by default (advanced)
   scrollLayout->addWidget(dpiBypassSection_);
+
+  notificationSection_ = new CollapsibleSection("Notifications", scrollWidget);
+  notificationSection_->setContent(createNotificationSection());
+  notificationSection_->setCollapsedImmediate(true);  // Collapsed by default
+  scrollLayout->addWidget(notificationSection_);
 
   advancedSection_ = new CollapsibleSection("Advanced", scrollWidget);
   advancedSection_->setContent(createAdvancedSection());
@@ -402,6 +418,40 @@ QWidget* SettingsWidget::createCryptoSection() {
   return group;
 }
 
+QWidget* SettingsWidget::createStartupSection() {
+  auto* group = new QGroupBox();
+  auto* layout = new QVBoxLayout(group);
+  layout->setSpacing(12);
+
+  startMinimizedCheck_ = new QCheckBox("Start minimized to tray", group);
+  startMinimizedCheck_->setToolTip("Launch application minimized to system tray instead of showing main window");
+  layout->addWidget(startMinimizedCheck_);
+
+  autoConnectOnStartupCheck_ = new QCheckBox("Auto-connect on startup", group);
+  autoConnectOnStartupCheck_->setToolTip("Automatically connect to VPN when application starts");
+  layout->addWidget(autoConnectOnStartupCheck_);
+
+  launchOnWindowsStartupCheck_ = new QCheckBox("Launch on Windows startup", group);
+  launchOnWindowsStartupCheck_->setToolTip("Automatically start VEIL VPN when Windows starts (requires administrator privileges)");
+  connect(launchOnWindowsStartupCheck_, &QCheckBox::stateChanged, this, &SettingsWidget::onLaunchOnStartupChanged);
+  layout->addWidget(launchOnWindowsStartupCheck_);
+
+  // Info text
+  auto* infoLabel = new QLabel(
+      "Startup options control how the application behaves when launched.\n"
+      "Note: Windows service auto-starts by default; this controls the GUI application.",
+      group);
+  infoLabel->setWordWrap(true);
+  infoLabel->setStyleSheet(QString("color: %1; font-size: 12px; padding: 12px; "
+                                   "background: rgba(88, 166, 255, 0.08); "
+                                   "border: 1px solid rgba(88, 166, 255, 0.2); "
+                                   "border-radius: 10px;")
+                               .arg(colors::dark::kAccentPrimary));
+  layout->addWidget(infoLabel);
+
+  return group;
+}
+
 QWidget* SettingsWidget::createRoutingSection() {
   auto* group = new QGroupBox();
   auto* layout = new QVBoxLayout(group);
@@ -437,6 +487,46 @@ QWidget* SettingsWidget::createRoutingSection() {
       routeAllTrafficCheck_->setChecked(false);
     }
   });
+
+  // Per-application routing (Phase 1: UI/UX foundation)
+  layout->addSpacing(12);
+
+  enablePerAppRoutingCheck_ = new QCheckBox("Enable per-application routing (Experimental)", group);
+  enablePerAppRoutingCheck_->setToolTip(
+    "Configure VPN routing on a per-application basis.\n"
+    "Note: This is a UI preview. Backend routing is not yet implemented.");
+  enablePerAppRoutingCheck_->setEnabled(false);  // Disabled until backend is ready
+  layout->addWidget(enablePerAppRoutingCheck_);
+
+  // App split tunnel widget (collapsible)
+  appSplitTunnelWidget_ = new AppSplitTunnelWidget(group);
+  appSplitTunnelWidget_->hide();  // Hidden by default
+  layout->addWidget(appSplitTunnelWidget_);
+
+  connect(enablePerAppRoutingCheck_, &QCheckBox::toggled, [this](bool checked) {
+    appSplitTunnelWidget_->setVisible(checked);
+    if (checked) {
+      hasUnsavedChanges_ = true;
+    }
+  });
+
+  connect(appSplitTunnelWidget_, &AppSplitTunnelWidget::settingsChanged, [this]() {
+    hasUnsavedChanges_ = true;
+  });
+
+  // Add informational label about experimental status
+  auto* infoLabel = new QLabel(
+    "\U0001F6A7 <b>Experimental Feature:</b> Per-application routing UI is available for preview. "
+    "Full routing functionality requires daemon integration and will be implemented in Phase 2.",
+    group);
+  infoLabel->setProperty("textStyle", "secondary");
+  infoLabel->setStyleSheet(QString("color: %1; font-size: 11px; padding: 8px; background-color: rgba(255, 165, 0, 0.1); border-radius: 4px;")
+                           .arg(colors::dark::kAccentWarning));
+  infoLabel->setWordWrap(true);
+  infoLabel->hide();  // Hidden by default
+  layout->addWidget(infoLabel);
+
+  connect(enablePerAppRoutingCheck_, &QCheckBox::toggled, infoLabel, &QLabel::setVisible);
 
   return group;
 }
@@ -626,6 +716,167 @@ QWidget* SettingsWidget::createTunInterfaceSection() {
   return group;
 }
 
+QWidget* SettingsWidget::createNotificationSection() {
+  auto* group = new QGroupBox();
+  auto* layout = new QVBoxLayout(group);
+  layout->setSpacing(12);
+
+  // Global notification toggle
+  notificationsEnabledCheck_ = new QCheckBox("Enable notifications", group);
+  notificationsEnabledCheck_->setToolTip("Master toggle for all system tray notifications");
+  connect(notificationsEnabledCheck_, &QCheckBox::toggled, [this](bool checked) {
+    hasUnsavedChanges_ = true;
+    // Enable/disable per-event checkboxes based on master toggle
+    notificationSoundCheck_->setEnabled(checked);
+    showNotificationDetailsCheck_->setEnabled(checked);
+    connectionEstablishedCheck_->setEnabled(checked);
+    connectionLostCheck_->setEnabled(checked);
+    minimizeToTrayCheck_->setEnabled(checked);
+    updatesAvailableCheck_->setEnabled(checked);
+    errorNotificationsCheck_->setEnabled(checked);
+  });
+  layout->addWidget(notificationsEnabledCheck_);
+
+  // Notification sound
+  notificationSoundCheck_ = new QCheckBox("Play notification sound", group);
+  notificationSoundCheck_->setToolTip("Play system sound when notifications appear");
+  connect(notificationSoundCheck_, &QCheckBox::toggled, [this]() {
+    hasUnsavedChanges_ = true;
+  });
+  layout->addWidget(notificationSoundCheck_);
+
+  // Show details
+  showNotificationDetailsCheck_ = new QCheckBox("Show notification details", group);
+  showNotificationDetailsCheck_->setToolTip("Include detailed information in notification messages");
+  connect(showNotificationDetailsCheck_, &QCheckBox::toggled, [this]() {
+    hasUnsavedChanges_ = true;
+  });
+  layout->addWidget(showNotificationDetailsCheck_);
+
+  // Separator
+  auto* separator = new QFrame(group);
+  separator->setFrameShape(QFrame::HLine);
+  separator->setStyleSheet("background-color: rgba(255, 255, 255, 0.08);");
+  layout->addWidget(separator);
+
+  // Per-event notification toggles
+  auto* eventLabel = new QLabel("Notify me when:", group);
+  eventLabel->setStyleSheet("font-weight: 600; color: #f0f6fc; margin-top: 8px;");
+  layout->addWidget(eventLabel);
+
+  connectionEstablishedCheck_ = new QCheckBox("Connection is established", group);
+  connectionEstablishedCheck_->setToolTip("Show notification when VPN connection succeeds");
+  connect(connectionEstablishedCheck_, &QCheckBox::toggled, [this]() {
+    hasUnsavedChanges_ = true;
+  });
+  layout->addWidget(connectionEstablishedCheck_);
+
+  connectionLostCheck_ = new QCheckBox("Connection is lost or disconnected", group);
+  connectionLostCheck_->setToolTip("Show notification when VPN connection drops");
+  connect(connectionLostCheck_, &QCheckBox::toggled, [this]() {
+    hasUnsavedChanges_ = true;
+  });
+  layout->addWidget(connectionLostCheck_);
+
+  minimizeToTrayCheck_ = new QCheckBox("Application is minimized to tray", group);
+  minimizeToTrayCheck_->setToolTip("Show notification when window is minimized to system tray");
+  connect(minimizeToTrayCheck_, &QCheckBox::toggled, [this]() {
+    hasUnsavedChanges_ = true;
+  });
+  layout->addWidget(minimizeToTrayCheck_);
+
+  updatesAvailableCheck_ = new QCheckBox("Software updates are available", group);
+  updatesAvailableCheck_->setToolTip("Show notification when new version is available");
+  connect(updatesAvailableCheck_, &QCheckBox::toggled, [this]() {
+    hasUnsavedChanges_ = true;
+  });
+  layout->addWidget(updatesAvailableCheck_);
+
+  errorNotificationsCheck_ = new QCheckBox("Connection errors occur", group);
+  errorNotificationsCheck_->setToolTip("Show notification when connection or configuration errors happen");
+  connect(errorNotificationsCheck_, &QCheckBox::toggled, [this]() {
+    hasUnsavedChanges_ = true;
+  });
+  layout->addWidget(errorNotificationsCheck_);
+
+  // Notification history
+  auto* historyLabel = new QLabel("Notification History", group);
+  historyLabel->setStyleSheet("font-weight: 600; color: #f0f6fc; margin-top: 16px;");
+  layout->addWidget(historyLabel);
+
+  auto* historyButtonRow = new QHBoxLayout();
+  viewHistoryButton_ = new QPushButton("View History", group);
+  viewHistoryButton_->setToolTip("View recent notification history");
+  viewHistoryButton_->setStyleSheet(R"(
+    QPushButton {
+      background: #238636;
+      color: #ffffff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    QPushButton:hover {
+      background: #2ea043;
+    }
+  )");
+  connect(viewHistoryButton_, &QPushButton::clicked, this, [this]() {
+    auto* dialog = new NotificationHistoryDialog(this);
+    dialog->exec();
+    dialog->deleteLater();
+  });
+  historyButtonRow->addWidget(viewHistoryButton_);
+
+  clearHistoryButton_ = new QPushButton("Clear History", group);
+  clearHistoryButton_->setToolTip("Delete all notification history");
+  clearHistoryButton_->setStyleSheet(R"(
+    QPushButton {
+      background: #da3633;
+      color: #ffffff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    QPushButton:hover {
+      background: #f85149;
+    }
+  )");
+  connect(clearHistoryButton_, &QPushButton::clicked, this, [this]() {
+    auto reply = QMessageBox::question(
+        this, "Clear History",
+        "Are you sure you want to clear all notification history?",
+        QMessageBox::Yes | QMessageBox::No);
+
+    if (reply == QMessageBox::Yes) {
+      auto& prefs = NotificationPreferences::instance();
+      prefs.clearHistory();
+      QMessageBox::information(this, "History Cleared",
+                              "Notification history has been cleared.");
+    }
+  });
+  historyButtonRow->addWidget(clearHistoryButton_);
+  historyButtonRow->addStretch();
+  layout->addLayout(historyButtonRow);
+
+  // Info text
+  auto* infoLabel = new QLabel(
+      "Configure which system tray notifications you want to receive. "
+      "Notifications help you stay informed about VPN connection status and important events.",
+      group);
+  infoLabel->setWordWrap(true);
+  infoLabel->setStyleSheet(QString("color: %1; font-size: 12px; padding: 12px; "
+                                   "background: rgba(88, 166, 255, 0.08); "
+                                   "border: 1px solid rgba(88, 166, 255, 0.2); "
+                                   "border-radius: 10px;")
+                               .arg(colors::dark::kAccentPrimary));
+  layout->addWidget(infoLabel);
+
+  return group;
+}
+
 QWidget* SettingsWidget::createAdvancedSection() {
   auto* group = new QGroupBox();
   auto* layout = new QVBoxLayout(group);
@@ -745,6 +996,38 @@ void SettingsWidget::onBrowseObfuscationSeed() {
     hasUnsavedChanges_ = true;
     validateSettings();
   }
+}
+
+void SettingsWidget::onLaunchOnStartupChanged(int state) {
+#ifdef _WIN32
+  // Update Windows registry to add/remove application from startup
+  QSettings registrySettings(
+      "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+      QSettings::NativeFormat);
+
+  const QString appName = "VEIL VPN Client";
+
+  if (state == Qt::Checked) {
+    // Add to startup - get path to current executable
+    QString appPath = QApplication::applicationFilePath();
+    // Wrap path in quotes to handle spaces
+    QString startupCommand = QString("\"%1\" --minimized").arg(appPath);
+    registrySettings.setValue(appName, startupCommand);
+    qDebug() << "[SettingsWidget] Added to Windows startup:" << startupCommand;
+  } else {
+    // Remove from startup
+    registrySettings.remove(appName);
+    qDebug() << "[SettingsWidget] Removed from Windows startup";
+  }
+
+  registrySettings.sync();
+  hasUnsavedChanges_ = true;
+#else
+  // Not Windows - disable checkbox
+  launchOnWindowsStartupCheck_->setChecked(false);
+  launchOnWindowsStartupCheck_->setEnabled(false);
+  launchOnWindowsStartupCheck_->setToolTip("This feature is only available on Windows");
+#endif
 }
 
 void SettingsWidget::validateSettings() {
@@ -888,6 +1171,30 @@ void SettingsWidget::loadSettings() {
   routeAllTrafficCheck_->setChecked(settings.value("routing/routeAllTraffic", true).toBool());
   splitTunnelCheck_->setChecked(settings.value("routing/splitTunnel", false).toBool());
   customRoutesEdit_->setText(settings.value("routing/customRoutes", "").toString());
+  enablePerAppRoutingCheck_->setChecked(settings.value("routing/enablePerAppRouting", false).toBool());
+
+  // Load per-app routing settings
+  if (appSplitTunnelWidget_) {
+    appSplitTunnelWidget_->loadFromSettings();
+  }
+
+  // Startup Options
+  startMinimizedCheck_->setChecked(settings.value("startup/startMinimized", false).toBool());
+  autoConnectOnStartupCheck_->setChecked(settings.value("startup/autoConnect", false).toBool());
+
+  // Check Windows registry for actual startup state
+#ifdef _WIN32
+  QSettings registrySettings(
+      "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+      QSettings::NativeFormat);
+  bool inStartup = registrySettings.contains("VEIL VPN Client");
+  launchOnWindowsStartupCheck_->setChecked(inStartup);
+  // Update our settings to match registry
+  settings.setValue("startup/launchOnWindowsStartup", inStartup);
+#else
+  launchOnWindowsStartupCheck_->setChecked(false);
+  launchOnWindowsStartupCheck_->setEnabled(false);
+#endif
 
   // Connection
   autoReconnectCheck_->setChecked(settings.value("connection/autoReconnect", true).toBool());
@@ -909,6 +1216,18 @@ void SettingsWidget::loadSettings() {
   if (themeIndex >= 0) {
     themeCombo_->setCurrentIndex(themeIndex);
   }
+
+  // Notifications
+  auto& notificationPrefs = NotificationPreferences::instance();
+  notificationPrefs.load();
+  notificationsEnabledCheck_->setChecked(notificationPrefs.isNotificationsEnabled());
+  notificationSoundCheck_->setChecked(notificationPrefs.isNotificationSoundEnabled());
+  showNotificationDetailsCheck_->setChecked(notificationPrefs.isShowDetailsEnabled());
+  connectionEstablishedCheck_->setChecked(notificationPrefs.isConnectionEstablishedEnabled());
+  connectionLostCheck_->setChecked(notificationPrefs.isConnectionLostEnabled());
+  minimizeToTrayCheck_->setChecked(notificationPrefs.isMinimizeToTrayEnabled());
+  updatesAvailableCheck_->setChecked(notificationPrefs.isUpdatesAvailableEnabled());
+  errorNotificationsCheck_->setChecked(notificationPrefs.isErrorNotificationsEnabled());
 
   hasUnsavedChanges_ = false;
   validateSettings();
@@ -954,10 +1273,21 @@ void SettingsWidget::saveSettings() {
   settings.setValue("tun/netmask", tunNetmaskEdit_->text().trimmed());
   settings.setValue("tun/mtu", tunMtuSpinBox_->value());
 
+  // Startup Options
+  settings.setValue("startup/startMinimized", startMinimizedCheck_->isChecked());
+  settings.setValue("startup/autoConnect", autoConnectOnStartupCheck_->isChecked());
+  settings.setValue("startup/launchOnWindowsStartup", launchOnWindowsStartupCheck_->isChecked());
+
   // Routing
   settings.setValue("routing/routeAllTraffic", routeAllTrafficCheck_->isChecked());
   settings.setValue("routing/splitTunnel", splitTunnelCheck_->isChecked());
   settings.setValue("routing/customRoutes", customRoutesEdit_->text().trimmed());
+  settings.setValue("routing/enablePerAppRouting", enablePerAppRoutingCheck_->isChecked());
+
+  // Save per-app routing settings
+  if (appSplitTunnelWidget_) {
+    appSplitTunnelWidget_->saveToSettings();
+  }
 
   // Connection
   settings.setValue("connection/autoReconnect", autoReconnectCheck_->isChecked());
@@ -974,6 +1304,18 @@ void SettingsWidget::saveSettings() {
 
   // Theme
   settings.setValue("ui/theme", themeCombo_->currentData().toInt());
+
+  // Notifications
+  auto& notificationPrefs = NotificationPreferences::instance();
+  notificationPrefs.setNotificationsEnabled(notificationsEnabledCheck_->isChecked());
+  notificationPrefs.setNotificationSoundEnabled(notificationSoundCheck_->isChecked());
+  notificationPrefs.setShowDetailsEnabled(showNotificationDetailsCheck_->isChecked());
+  notificationPrefs.setConnectionEstablishedEnabled(connectionEstablishedCheck_->isChecked());
+  notificationPrefs.setConnectionLostEnabled(connectionLostCheck_->isChecked());
+  notificationPrefs.setMinimizeToTrayEnabled(minimizeToTrayCheck_->isChecked());
+  notificationPrefs.setUpdatesAvailableEnabled(updatesAvailableCheck_->isChecked());
+  notificationPrefs.setErrorNotificationsEnabled(errorNotificationsCheck_->isChecked());
+  notificationPrefs.save();
 
   settings.sync();
   hasUnsavedChanges_ = false;

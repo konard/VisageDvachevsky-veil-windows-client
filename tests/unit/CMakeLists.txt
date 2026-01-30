@@ -14,6 +14,7 @@ if(WIN32)
     session_migration_tests.cpp
     console_handler_tests.cpp
     service_manager_tests.cpp
+    app_enumerator_tests.cpp
   )
 else()
   set(VEIL_PLATFORM_TEST_SOURCES

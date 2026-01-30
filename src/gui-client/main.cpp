@@ -81,9 +81,21 @@ int main(int argc, char* argv[]) {
   }
 #endif
 
-  // Create and show main window
+  // Check for command-line arguments
+  QStringList args = app.arguments();
+  bool startMinimized = args.contains("--minimized") || args.contains("-m");
+
+  // Create main window
   veil::gui::MainWindow window;
-  window.show();
+
+  // Show window unless minimized flag is set
+  if (!startMinimized) {
+    window.show();
+  } else {
+    qDebug() << "Starting minimized due to --minimized flag";
+    // Window will be hidden by the startMinimized logic in MainWindow constructor
+    window.show();  // Still call show() first, then hide() in constructor
+  }
 
   return app.exec();
 }

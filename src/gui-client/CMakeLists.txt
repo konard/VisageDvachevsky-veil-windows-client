@@ -28,6 +28,10 @@ add_executable(veil-client-gui
   statistics_widget.h
   ipc_client_manager.cpp
   ipc_client_manager.h
+  notification_preferences.cpp
+  notification_preferences.h
+  notification_history_dialog.cpp
+  notification_history_dialog.h
   update_checker.cpp
   update_checker.h
   setup_wizard.cpp
@@ -40,6 +44,8 @@ add_executable(veil-client-gui
   server_selector_widget.h
   quick_actions_widget.cpp
   quick_actions_widget.h
+  app_split_tunnel_widget.cpp
+  app_split_tunnel_widget.h
   resources/resources.qrc
 )
 

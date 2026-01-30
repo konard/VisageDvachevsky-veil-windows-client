@@ -7,6 +7,7 @@ if(WIN32)
     windows/service_manager.cpp
     windows/system_tray.cpp
     windows/console_handler.cpp
+    windows/app_enumerator.cpp
   )
   # Windows doesn't use POSIX signals or daemonization
   set(VEIL_SIGNAL_SOURCES)
