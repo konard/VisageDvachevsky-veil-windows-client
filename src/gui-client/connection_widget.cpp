@@ -9,6 +9,7 @@
 #include <QPainterPath>
 #include <QGraphicsDropShadowEffect>
 #include <QSettings>
+#include <QShortcut>
 
 #include "common/gui/theme.h"
 
@@ -159,6 +160,15 @@ ConnectionWidget::ConnectionWidget(QWidget* parent) : QWidget(parent) {
   setupUi();
   setupAnimations();
   loadServerSettings();
+
+  // Add Space shortcut for toggling connection when button is focused
+  auto* spaceShortcut = new QShortcut(QKeySequence(Qt::Key_Space), this);
+  connect(spaceShortcut, &QShortcut::activated, this, [this]() {
+    // Only trigger if connect button has focus
+    if (connectButton_ && connectButton_->hasFocus()) {
+      onConnectClicked();
+    }
+  });
 }
 
 void ConnectionWidget::setupUi() {
