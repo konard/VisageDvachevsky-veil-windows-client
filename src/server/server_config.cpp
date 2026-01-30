@@ -2,8 +2,11 @@
 
 #include <arpa/inet.h>
 
+#include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <type_traits>
@@ -70,6 +73,36 @@ std::uint32_t ipv4_to_uint(const std::string& ip) {
     return 0;
   }
   return ntohl(addr.s_addr);
+}
+
+// Helper to decode hex string to bytes (Issue #87: per-client PSK support)
+std::optional<std::vector<std::uint8_t>> decode_hex(const std::string& hex) {
+  if (hex.size() % 2 != 0) {
+    return std::nullopt;
+  }
+
+  std::vector<std::uint8_t> result;
+  result.reserve(hex.size() / 2);
+
+  for (std::size_t i = 0; i < hex.size(); i += 2) {
+    std::uint8_t byte = 0;
+    for (std::size_t j = 0; j < 2; ++j) {
+      char c = hex[i + j];
+      byte = static_cast<std::uint8_t>(byte << 4);
+      if (c >= '0' && c <= '9') {
+        byte |= static_cast<std::uint8_t>(c - '0');
+      } else if (c >= 'a' && c <= 'f') {
+        byte |= static_cast<std::uint8_t>(c - 'a' + 10);
+      } else if (c >= 'A' && c <= 'F') {
+        byte |= static_cast<std::uint8_t>(c - 'A' + 10);
+      } else {
+        return std::nullopt;  // Invalid hex character
+      }
+    }
+    result.push_back(byte);
+  }
+
+  return result;
 }
 }  // namespace
 
@@ -290,6 +323,90 @@ bool load_config_file(const std::string& path, ServerConfig& config, std::error_
         config.user = value;
       } else if (key == "group") {
         config.group = value;
+      }
+    } else if (section == "clients") {
+      // Issue #87: Per-client PSK authentication.
+      // Format: client_id = hex_encoded_psk
+      // Example: alice = 0123456789abcdef...
+      //
+      // The key is the client_id, and the value is the hex-encoded PSK.
+      // PSKs must be 32-64 bytes (64-128 hex characters).
+
+      auto psk_bytes = decode_hex(value);
+      if (!psk_bytes) {
+        LOG_ERROR("Configuration error: Invalid hex PSK for client '{}': '{}'", key, value);
+        ec = std::make_error_code(std::errc::invalid_argument);
+        return false;
+      }
+
+      // Validate PSK size (32-64 bytes)
+      constexpr std::size_t kMinPskSize = 32;
+      constexpr std::size_t kMaxPskSize = 64;
+      if (psk_bytes->size() < kMinPskSize || psk_bytes->size() > kMaxPskSize) {
+        LOG_ERROR(
+            "Configuration error: PSK for client '{}' has invalid size {} bytes "
+            "(must be {}-{} bytes)",
+            key, psk_bytes->size(), kMinPskSize, kMaxPskSize);
+        ec = std::make_error_code(std::errc::invalid_argument);
+        return false;
+      }
+
+      // Validate client_id format
+      bool valid_id =
+          !key.empty() && key.size() <= 64 &&
+          std::all_of(key.begin(), key.end(), [](char c) {
+            return std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_';
+          });
+
+      if (!valid_id) {
+        LOG_ERROR(
+            "Configuration error: Invalid client_id '{}' "
+            "(must be 1-64 alphanumeric characters, hyphens, or underscores)",
+            key);
+        ec = std::make_error_code(std::errc::invalid_argument);
+        return false;
+      }
+
+      // Check for duplicate client IDs
+      auto it = std::find_if(config.client_psks.begin(), config.client_psks.end(),
+                             [&key](const ClientPskEntry& entry) { return entry.client_id == key; });
+      if (it != config.client_psks.end()) {
+        LOG_ERROR("Configuration error: Duplicate client_id '{}'", key);
+        ec = std::make_error_code(std::errc::invalid_argument);
+        return false;
+      }
+
+      config.client_psks.push_back(ClientPskEntry{
+          .client_id = key,
+          .psk = std::move(*psk_bytes),
+          .enabled = true,
+      });
+
+      LOG_DEBUG("Loaded per-client PSK for client '{}' ({} bytes)", key, config.client_psks.back().psk.size());
+    } else if (section == "fallback") {
+      // Fallback PSK for clients not in the registry.
+      // Format: psk = hex_encoded_psk
+      if (key == "psk") {
+        auto psk_bytes = decode_hex(value);
+        if (!psk_bytes) {
+          LOG_ERROR("Configuration error: Invalid hex fallback PSK: '{}'", value);
+          ec = std::make_error_code(std::errc::invalid_argument);
+          return false;
+        }
+
+        constexpr std::size_t kMinPskSize = 32;
+        constexpr std::size_t kMaxPskSize = 64;
+        if (psk_bytes->size() < kMinPskSize || psk_bytes->size() > kMaxPskSize) {
+          LOG_ERROR(
+              "Configuration error: Fallback PSK has invalid size {} bytes "
+              "(must be {}-{} bytes)",
+              psk_bytes->size(), kMinPskSize, kMaxPskSize);
+          ec = std::make_error_code(std::errc::invalid_argument);
+          return false;
+        }
+
+        config.fallback_psk = std::move(*psk_bytes);
+        LOG_DEBUG("Loaded fallback PSK ({} bytes)", config.fallback_psk.size());
       }
     }
   }

@@ -177,6 +177,21 @@ HandshakeInitiator::HandshakeInitiator(std::vector<std::uint8_t> psk,
   }
 }
 
+HandshakeInitiator::HandshakeInitiator(std::vector<std::uint8_t> psk, std::string client_id,
+                                       std::chrono::milliseconds skew_tolerance,
+                                       std::function<Clock::time_point()> now_fn)
+    : psk_(std::move(psk)),
+      client_id_(std::move(client_id)),
+      skew_tolerance_(skew_tolerance),
+      now_fn_(std::move(now_fn)) {
+  if (psk_.empty()) {
+    throw std::invalid_argument("psk required");
+  }
+  if (client_id_.size() > kMaxHandshakeClientIdLength) {
+    throw std::invalid_argument("client_id too long");
+  }
+}
+
 HandshakeInitiator::~HandshakeInitiator() {
   // SECURITY: Clear all sensitive key material on destruction
   if (!psk_.empty()) {
@@ -323,6 +338,7 @@ std::optional<HandshakeSession> HandshakeInitiator::consume_response(
       .keys = keys,
       .initiator_ephemeral = init_pub,
       .responder_ephemeral = responder_pub,
+      .client_id = client_id_,  // Issue #87: Include client_id in session
   };
   return session;
 }
@@ -490,6 +506,199 @@ std::optional<HandshakeResponder::Result> HandshakeResponder::handle_init(
       .keys = session_keys,
       .initiator_ephemeral = init_pub,
       .responder_ephemeral = responder_keys.public_key,
+      .client_id = {},  // No client_id for single-PSK responder
+  };
+
+  return Result{.response = std::move(encrypted_response), .session = session};
+}
+
+// =============================================================================
+// MultiClientHandshakeResponder Implementation (Issue #87)
+// =============================================================================
+
+MultiClientHandshakeResponder::MultiClientHandshakeResponder(
+    std::shared_ptr<auth::ClientRegistry> registry, std::chrono::milliseconds skew_tolerance,
+    utils::TokenBucket rate_limiter, std::function<Clock::time_point()> now_fn)
+    : registry_(std::move(registry)),
+      skew_tolerance_(skew_tolerance),
+      rate_limiter_(std::move(rate_limiter)),
+      now_fn_(std::move(now_fn)) {
+  if (!registry_) {
+    throw std::invalid_argument("registry required");
+  }
+}
+
+MultiClientHandshakeResponder::~MultiClientHandshakeResponder() {
+  // Registry is a shared_ptr, it will be cleaned up automatically
+}
+
+std::optional<MultiClientHandshakeResponder::Result> MultiClientHandshakeResponder::handle_init(
+    std::span<const std::uint8_t> init_bytes) {
+  // Rate limit before attempting decryption (prevents DoS via decrypt operations)
+  if (!rate_limiter_.allow()) {
+    return std::nullopt;
+  }
+
+  // Trial decryption: Try each PSK until one succeeds
+  // This is necessary because the client_id cannot be sent in plaintext
+  // (would reveal client identity to eavesdroppers)
+
+  // First, try all registered client PSKs
+  auto client_psks = registry_->get_all_enabled_psks();
+  for (const auto& [client_id, psk] : client_psks) {
+    auto handshake_key = derive_handshake_key(psk);
+    auto decrypted = decrypt_handshake_packet(handshake_key, init_bytes);
+
+    if (decrypted.has_value()) {
+      auto result = process_decrypted_init(*decrypted, handshake_key, psk, client_id);
+      sodium_memzero(handshake_key.data(), handshake_key.size());
+      if (result.has_value()) {
+        return result;
+      }
+      // Decryption succeeded but validation failed - don't try other PSKs
+      // (The packet was encrypted with this PSK but is invalid)
+      return std::nullopt;
+    }
+    sodium_memzero(handshake_key.data(), handshake_key.size());
+  }
+
+  // Try fallback PSK if available
+  auto fallback_psk = registry_->get_fallback_psk();
+  if (fallback_psk.has_value()) {
+    auto handshake_key = derive_handshake_key(*fallback_psk);
+    auto decrypted = decrypt_handshake_packet(handshake_key, init_bytes);
+
+    if (decrypted.has_value()) {
+      auto result = process_decrypted_init(*decrypted, handshake_key, *fallback_psk, "");
+      sodium_memzero(handshake_key.data(), handshake_key.size());
+      return result;
+    }
+    sodium_memzero(handshake_key.data(), handshake_key.size());
+  }
+
+  // No PSK matched
+  return std::nullopt;
+}
+
+std::optional<MultiClientHandshakeResponder::Result>
+MultiClientHandshakeResponder::process_decrypted_init(
+    const std::vector<std::uint8_t>& plaintext,
+    std::span<const std::uint8_t, crypto::kAeadKeyLen> handshake_key,
+    const std::vector<std::uint8_t>& psk,
+    const std::string& client_id) {
+  // Minimum size: header + fields + HMAC + padding_length (2 bytes)
+  constexpr std::size_t min_init_size =
+      kMagic.size() + 1 + 1 + 8 + crypto::kX25519PublicKeySize + crypto::kHmacSha256Len + 2;
+  if (plaintext.size() < min_init_size) {
+    return std::nullopt;
+  }
+  // Maximum size with maximum padding
+  const std::size_t max_init_size = min_init_size + kMaxPaddingSize;
+  if (plaintext.size() > max_init_size) {
+    return std::nullopt;
+  }
+  if (!std::equal(kMagic.begin(), kMagic.end(), plaintext.begin())) {
+    return std::nullopt;
+  }
+  if (plaintext[2] != kVersion || plaintext[3] != static_cast<std::uint8_t>(MessageType::kInit)) {
+    return std::nullopt;
+  }
+  const auto init_ts = read_u64(plaintext, 4);
+  if (!timestamp_valid(init_ts, skew_tolerance_, now_fn_)) {
+    return std::nullopt;
+  }
+  std::array<std::uint8_t, crypto::kX25519PublicKeySize> init_pub{};
+  std::copy_n(plaintext.begin() + 12, init_pub.size(), init_pub.begin());
+
+  // Check replay cache BEFORE validating HMAC (anti-probing requirement)
+  if (replay_cache_.mark_and_check(init_ts, init_pub)) {
+    return std::nullopt;  // Replay detected
+  }
+
+  // Extract HMAC (32 bytes after the ephemeral public key)
+  const auto mac_offset = 12 + init_pub.size();
+  std::array<std::uint8_t, crypto::kHmacSha256Len> provided_mac{};
+  std::copy_n(plaintext.begin() + static_cast<std::ptrdiff_t>(mac_offset), crypto::kHmacSha256Len,
+              provided_mac.begin());
+
+  const auto hmac_payload = build_init_hmac_payload(init_ts, init_pub);
+  const auto expected_mac = crypto::hmac_sha256(psk, hmac_payload);
+  if (!std::equal(expected_mac.begin(), expected_mac.end(), provided_mac.begin())) {
+    return std::nullopt;
+  }
+
+  // Validate padding length field (after HMAC)
+  const auto padding_len_offset = mac_offset + crypto::kHmacSha256Len;
+  if (plaintext.size() < padding_len_offset + 2) {
+    return std::nullopt;
+  }
+  const auto padding_len = static_cast<std::uint16_t>((plaintext[padding_len_offset] << 8) |
+                                                       plaintext[padding_len_offset + 1]);
+
+  // Validate padding length is within allowed range
+  if (padding_len < kMinPaddingSize || padding_len > kMaxPaddingSize) {
+    return std::nullopt;
+  }
+
+  // Validate total packet size matches expected size with padding
+  const std::size_t expected_total_size = padding_len_offset + 2 + padding_len;
+  if (plaintext.size() != expected_total_size) {
+    return std::nullopt;
+  }
+
+  auto responder_keys = crypto::generate_x25519_keypair();
+  auto shared = crypto::compute_shared_secret(responder_keys.secret_key, init_pub);
+  const auto info = derive_info(init_pub, responder_keys.public_key);
+  const auto session_keys = crypto::derive_session_keys(shared, psk, info, false);
+
+  // SECURITY: Clear shared secret immediately after key derivation
+  sodium_memzero(shared.data(), shared.size());
+
+  // SECURITY: Clear responder's ephemeral private key after ECDH computation
+  sodium_memzero(responder_keys.secret_key.data(), responder_keys.secret_key.size());
+
+  const auto session_id = veil::crypto::random_uint64();
+  const auto resp_ts = to_millis(now_fn_());
+
+  auto hmac_payload_resp = build_hmac_payload(static_cast<std::uint8_t>(MessageType::kResponse),
+                                              init_ts, resp_ts, session_id, init_pub,
+                                              responder_keys.public_key);
+  const auto mac = crypto::hmac_sha256(psk, hmac_payload_resp);
+
+  // Generate random padding for DPI resistance
+  const auto padding_size = compute_random_padding_size();
+  const auto padding = veil::crypto::random_bytes(padding_size);
+
+  // Build plaintext response
+  std::vector<std::uint8_t> response_plaintext;
+  response_plaintext.reserve(kMagic.size() + 1 + 1 + 8 + 8 + 8 +
+                             responder_keys.public_key.size() + mac.size() + 2 + padding_size);
+  response_plaintext.insert(response_plaintext.end(), kMagic.begin(), kMagic.end());
+  response_plaintext.push_back(kVersion);
+  response_plaintext.push_back(static_cast<std::uint8_t>(MessageType::kResponse));
+  write_u64(response_plaintext, init_ts);
+  write_u64(response_plaintext, resp_ts);
+  write_u64(response_plaintext, session_id);
+  response_plaintext.insert(response_plaintext.end(), responder_keys.public_key.begin(),
+                            responder_keys.public_key.end());
+  response_plaintext.insert(response_plaintext.end(), mac.begin(), mac.end());
+
+  // Append padding length (2 bytes, big-endian)
+  response_plaintext.push_back(static_cast<std::uint8_t>((padding_size >> 8) & 0xFF));
+  response_plaintext.push_back(static_cast<std::uint8_t>(padding_size & 0xFF));
+
+  // Append random padding
+  response_plaintext.insert(response_plaintext.end(), padding.begin(), padding.end());
+
+  // Encrypt the response
+  auto encrypted_response = encrypt_handshake_packet(handshake_key, response_plaintext);
+
+  HandshakeSession session{
+      .session_id = session_id,
+      .keys = session_keys,
+      .initiator_ephemeral = init_pub,
+      .responder_ephemeral = responder_keys.public_key,
+      .client_id = client_id,  // Issue #87: Include authenticated client_id
   };
 
   return Result{.response = std::move(encrypted_response), .session = session};
