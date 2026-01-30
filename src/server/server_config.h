@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -8,6 +9,14 @@
 #include "tun/routing.h"
 
 namespace veil::server {
+
+// Per-client PSK configuration entry (Issue #87).
+// Each client can have a unique PSK for authentication.
+struct ClientPskEntry {
+  std::string client_id;             // Unique identifier (alphanumeric, hyphens, underscores)
+  std::vector<std::uint8_t> psk;     // Pre-shared key (32-64 bytes)
+  bool enabled{true};                // Whether client is allowed to connect
+};
 
 // Server-specific configuration.
 struct ServerConfig {
@@ -40,6 +49,14 @@ struct ServerConfig {
   std::string log_file;
   std::string user;
   std::string group;
+
+  // Per-client PSK authentication (Issue #87).
+  // Each client can have a unique PSK for individual revocation and audit.
+  std::vector<ClientPskEntry> client_psks;
+
+  // Fallback PSK for backward compatibility with legacy clients.
+  // If set, clients without a specific PSK entry will use this key.
+  std::vector<std::uint8_t> fallback_psk;
 };
 
 // Parse command-line arguments into configuration.

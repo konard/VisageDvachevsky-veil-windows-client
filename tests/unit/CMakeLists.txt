@@ -42,6 +42,8 @@ add_executable(veil_unit_tests
   replay_window_tests.cpp
   handshake_tests.cpp
   handshake_replay_cache_tests.cpp
+  client_registry_tests.cpp
+  multi_client_handshake_tests.cpp
   timer_heap_tests.cpp
   obfuscation_tests.cpp
   tun_device_tests.cpp
