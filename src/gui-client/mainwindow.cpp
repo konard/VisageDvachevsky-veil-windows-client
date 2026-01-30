@@ -216,6 +216,43 @@ MainWindow::MainWindow(QWidget* parent)
 
   // Check for updates on startup (delayed)
   QTimer::singleShot(3000, this, &MainWindow::checkForUpdates);
+
+  // Handle startup options
+  QSettings startupSettings("VEIL", "VPN Client");
+  bool startMinimized = startupSettings.value("startup/startMinimized", false).toBool();
+  bool autoConnect = startupSettings.value("startup/autoConnect", false).toBool();
+
+  qDebug() << "MainWindow: Startup options - Start Minimized:" << startMinimized
+           << ", Auto-Connect:" << autoConnect;
+
+  // If start minimized is enabled, hide the window and show in tray
+  if (startMinimized) {
+    qDebug() << "MainWindow: Starting minimized to tray";
+    // Hide the main window instead of showing it
+    // We'll do this after a short delay to ensure everything is initialized
+    QTimer::singleShot(100, this, [this]() {
+      hide();
+      if (trayIcon_ && trayIcon_->isVisible()) {
+        trayIcon_->showMessage("VEIL VPN", "Application started minimized to tray",
+                               QSystemTrayIcon::Information, 2000);
+      }
+    });
+  }
+
+  // If auto-connect is enabled and daemon is connected, initiate connection
+  if (autoConnect) {
+    qDebug() << "MainWindow: Auto-connect on startup enabled";
+    // Delay auto-connect to ensure daemon is fully ready
+    QTimer::singleShot(2000, this, [this]() {
+      if (ipcManager_->isConnected()) {
+        qDebug() << "MainWindow: Initiating auto-connect...";
+        // Trigger connection using the connection widget's signal
+        emit connectionWidget_->connectRequested();
+      } else {
+        qWarning() << "MainWindow: Auto-connect skipped - daemon not connected";
+      }
+    });
+  }
 }
 
 MainWindow::~MainWindow() = default;

@@ -96,6 +96,8 @@ void SettingsWidget::setupUi() {
                                QString("server address port").contains(lowerText));
     cryptoSection_->setVisible(showAll || cryptoSection_->title().toLower().contains(lowerText) ||
                                QString("key crypto obfuscation seed").contains(lowerText));
+    startupSection_->setVisible(showAll || startupSection_->title().toLower().contains(lowerText) ||
+                                QString("startup minimized auto-connect launch windows tray").contains(lowerText));
     tunInterfaceSection_->setVisible(showAll || tunInterfaceSection_->title().toLower().contains(lowerText) ||
                                      QString("tun interface ip netmask mtu").contains(lowerText));
     routingSection_->setVisible(showAll || routingSection_->title().toLower().contains(lowerText) ||
@@ -167,6 +169,11 @@ void SettingsWidget::setupUi() {
   cryptoSection_->setContent(createCryptoSection());
   cryptoSection_->setCollapsedImmediate(true);  // Collapsed by default
   scrollLayout->addWidget(cryptoSection_);
+
+  startupSection_ = new CollapsibleSection("Startup Options", scrollWidget);
+  startupSection_->setContent(createStartupSection());
+  startupSection_->setCollapsedImmediate(true);  // Collapsed by default
+  scrollLayout->addWidget(startupSection_);
 
   tunInterfaceSection_ = new CollapsibleSection("TUN Interface", scrollWidget);
   tunInterfaceSection_->setContent(createTunInterfaceSection());
@@ -399,6 +406,40 @@ QWidget* SettingsWidget::createCryptoSection() {
   auto* infoLabel = new QLabel(
       "The pre-shared key is required for secure handshake authentication.\n"
       "The obfuscation seed enables traffic morphing to evade DPI detection.",
+      group);
+  infoLabel->setWordWrap(true);
+  infoLabel->setStyleSheet(QString("color: %1; font-size: 12px; padding: 12px; "
+                                   "background: rgba(88, 166, 255, 0.08); "
+                                   "border: 1px solid rgba(88, 166, 255, 0.2); "
+                                   "border-radius: 10px;")
+                               .arg(colors::dark::kAccentPrimary));
+  layout->addWidget(infoLabel);
+
+  return group;
+}
+
+QWidget* SettingsWidget::createStartupSection() {
+  auto* group = new QGroupBox();
+  auto* layout = new QVBoxLayout(group);
+  layout->setSpacing(12);
+
+  startMinimizedCheck_ = new QCheckBox("Start minimized to tray", group);
+  startMinimizedCheck_->setToolTip("Launch application minimized to system tray instead of showing main window");
+  layout->addWidget(startMinimizedCheck_);
+
+  autoConnectOnStartupCheck_ = new QCheckBox("Auto-connect on startup", group);
+  autoConnectOnStartupCheck_->setToolTip("Automatically connect to VPN when application starts");
+  layout->addWidget(autoConnectOnStartupCheck_);
+
+  launchOnWindowsStartupCheck_ = new QCheckBox("Launch on Windows startup", group);
+  launchOnWindowsStartupCheck_->setToolTip("Automatically start VEIL VPN when Windows starts (requires administrator privileges)");
+  connect(launchOnWindowsStartupCheck_, &QCheckBox::stateChanged, this, &SettingsWidget::onLaunchOnStartupChanged);
+  layout->addWidget(launchOnWindowsStartupCheck_);
+
+  // Info text
+  auto* infoLabel = new QLabel(
+      "Startup options control how the application behaves when launched.\n"
+      "Note: Windows service auto-starts by default; this controls the GUI application.",
       group);
   infoLabel->setWordWrap(true);
   infoLabel->setStyleSheet(QString("color: %1; font-size: 12px; padding: 12px; "
@@ -957,6 +998,38 @@ void SettingsWidget::onBrowseObfuscationSeed() {
   }
 }
 
+void SettingsWidget::onLaunchOnStartupChanged(int state) {
+#ifdef _WIN32
+  // Update Windows registry to add/remove application from startup
+  QSettings registrySettings(
+      "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+      QSettings::NativeFormat);
+
+  const QString appName = "VEIL VPN Client";
+
+  if (state == Qt::Checked) {
+    // Add to startup - get path to current executable
+    QString appPath = QApplication::applicationFilePath();
+    // Wrap path in quotes to handle spaces
+    QString startupCommand = QString("\"%1\" --minimized").arg(appPath);
+    registrySettings.setValue(appName, startupCommand);
+    qDebug() << "[SettingsWidget] Added to Windows startup:" << startupCommand;
+  } else {
+    // Remove from startup
+    registrySettings.remove(appName);
+    qDebug() << "[SettingsWidget] Removed from Windows startup";
+  }
+
+  registrySettings.sync();
+  hasUnsavedChanges_ = true;
+#else
+  // Not Windows - disable checkbox
+  launchOnWindowsStartupCheck_->setChecked(false);
+  launchOnWindowsStartupCheck_->setEnabled(false);
+  launchOnWindowsStartupCheck_->setToolTip("This feature is only available on Windows");
+#endif
+}
+
 void SettingsWidget::validateSettings() {
   bool allValid = true;
 
@@ -1105,6 +1178,24 @@ void SettingsWidget::loadSettings() {
     appSplitTunnelWidget_->loadFromSettings();
   }
 
+  // Startup Options
+  startMinimizedCheck_->setChecked(settings.value("startup/startMinimized", false).toBool());
+  autoConnectOnStartupCheck_->setChecked(settings.value("startup/autoConnect", false).toBool());
+
+  // Check Windows registry for actual startup state
+#ifdef _WIN32
+  QSettings registrySettings(
+      "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+      QSettings::NativeFormat);
+  bool inStartup = registrySettings.contains("VEIL VPN Client");
+  launchOnWindowsStartupCheck_->setChecked(inStartup);
+  // Update our settings to match registry
+  settings.setValue("startup/launchOnWindowsStartup", inStartup);
+#else
+  launchOnWindowsStartupCheck_->setChecked(false);
+  launchOnWindowsStartupCheck_->setEnabled(false);
+#endif
+
   // Connection
   autoReconnectCheck_->setChecked(settings.value("connection/autoReconnect", true).toBool());
   reconnectIntervalSpinBox_->setValue(settings.value("connection/reconnectInterval", 5).toInt());
@@ -1181,6 +1272,11 @@ void SettingsWidget::saveSettings() {
   settings.setValue("tun/ipAddress", tunIpAddressEdit_->text().trimmed());
   settings.setValue("tun/netmask", tunNetmaskEdit_->text().trimmed());
   settings.setValue("tun/mtu", tunMtuSpinBox_->value());
+
+  // Startup Options
+  settings.setValue("startup/startMinimized", startMinimizedCheck_->isChecked());
+  settings.setValue("startup/autoConnect", autoConnectOnStartupCheck_->isChecked());
+  settings.setValue("startup/launchOnWindowsStartup", launchOnWindowsStartupCheck_->isChecked());
 
   // Routing
   settings.setValue("routing/routeAllTraffic", routeAllTrafficCheck_->isChecked());

@@ -54,6 +54,7 @@ class SettingsWidget : public QWidget {
   void onDpiModeChanged(int index);
   void onBrowseKeyFile();
   void onBrowseObfuscationSeed();
+  void onLaunchOnStartupChanged(int state);
   void validateSettings();
   void onValidationDebounceTimeout();
 
@@ -61,6 +62,7 @@ class SettingsWidget : public QWidget {
   void setupUi();
   QWidget* createServerSection();
   QWidget* createCryptoSection();
+  QWidget* createStartupSection();
   QWidget* createRoutingSection();
   QWidget* createConnectionSection();
   QWidget* createDpiBypassSection();
@@ -95,6 +97,11 @@ class SettingsWidget : public QWidget {
   QPushButton* browseObfuscationSeedButton_;
   QLabel* obfuscationSeedValidationLabel_;
   QLabel* obfuscationSeedValidationIndicator_;
+
+  // Startup Options
+  QCheckBox* startMinimizedCheck_;
+  QCheckBox* autoConnectOnStartupCheck_;
+  QCheckBox* launchOnWindowsStartupCheck_;
 
   // Routing
   QCheckBox* routeAllTrafficCheck_;
@@ -150,6 +157,7 @@ class SettingsWidget : public QWidget {
   // Collapsible sections
   CollapsibleSection* serverSection_;
   CollapsibleSection* cryptoSection_;
+  CollapsibleSection* startupSection_;
   CollapsibleSection* tunInterfaceSection_;
   CollapsibleSection* routingSection_;
   CollapsibleSection* connectionSection_;
