@@ -11,12 +11,19 @@
 #include <QFileInfo>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QApplication>
 
 #include "common/gui/theme.h"
 
 namespace veil::gui {
 
 SettingsWidget::SettingsWidget(QWidget* parent) : QWidget(parent) {
+  // Initialize validation debounce timer
+  validationDebounceTimer_ = new QTimer(this);
+  validationDebounceTimer_->setSingleShot(true);
+  validationDebounceTimer_->setInterval(200);
+  connect(validationDebounceTimer_, &QTimer::timeout, this, &SettingsWidget::onValidationDebounceTimeout);
+
   setupUi();
   loadSettings();
 }
@@ -57,6 +64,21 @@ void SettingsWidget::setupUi() {
   titleLabel->setStyleSheet(QString("font-size: %1px; font-weight: 700; color: #f0f6fc; margin-bottom: 8px;")
                                 .arg(fonts::kFontSizeHeadline));
   mainLayout->addWidget(titleLabel);
+
+  // Validation summary banner
+  validationSummaryBanner_ = new QLabel(this);
+  validationSummaryBanner_->setWordWrap(true);
+  validationSummaryBanner_->setStyleSheet(QString(
+      "color: %1; "
+      "background: rgba(248, 81, 73, 0.08); "
+      "border: 1px solid rgba(248, 81, 73, 0.3); "
+      "border-radius: 10px; "
+      "padding: 12px 16px; "
+      "font-size: 14px; "
+      "font-weight: 500;")
+      .arg(colors::dark::kAccentError));
+  validationSummaryBanner_->hide();
+  mainLayout->addWidget(validationSummaryBanner_);
 
   // === Scrollable content ===
   auto* scrollArea = new QScrollArea(this);
@@ -143,10 +165,18 @@ void SettingsWidget::createServerSection(QWidget* parent) {
   serverLabel->setProperty("textStyle", "secondary");
   layout->addWidget(serverLabel);
 
+  auto* serverRow = new QHBoxLayout();
   serverAddressEdit_ = new QLineEdit(group);
   serverAddressEdit_->setPlaceholderText("vpn.example.com or 192.168.1.1");
   connect(serverAddressEdit_, &QLineEdit::textChanged, this, &SettingsWidget::onServerAddressChanged);
-  layout->addWidget(serverAddressEdit_);
+  serverRow->addWidget(serverAddressEdit_, 1);
+
+  serverValidationIndicator_ = new QLabel(group);
+  serverValidationIndicator_->setFixedSize(24, 24);
+  serverValidationIndicator_->setAlignment(Qt::AlignCenter);
+  serverValidationIndicator_->setStyleSheet("font-size: 18px;");
+  serverRow->addWidget(serverValidationIndicator_);
+  layout->addLayout(serverRow);
 
   serverValidationLabel_ = new QLabel(group);
   serverValidationLabel_->setStyleSheet(QString("color: %1; font-size: 12px;").arg(colors::dark::kAccentError));
@@ -187,10 +217,16 @@ void SettingsWidget::createCryptoSection(QWidget* parent) {
   keyFileEdit_->setPlaceholderText("Path to client.key file");
   keyFileEdit_->setReadOnly(false);
   connect(keyFileEdit_, &QLineEdit::textChanged, [this]() {
-    validateSettings();
+    validationDebounceTimer_->start();
     hasUnsavedChanges_ = true;
   });
   keyFileRow->addWidget(keyFileEdit_, 1);
+
+  keyFileValidationIndicator_ = new QLabel(group);
+  keyFileValidationIndicator_->setFixedSize(24, 24);
+  keyFileValidationIndicator_->setAlignment(Qt::AlignCenter);
+  keyFileValidationIndicator_->setStyleSheet("font-size: 18px;");
+  keyFileRow->addWidget(keyFileValidationIndicator_);
 
   browseKeyFileButton_ = new QPushButton("\U0001F4C2", group);  // Folder icon
   browseKeyFileButton_->setFixedSize(40, 40);
@@ -226,10 +262,16 @@ void SettingsWidget::createCryptoSection(QWidget* parent) {
   obfuscationSeedEdit_ = new QLineEdit(group);
   obfuscationSeedEdit_->setPlaceholderText("Path to obfuscation.seed file (optional)");
   connect(obfuscationSeedEdit_, &QLineEdit::textChanged, [this]() {
-    validateSettings();
+    validationDebounceTimer_->start();
     hasUnsavedChanges_ = true;
   });
   obfuscationRow->addWidget(obfuscationSeedEdit_, 1);
+
+  obfuscationSeedValidationIndicator_ = new QLabel(group);
+  obfuscationSeedValidationIndicator_->setFixedSize(24, 24);
+  obfuscationSeedValidationIndicator_->setAlignment(Qt::AlignCenter);
+  obfuscationSeedValidationIndicator_->setStyleSheet("font-size: 18px;");
+  obfuscationRow->addWidget(obfuscationSeedValidationIndicator_);
 
   browseObfuscationSeedButton_ = new QPushButton("\U0001F4C2", group);  // Folder icon
   browseObfuscationSeedButton_->setFixedSize(40, 40);
@@ -411,14 +453,22 @@ void SettingsWidget::createTunInterfaceSection(QWidget* parent) {
   ipLabel->setProperty("textStyle", "secondary");
   layout->addWidget(ipLabel);
 
+  auto* ipRow = new QHBoxLayout();
   tunIpAddressEdit_ = new QLineEdit(group);
   tunIpAddressEdit_->setPlaceholderText("10.8.0.2");
   tunIpAddressEdit_->setToolTip("IP address assigned to the TUN interface");
   connect(tunIpAddressEdit_, &QLineEdit::textChanged, [this]() {
-    validateSettings();
+    validationDebounceTimer_->start();
     hasUnsavedChanges_ = true;
   });
-  layout->addWidget(tunIpAddressEdit_);
+  ipRow->addWidget(tunIpAddressEdit_, 1);
+
+  tunIpValidationIndicator_ = new QLabel(group);
+  tunIpValidationIndicator_->setFixedSize(24, 24);
+  tunIpValidationIndicator_->setAlignment(Qt::AlignCenter);
+  tunIpValidationIndicator_->setStyleSheet("font-size: 18px;");
+  ipRow->addWidget(tunIpValidationIndicator_);
+  layout->addLayout(ipRow);
 
   tunIpValidationLabel_ = new QLabel(group);
   tunIpValidationLabel_->setStyleSheet(QString("color: %1; font-size: 12px;").arg(colors::dark::kAccentError));
@@ -430,14 +480,22 @@ void SettingsWidget::createTunInterfaceSection(QWidget* parent) {
   netmaskLabel->setProperty("textStyle", "secondary");
   layout->addWidget(netmaskLabel);
 
+  auto* netmaskRow = new QHBoxLayout();
   tunNetmaskEdit_ = new QLineEdit(group);
   tunNetmaskEdit_->setPlaceholderText("255.255.255.0");
   tunNetmaskEdit_->setToolTip("Subnet mask for the TUN interface");
   connect(tunNetmaskEdit_, &QLineEdit::textChanged, [this]() {
-    validateSettings();
+    validationDebounceTimer_->start();
     hasUnsavedChanges_ = true;
   });
-  layout->addWidget(tunNetmaskEdit_);
+  netmaskRow->addWidget(tunNetmaskEdit_, 1);
+
+  tunNetmaskValidationIndicator_ = new QLabel(group);
+  tunNetmaskValidationIndicator_->setFixedSize(24, 24);
+  tunNetmaskValidationIndicator_->setAlignment(Qt::AlignCenter);
+  tunNetmaskValidationIndicator_->setStyleSheet("font-size: 18px;");
+  netmaskRow->addWidget(tunNetmaskValidationIndicator_);
+  layout->addLayout(netmaskRow);
 
   tunNetmaskValidationLabel_ = new QLabel(group);
   tunNetmaskValidationLabel_->setStyleSheet(QString("color: %1; font-size: 12px;").arg(colors::dark::kAccentError));
@@ -501,7 +559,7 @@ void SettingsWidget::createAdvancedSection(QWidget* parent) {
 }
 
 void SettingsWidget::onServerAddressChanged() {
-  validateSettings();
+  validationDebounceTimer_->start();
   hasUnsavedChanges_ = true;
 }
 
@@ -573,65 +631,96 @@ void SettingsWidget::validateSettings() {
 
   // Validate server address
   QString address = serverAddressEdit_->text().trimmed();
-  bool addressValid = address.isEmpty() || isValidHostname(address) || isValidIpAddress(address);
-
-  if (!addressValid && !address.isEmpty()) {
+  if (address.isEmpty()) {
+    setFieldValidationState(serverAddressEdit_, serverValidationIndicator_,
+                            ValidationState::kNeutral);
+    serverValidationLabel_->hide();
+  } else if (isValidHostname(address) || isValidIpAddress(address)) {
+    setFieldValidationState(serverAddressEdit_, serverValidationIndicator_,
+                            ValidationState::kValid);
+    serverValidationLabel_->hide();
+  } else {
+    setFieldValidationState(serverAddressEdit_, serverValidationIndicator_,
+                            ValidationState::kInvalid, "Invalid server address format");
     serverValidationLabel_->setText("Invalid server address format");
     serverValidationLabel_->show();
-    serverAddressEdit_->setStyleSheet(QString("border-color: %1;").arg(colors::dark::kAccentError));
     allValid = false;
-  } else {
-    serverValidationLabel_->hide();
-    serverAddressEdit_->setStyleSheet("");
   }
 
   // Validate key file
   QString keyPath = keyFileEdit_->text().trimmed();
-  if (!keyPath.isEmpty() && !isValidFilePath(keyPath)) {
+  if (keyPath.isEmpty()) {
+    setFieldValidationState(keyFileEdit_, keyFileValidationIndicator_,
+                            ValidationState::kNeutral);
+    keyFileValidationLabel_->hide();
+  } else if (isValidFilePath(keyPath)) {
+    setFieldValidationState(keyFileEdit_, keyFileValidationIndicator_,
+                            ValidationState::kValid);
+    keyFileValidationLabel_->hide();
+  } else {
+    setFieldValidationState(keyFileEdit_, keyFileValidationIndicator_,
+                            ValidationState::kInvalid, "Key file not found");
     keyFileValidationLabel_->setText("Key file not found");
     keyFileValidationLabel_->show();
-    keyFileEdit_->setStyleSheet(QString("border-color: %1;").arg(colors::dark::kAccentError));
     allValid = false;
-  } else {
-    keyFileValidationLabel_->hide();
-    keyFileEdit_->setStyleSheet("");
   }
 
   // Validate obfuscation seed file (optional, but check if path is set)
   QString seedPath = obfuscationSeedEdit_->text().trimmed();
-  if (!seedPath.isEmpty() && !isValidFilePath(seedPath)) {
+  if (seedPath.isEmpty()) {
+    setFieldValidationState(obfuscationSeedEdit_, obfuscationSeedValidationIndicator_,
+                            ValidationState::kNeutral);
+    obfuscationSeedValidationLabel_->hide();
+  } else if (isValidFilePath(seedPath)) {
+    setFieldValidationState(obfuscationSeedEdit_, obfuscationSeedValidationIndicator_,
+                            ValidationState::kValid);
+    obfuscationSeedValidationLabel_->hide();
+  } else {
+    setFieldValidationState(obfuscationSeedEdit_, obfuscationSeedValidationIndicator_,
+                            ValidationState::kInvalid, "Seed file not found");
     obfuscationSeedValidationLabel_->setText("Seed file not found");
     obfuscationSeedValidationLabel_->show();
-    obfuscationSeedEdit_->setStyleSheet(QString("border-color: %1;").arg(colors::dark::kAccentError));
     allValid = false;
-  } else {
-    obfuscationSeedValidationLabel_->hide();
-    obfuscationSeedEdit_->setStyleSheet("");
   }
 
   // Validate TUN IP address
   QString tunIp = tunIpAddressEdit_->text().trimmed();
-  if (!tunIp.isEmpty() && !isValidIpAddress(tunIp)) {
+  if (tunIp.isEmpty()) {
+    setFieldValidationState(tunIpAddressEdit_, tunIpValidationIndicator_,
+                            ValidationState::kNeutral);
+    tunIpValidationLabel_->hide();
+  } else if (isValidIpAddress(tunIp)) {
+    setFieldValidationState(tunIpAddressEdit_, tunIpValidationIndicator_,
+                            ValidationState::kValid);
+    tunIpValidationLabel_->hide();
+  } else {
+    setFieldValidationState(tunIpAddressEdit_, tunIpValidationIndicator_,
+                            ValidationState::kInvalid, "Invalid IP address format");
     tunIpValidationLabel_->setText("Invalid IP address format");
     tunIpValidationLabel_->show();
-    tunIpAddressEdit_->setStyleSheet(QString("border-color: %1;").arg(colors::dark::kAccentError));
     allValid = false;
-  } else {
-    tunIpValidationLabel_->hide();
-    tunIpAddressEdit_->setStyleSheet("");
   }
 
   // Validate TUN netmask
   QString tunNetmask = tunNetmaskEdit_->text().trimmed();
-  if (!tunNetmask.isEmpty() && !isValidIpAddress(tunNetmask)) {
+  if (tunNetmask.isEmpty()) {
+    setFieldValidationState(tunNetmaskEdit_, tunNetmaskValidationIndicator_,
+                            ValidationState::kNeutral);
+    tunNetmaskValidationLabel_->hide();
+  } else if (isValidIpAddress(tunNetmask)) {
+    setFieldValidationState(tunNetmaskEdit_, tunNetmaskValidationIndicator_,
+                            ValidationState::kValid);
+    tunNetmaskValidationLabel_->hide();
+  } else {
+    setFieldValidationState(tunNetmaskEdit_, tunNetmaskValidationIndicator_,
+                            ValidationState::kInvalid, "Invalid netmask format");
     tunNetmaskValidationLabel_->setText("Invalid netmask format");
     tunNetmaskValidationLabel_->show();
-    tunNetmaskEdit_->setStyleSheet(QString("border-color: %1;").arg(colors::dark::kAccentError));
     allValid = false;
-  } else {
-    tunNetmaskValidationLabel_->hide();
-    tunNetmaskEdit_->setStyleSheet("");
   }
+
+  // Update validation summary banner
+  updateValidationSummary();
 
   saveButton_->setEnabled(allValid);
 }
@@ -706,6 +795,19 @@ void SettingsWidget::saveSettings() {
     return;
   }
 
+  // Show loading state
+  saveButton_->setEnabled(false);
+  saveButton_->setText("Saving...");
+  saveButton_->setStyleSheet(QString(R"(
+    QPushButton {
+      background: %1;
+      color: %2;
+    }
+  )").arg(colors::dark::kBackgroundSecondary, colors::dark::kTextSecondary));
+
+  // Process events to update UI immediately
+  QApplication::processEvents();
+
   // Save settings to QSettings
   QSettings settings("VEIL", "VPN Client");
 
@@ -744,7 +846,7 @@ void SettingsWidget::saveSettings() {
   settings.sync();
   hasUnsavedChanges_ = false;
 
-  // Show brief confirmation
+  // Show success confirmation
   saveButton_->setText("Saved!");
   saveButton_->setStyleSheet(QString(R"(
     QPushButton {
@@ -756,6 +858,7 @@ void SettingsWidget::saveSettings() {
   QTimer::singleShot(2000, this, [this]() {
     saveButton_->setText("Save Changes");
     saveButton_->setStyleSheet("");
+    saveButton_->setEnabled(true);
   });
 
   emit settingsSaved();
@@ -775,6 +878,79 @@ QString SettingsWidget::keyFilePath() const {
 
 QString SettingsWidget::obfuscationSeedPath() const {
   return obfuscationSeedEdit_->text().trimmed();
+}
+
+void SettingsWidget::onValidationDebounceTimeout() {
+  validateSettings();
+}
+
+void SettingsWidget::setFieldValidationState(QLineEdit* field, QLabel* indicator,
+                                              ValidationState state, const QString& message) {
+  switch (state) {
+    case ValidationState::kValid:
+      indicator->setText("✓");
+      indicator->setStyleSheet(QString("font-size: 18px; color: %1; font-weight: bold;")
+                               .arg(colors::dark::kAccentSuccess));
+      indicator->setToolTip("Valid");
+      field->setStyleSheet("");
+      break;
+    case ValidationState::kInvalid:
+      indicator->setText("✗");
+      indicator->setStyleSheet(QString("font-size: 18px; color: %1; font-weight: bold;")
+                               .arg(colors::dark::kAccentError));
+      indicator->setToolTip(message.isEmpty() ? "Invalid" : message);
+      field->setStyleSheet(QString("border-color: %1;").arg(colors::dark::kAccentError));
+      break;
+    case ValidationState::kNeutral:
+      indicator->setText("");
+      indicator->setStyleSheet("");
+      indicator->setToolTip("");
+      field->setStyleSheet("");
+      break;
+  }
+}
+
+void SettingsWidget::updateValidationSummary() {
+  QStringList errorFields;
+
+  // Check each field for errors
+  QString address = serverAddressEdit_->text().trimmed();
+  if (!address.isEmpty() && !isValidHostname(address) && !isValidIpAddress(address)) {
+    errorFields.append("Server Address");
+  }
+
+  QString keyPath = keyFileEdit_->text().trimmed();
+  if (!keyPath.isEmpty() && !isValidFilePath(keyPath)) {
+    errorFields.append("Key File");
+  }
+
+  QString seedPath = obfuscationSeedEdit_->text().trimmed();
+  if (!seedPath.isEmpty() && !isValidFilePath(seedPath)) {
+    errorFields.append("Obfuscation Seed");
+  }
+
+  QString tunIp = tunIpAddressEdit_->text().trimmed();
+  if (!tunIp.isEmpty() && !isValidIpAddress(tunIp)) {
+    errorFields.append("TUN IP Address");
+  }
+
+  QString tunNetmask = tunNetmaskEdit_->text().trimmed();
+  if (!tunNetmask.isEmpty() && !isValidIpAddress(tunNetmask)) {
+    errorFields.append("TUN Netmask");
+  }
+
+  // Update banner
+  if (errorFields.isEmpty()) {
+    validationSummaryBanner_->hide();
+  } else {
+    QString message = QString("⚠ %1 field%2 need%3 attention: %4")
+                          .arg(errorFields.size())
+                          .arg(errorFields.size() > 1 ? "s" : "")
+                          .arg(errorFields.size() > 1 ? "" : "s")
+                          .arg(errorFields.join(", "));
+    validationSummaryBanner_->setText(message);
+    validationSummaryBanner_->show();
+  }
 }
 
 }  // namespace veil::gui
