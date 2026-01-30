@@ -13,6 +13,7 @@
 #include <memory>
 
 #include "update_checker.h"
+#include "common/gui/error_message.h"
 #include "common/gui/theme.h"
 
 namespace veil::gui {
@@ -20,6 +21,7 @@ namespace veil::gui {
 class ConnectionWidget;
 class SettingsWidget;
 class DiagnosticsWidget;
+class StatisticsWidget;
 class IpcClientManager;
 class SetupWizard;
 class ServerListWidget;
@@ -61,6 +63,9 @@ class MainWindow : public QMainWindow {
   /// Update the system tray icon based on connection state
   void updateTrayIcon(TrayConnectionState state);
 
+  /// Show error with system tray notification for critical errors
+  void showError(const ErrorMessage& error, bool showTrayNotification = false);
+
   /// Apply the specified theme to the application
   void applyTheme(Theme theme);
 
@@ -72,6 +77,7 @@ class MainWindow : public QMainWindow {
   void showConnectionView();
   void showSettingsView();
   void showDiagnosticsView();
+  void showStatisticsView();
   void showServerListView();
   void showAboutDialog();
   void onTrayIconActivated(QSystemTrayIcon::ActivationReason reason);
@@ -110,6 +116,7 @@ class MainWindow : public QMainWindow {
   SettingsWidget* settingsWidget_;
   DiagnosticsWidget* diagnosticsWidget_;
   SetupWizard* setupWizard_;
+  StatisticsWidget* statisticsWidget_;
   ServerListWidget* serverListWidget_;
   std::unique_ptr<IpcClientManager> ipcManager_;
 
@@ -123,6 +130,10 @@ class MainWindow : public QMainWindow {
 
   // Update checker
   std::unique_ptr<UpdateChecker> updateChecker_;
+
+  // Accumulated session bytes for statistics tracking
+  uint64_t lastTotalTxBytes_{0};
+  uint64_t lastTotalRxBytes_{0};
 
   // Current theme
   Theme currentTheme_{Theme::kDark};

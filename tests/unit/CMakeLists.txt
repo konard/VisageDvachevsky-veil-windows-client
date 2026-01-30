@@ -63,6 +63,7 @@ add_executable(veil_unit_tests
   spsc_queue_tests.cpp
   thread_pool_tests.cpp
   packet_pool_tests.cpp
+  error_message_tests.cpp
   ${VEIL_PLATFORM_TEST_SOURCES}
 )
 
@@ -76,7 +77,7 @@ veil_set_warnings(veil_unit_tests)
 include(GoogleTest)
 gtest_discover_tests(veil_unit_tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
 
-# GUI tests (requires Qt6)
+# GUI widget tests (requires Qt6)
 find_package(Qt6 COMPONENTS Core Widgets Network QUIET)
 if(Qt6_FOUND)
   set(CMAKE_AUTOMOC ON)
@@ -85,9 +86,13 @@ if(Qt6_FOUND)
     setup_wizard_tests.cpp
     ${CMAKE_SOURCE_DIR}/src/gui-client/setup_wizard.cpp
     ${CMAKE_SOURCE_DIR}/src/gui-client/setup_wizard.h
+    statistics_widget_tests.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui-client/statistics_widget.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui-client/statistics_widget.h
   )
 
   target_include_directories(veil_gui_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/gui-client
     ${CMAKE_SOURCE_DIR}/src
   )
 
@@ -101,7 +106,13 @@ if(Qt6_FOUND)
 
   veil_set_warnings(veil_gui_tests)
 
-  gtest_discover_tests(veil_gui_tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0\;QT_QPA_PLATFORM=offscreen")
+  # QT_QPA_PLATFORM=offscreen is needed for headless CI servers.
+  # DISCOVERY_MODE PRE_TEST defers test discovery to ctest run time,
+  # where the ENVIRONMENT property is honored.
+  gtest_discover_tests(veil_gui_tests
+    PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0;QT_QPA_PLATFORM=offscreen"
+    DISCOVERY_MODE PRE_TEST
+  )
 else()
-  message(STATUS "Qt6 not found, GUI tests will not be built")
+  message(STATUS "Qt6 not found, GUI widget tests will not be built")
 endif()

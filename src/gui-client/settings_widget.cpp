@@ -59,11 +59,55 @@ void SettingsWidget::setupUi() {
   headerLayout->addStretch();
   mainLayout->addLayout(headerLayout);
 
-  // Title
+  // Title and Search
+  auto* titleRow = new QHBoxLayout();
   auto* titleLabel = new QLabel("Settings", this);
   titleLabel->setStyleSheet(QString("font-size: %1px; font-weight: 700; color: #f0f6fc; margin-bottom: 8px;")
                                 .arg(fonts::kFontSizeHeadline));
-  mainLayout->addWidget(titleLabel);
+  titleRow->addWidget(titleLabel);
+
+  titleRow->addStretch();
+
+  // Search/filter box
+  searchEdit_ = new QLineEdit(this);
+  searchEdit_->setPlaceholderText("🔍 Search settings...");
+  searchEdit_->setFixedWidth(250);
+  searchEdit_->setStyleSheet(R"(
+    QLineEdit {
+      background-color: #161b22;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 10px;
+      padding: 10px 16px;
+      color: #f0f6fc;
+      font-size: 14px;
+    }
+    QLineEdit:focus {
+      border-color: #58a6ff;
+    }
+  )");
+  connect(searchEdit_, &QLineEdit::textChanged, [this](const QString& text) {
+    QString lowerText = text.toLower();
+    // Filter sections based on search text
+    bool showAll = lowerText.isEmpty();
+
+    serverSection_->setVisible(showAll || serverSection_->title().toLower().contains(lowerText) ||
+                               QString("server address port").contains(lowerText));
+    cryptoSection_->setVisible(showAll || cryptoSection_->title().toLower().contains(lowerText) ||
+                               QString("key crypto obfuscation seed").contains(lowerText));
+    tunInterfaceSection_->setVisible(showAll || tunInterfaceSection_->title().toLower().contains(lowerText) ||
+                                     QString("tun interface ip netmask mtu").contains(lowerText));
+    routingSection_->setVisible(showAll || routingSection_->title().toLower().contains(lowerText) ||
+                                QString("routing tunnel split traffic").contains(lowerText));
+    connectionSection_->setVisible(showAll || connectionSection_->title().toLower().contains(lowerText) ||
+                                   QString("connection reconnect").contains(lowerText));
+    dpiBypassSection_->setVisible(showAll || dpiBypassSection_->title().toLower().contains(lowerText) ||
+                                  QString("dpi bypass obfuscation mode").contains(lowerText));
+    advancedSection_->setVisible(showAll || advancedSection_->title().toLower().contains(lowerText) ||
+                                 QString("advanced developer logging").contains(lowerText));
+  });
+  titleRow->addWidget(searchEdit_);
+
+  mainLayout->addLayout(titleRow);
 
   // Validation summary banner
   validationSummaryBanner_ = new QLabel(this);
@@ -80,6 +124,23 @@ void SettingsWidget::setupUi() {
   validationSummaryBanner_->hide();
   mainLayout->addWidget(validationSummaryBanner_);
 
+  // Advanced mode toggle
+  showAdvancedCheck_ = new QCheckBox("Show Advanced Settings", this);
+  showAdvancedCheck_->setChecked(true);  // Show all by default initially
+  showAdvancedCheck_->setStyleSheet(R"(
+    QCheckBox {
+      color: #8b949e;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 8px 0;
+    }
+    QCheckBox:hover {
+      color: #f0f6fc;
+    }
+  )");
+  connect(showAdvancedCheck_, &QCheckBox::toggled, this, &SettingsWidget::onAdvancedModeToggled);
+  mainLayout->addWidget(showAdvancedCheck_);
+
   // === Scrollable content ===
   auto* scrollArea = new QScrollArea(this);
   scrollArea->setWidgetResizable(true);
@@ -92,14 +153,41 @@ void SettingsWidget::setupUi() {
   scrollLayout->setSpacing(16);
   scrollLayout->setContentsMargins(0, 0, 12, 0);  // Right margin for scrollbar
 
-  // Create sections
-  createServerSection(scrollWidget);
-  createCryptoSection(scrollWidget);
-  createTunInterfaceSection(scrollWidget);
-  createRoutingSection(scrollWidget);
-  createConnectionSection(scrollWidget);
-  createDpiBypassSection(scrollWidget);
-  createAdvancedSection(scrollWidget);
+  // Create collapsible sections
+  serverSection_ = new CollapsibleSection("Server Configuration", scrollWidget);
+  serverSection_->setContent(createServerSection());
+  serverSection_->setCollapsedImmediate(false);  // Expanded by default
+  scrollLayout->addWidget(serverSection_);
+
+  cryptoSection_ = new CollapsibleSection("Cryptographic Settings", scrollWidget);
+  cryptoSection_->setContent(createCryptoSection());
+  cryptoSection_->setCollapsedImmediate(true);  // Collapsed by default
+  scrollLayout->addWidget(cryptoSection_);
+
+  tunInterfaceSection_ = new CollapsibleSection("TUN Interface", scrollWidget);
+  tunInterfaceSection_->setContent(createTunInterfaceSection());
+  tunInterfaceSection_->setCollapsedImmediate(true);  // Collapsed by default (advanced)
+  scrollLayout->addWidget(tunInterfaceSection_);
+
+  routingSection_ = new CollapsibleSection("Routing", scrollWidget);
+  routingSection_->setContent(createRoutingSection());
+  routingSection_->setCollapsedImmediate(true);  // Collapsed by default
+  scrollLayout->addWidget(routingSection_);
+
+  connectionSection_ = new CollapsibleSection("Connection", scrollWidget);
+  connectionSection_->setContent(createConnectionSection());
+  connectionSection_->setCollapsedImmediate(true);  // Collapsed by default
+  scrollLayout->addWidget(connectionSection_);
+
+  dpiBypassSection_ = new CollapsibleSection("DPI Bypass Mode", scrollWidget);
+  dpiBypassSection_->setContent(createDpiBypassSection());
+  dpiBypassSection_->setCollapsedImmediate(true);  // Collapsed by default (advanced)
+  scrollLayout->addWidget(dpiBypassSection_);
+
+  advancedSection_ = new CollapsibleSection("Advanced", scrollWidget);
+  advancedSection_->setContent(createAdvancedSection());
+  advancedSection_->setCollapsedImmediate(true);  // Collapsed by default (advanced)
+  scrollLayout->addWidget(advancedSection_);
 
   scrollLayout->addStretch();
   scrollArea->setWidget(scrollWidget);
@@ -155,8 +243,8 @@ void SettingsWidget::setupUi() {
   mainLayout->addLayout(footerLayout);
 }
 
-void SettingsWidget::createServerSection(QWidget* parent) {
-  auto* group = new QGroupBox("Server Configuration", parent);
+QWidget* SettingsWidget::createServerSection() {
+  auto* group = new QGroupBox();
   auto* layout = new QVBoxLayout(group);
   layout->setSpacing(12);
 
@@ -199,11 +287,11 @@ void SettingsWidget::createServerSection(QWidget* parent) {
 
   layout->addLayout(portRow);
 
-  parent->layout()->addWidget(group);
+  return group;
 }
 
-void SettingsWidget::createCryptoSection(QWidget* parent) {
-  auto* group = new QGroupBox("Cryptographic Settings", parent);
+QWidget* SettingsWidget::createCryptoSection() {
+  auto* group = new QGroupBox();
   auto* layout = new QVBoxLayout(group);
   layout->setSpacing(12);
 
@@ -311,11 +399,11 @@ void SettingsWidget::createCryptoSection(QWidget* parent) {
                                .arg(colors::dark::kAccentPrimary));
   layout->addWidget(infoLabel);
 
-  parent->layout()->addWidget(group);
+  return group;
 }
 
-void SettingsWidget::createRoutingSection(QWidget* parent) {
-  auto* group = new QGroupBox("Routing", parent);
+QWidget* SettingsWidget::createRoutingSection() {
+  auto* group = new QGroupBox();
   auto* layout = new QVBoxLayout(group);
   layout->setSpacing(12);
 
@@ -350,11 +438,11 @@ void SettingsWidget::createRoutingSection(QWidget* parent) {
     }
   });
 
-  parent->layout()->addWidget(group);
+  return group;
 }
 
-void SettingsWidget::createConnectionSection(QWidget* parent) {
-  auto* group = new QGroupBox("Connection", parent);
+QWidget* SettingsWidget::createConnectionSection() {
+  auto* group = new QGroupBox();
   auto* layout = new QVBoxLayout(group);
   layout->setSpacing(12);
 
@@ -394,11 +482,11 @@ void SettingsWidget::createConnectionSection(QWidget* parent) {
 
   layout->addLayout(attemptsRow);
 
-  parent->layout()->addWidget(group);
+  return group;
 }
 
-void SettingsWidget::createDpiBypassSection(QWidget* parent) {
-  auto* group = new QGroupBox("DPI Bypass Mode", parent);
+QWidget* SettingsWidget::createDpiBypassSection() {
+  auto* group = new QGroupBox();
   auto* layout = new QVBoxLayout(group);
   layout->setSpacing(12);
 
@@ -427,11 +515,11 @@ void SettingsWidget::createDpiBypassSection(QWidget* parent) {
   // Set initial description
   onDpiModeChanged(0);
 
-  parent->layout()->addWidget(group);
+  return group;
 }
 
-void SettingsWidget::createTunInterfaceSection(QWidget* parent) {
-  auto* group = new QGroupBox("TUN Interface", parent);
+QWidget* SettingsWidget::createTunInterfaceSection() {
+  auto* group = new QGroupBox();
   auto* layout = new QVBoxLayout(group);
   layout->setSpacing(12);
 
@@ -535,11 +623,11 @@ void SettingsWidget::createTunInterfaceSection(QWidget* parent) {
                                .arg(colors::dark::kAccentPrimary));
   layout->addWidget(infoLabel);
 
-  parent->layout()->addWidget(group);
+  return group;
 }
 
-void SettingsWidget::createAdvancedSection(QWidget* parent) {
-  auto* group = new QGroupBox("Advanced", parent);
+QWidget* SettingsWidget::createAdvancedSection() {
+  auto* group = new QGroupBox();
   auto* layout = new QVBoxLayout(group);
   layout->setSpacing(12);
 
@@ -588,7 +676,7 @@ void SettingsWidget::createAdvancedSection(QWidget* parent) {
   });
   layout->addWidget(resetWizardButton);
 
-  parent->layout()->addWidget(group);
+  return group;
 }
 
 void SettingsWidget::onServerAddressChanged() {
@@ -995,6 +1083,14 @@ void SettingsWidget::updateValidationSummary() {
     validationSummaryBanner_->setText(message);
     validationSummaryBanner_->show();
   }
+}
+
+void SettingsWidget::onAdvancedModeToggled(bool showAdvanced) {
+  // Show/hide advanced sections based on toggle
+  // Advanced sections: TUN Interface, DPI Bypass, Advanced
+  tunInterfaceSection_->setVisible(showAdvanced);
+  dpiBypassSection_->setVisible(showAdvanced);
+  advancedSection_->setVisible(showAdvanced);
 }
 
 }  // namespace veil::gui
