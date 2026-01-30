@@ -127,7 +127,7 @@ MainWindow::MainWindow(QWidget* parent)
   setupStatusBar();
   setupSystemTray();
   setupUpdateChecker();
-  applyDarkTheme();
+  loadThemePreference();
   qDebug() << "MainWindow: GUI components initialized";
 
   // Attempt to connect to daemon
@@ -239,6 +239,10 @@ void MainWindow::setupUi() {
   // Update connection widget when settings are saved
   connect(settingsWidget_, &SettingsWidget::settingsSaved,
           connectionWidget_, &ConnectionWidget::loadServerSettings);
+
+  // Apply theme when changed in settings
+  connect(settingsWidget_, &SettingsWidget::themeChanged,
+          this, &MainWindow::applyTheme);
 }
 
 // Helper function to build ConnectionConfig from QSettings
@@ -782,6 +786,46 @@ void MainWindow::applyDarkTheme() {
 
   // Append to existing stylesheet
   setStyleSheet(styleSheet() + windowStyle);
+}
+
+void MainWindow::loadThemePreference() {
+  QSettings settings("VEIL", "VPN Client");
+  int themeValue = settings.value("ui/theme", static_cast<int>(Theme::kDark)).toInt();
+
+  // Validate theme value
+  if (themeValue < 0 || themeValue > 2) {
+    themeValue = static_cast<int>(Theme::kDark);
+  }
+
+  currentTheme_ = static_cast<Theme>(themeValue);
+  applyTheme(currentTheme_);
+}
+
+void MainWindow::applyTheme(Theme theme) {
+  currentTheme_ = theme;
+
+  // Get the stylesheet for the theme
+  QString stylesheet = getThemeStylesheet(theme);
+
+  // Additional window-specific styles based on theme
+  Theme effectiveTheme = resolveTheme(theme);
+  QString backgroundColor = (effectiveTheme == Theme::kDark) ? "#0d1117" : "#f8f9fa";
+
+  QString windowStyle = QString(R"(
+    QMainWindow {
+      background-color: %1;
+    }
+    QStackedWidget {
+      background-color: %1;
+    }
+  )").arg(backgroundColor);
+
+  // Apply the combined stylesheet
+  setStyleSheet(stylesheet + windowStyle);
+
+  qDebug() << "MainWindow: Applied theme:"
+           << (effectiveTheme == Theme::kDark ? "Dark" : "Light")
+           << (theme == Theme::kSystem ? "(from system)" : "");
 }
 
 void MainWindow::showConnectionView() {

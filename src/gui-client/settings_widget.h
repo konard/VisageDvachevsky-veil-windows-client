@@ -11,6 +11,7 @@
 #include <QTimer>
 
 #include "collapsible_section.h"
+#include "common/gui/theme.h"
 
 namespace veil::gui {
 
@@ -31,6 +32,7 @@ class SettingsWidget : public QWidget {
  signals:
   void backRequested();
   void settingsSaved();
+  void themeChanged(Theme theme);
 
  public slots:
   /// Load settings from config file
@@ -120,6 +122,7 @@ class SettingsWidget : public QWidget {
   QCheckBox* obfuscationCheck_;
   QCheckBox* verboseLoggingCheck_;
   QCheckBox* developerModeCheck_;
+  QComboBox* themeCombo_;
 
   // Buttons
   QPushButton* saveButton_;
