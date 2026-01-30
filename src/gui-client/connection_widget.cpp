@@ -12,6 +12,7 @@
 #include <QShortcut>
 
 #include "common/gui/theme.h"
+#include "server_selector_widget.h"
 
 namespace veil::gui {
 
@@ -285,6 +286,15 @@ void ConnectionWidget::setupUi() {
   statusContainerLayout->addWidget(errorLabel_);
 
   mainLayout->addWidget(statusContainer, 1);
+
+  // === Server Selector ===
+  serverSelector_ = new ServerSelectorWidget(this);
+  connect(serverSelector_, &ServerSelectorWidget::manageServersRequested,
+          this, &ConnectionWidget::serversRequested);
+  connect(serverSelector_, &ServerSelectorWidget::serverChanged,
+          this, &ConnectionWidget::loadServerSettings);
+  mainLayout->addWidget(serverSelector_);
+  mainLayout->addSpacing(spacing::kPaddingMedium);
 
   // === Connect Button (Large, prominent) ===
   connectButton_ = new QPushButton("Connect", this);
