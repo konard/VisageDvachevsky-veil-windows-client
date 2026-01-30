@@ -59,6 +59,13 @@ bool ServiceManager::install(const std::string& executable_path,
   desc.lpDescription = const_cast<char*>(kServiceDescription);
   ChangeServiceConfig2A(service, SERVICE_CONFIG_DESCRIPTION, &desc);
 
+  // Configure delayed auto-start to reduce boot time impact
+  // The service will start shortly after other auto-start services
+  SERVICE_DELAYED_AUTO_START_INFO delayed_info = {};
+  delayed_info.fDelayedAutostart = TRUE;
+  ChangeServiceConfig2A(service, SERVICE_CONFIG_DELAYED_AUTO_START_INFO,
+                        &delayed_info);
+
   // Configure service recovery options (restart on failure)
   SC_ACTION actions[3] = {
       {SC_ACTION_RESTART, 5000},   // Restart after 5 seconds

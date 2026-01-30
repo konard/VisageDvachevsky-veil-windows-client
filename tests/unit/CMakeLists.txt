@@ -13,6 +13,7 @@ if(WIN32)
     transport_session_tests.cpp
     session_migration_tests.cpp
     console_handler_tests.cpp
+    service_manager_tests.cpp
   )
 else()
   set(VEIL_PLATFORM_TEST_SOURCES
@@ -30,6 +31,7 @@ else()
     daemon_tests.cpp
     session_table_tests.cpp
     session_migration_tests.cpp
+    service_manager_tests.cpp
   )
 endif()
 
