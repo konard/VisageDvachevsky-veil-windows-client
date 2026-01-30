@@ -208,7 +208,10 @@ std::optional<TicketPayload> SessionTicketManager::validate_ticket(
 
 bool SessionTicketManager::check_and_mark_nonce(
     std::span<const std::uint8_t, kAntiReplayNonceSize> nonce) {
-  // FNV-1a hash the nonce for compact storage
+  // FNV-1a hash the nonce for compact storage.
+  // Trade-off: with ~4096 active nonces, collision probability is ~2^-49 (negligible).
+  // A hash collision would cause a false positive (legitimate request falsely rejected as replay),
+  // which is acceptable for this use case — the client simply falls back to a 1-RTT handshake.
   std::uint64_t nonce_hash = 14695981039346656037ULL;
   for (std::size_t i = 0; i < kAntiReplayNonceSize; ++i) {
     nonce_hash ^= static_cast<std::uint64_t>(nonce[i]);

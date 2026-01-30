@@ -743,6 +743,7 @@ std::vector<std::uint8_t> ZeroRttInitiator::create_zero_rtt_init() {
 
   // Build HMAC payload for 0-RTT INIT
   // Includes: magic, version, type, timestamp, ephemeral_pub, anti_replay_nonce
+  // Note: ticket_data is not included — it is separately authenticated via AEAD (server-only key)
   std::vector<std::uint8_t> hmac_payload;
   hmac_payload.reserve(kMagic.size() + 1 + 1 + 8 + ephemeral_.public_key.size() + kAntiReplayNonceSize);
   hmac_payload.insert(hmac_payload.end(), kMagic.begin(), kMagic.end());
@@ -1173,7 +1174,7 @@ std::optional<ZeroRttResponder::Result> ZeroRttResponder::handle_zero_rtt_init(
       .keys = session_keys,
       .initiator_ephemeral = init_pub,
       .responder_ephemeral = {},  // No responder ephemeral in 0-RTT
-      .client_id = {},
+      .client_id = {},  // Note: ticket stores client_id_hash (FNV-1a), not the original string
   };
 
   return Result{

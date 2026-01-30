@@ -237,13 +237,11 @@ class ZeroRttInitiator {
   /// SECURITY: Destructor clears all sensitive key material.
   ~ZeroRttInitiator();
 
-  // Non-copyable.
+  // Non-copyable, non-movable (destructor zeroes sensitive key material).
   ZeroRttInitiator(const ZeroRttInitiator&) = delete;
   ZeroRttInitiator& operator=(const ZeroRttInitiator&) = delete;
-
-  // Movable.
-  ZeroRttInitiator(ZeroRttInitiator&&) = default;
-  ZeroRttInitiator& operator=(ZeroRttInitiator&&) = default;
+  ZeroRttInitiator(ZeroRttInitiator&&) = delete;
+  ZeroRttInitiator& operator=(ZeroRttInitiator&&) = delete;
 
   /// Create a 0-RTT INIT message containing the session ticket.
   /// @return Encrypted 0-RTT INIT packet.
