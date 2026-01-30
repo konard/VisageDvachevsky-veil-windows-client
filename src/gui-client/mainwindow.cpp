@@ -32,6 +32,7 @@
 #include "settings_widget.h"
 #include "statistics_widget.h"
 #include "update_checker.h"
+#include "server_list_widget.h"
 
 #ifdef _WIN32
 #include <chrono>
@@ -116,6 +117,7 @@ MainWindow::MainWindow(QWidget* parent)
       settingsWidget_(new SettingsWidget(this)),
       diagnosticsWidget_(new DiagnosticsWidget(this)),
       statisticsWidget_(new StatisticsWidget(this)),
+      serverListWidget_(new ServerListWidget(this)),
       ipcManager_(std::make_unique<IpcClientManager>(this)),
       trayIcon_(nullptr),
       trayMenu_(nullptr),
@@ -129,7 +131,7 @@ MainWindow::MainWindow(QWidget* parent)
   setupStatusBar();
   setupSystemTray();
   setupUpdateChecker();
-  applyDarkTheme();
+  loadThemePreference();
   qDebug() << "MainWindow: GUI components initialized";
 
   // Attempt to connect to daemon
@@ -227,6 +229,7 @@ void MainWindow::setupUi() {
   stackedWidget_->addWidget(settingsWidget_);
   stackedWidget_->addWidget(diagnosticsWidget_);
   stackedWidget_->addWidget(statisticsWidget_);
+  stackedWidget_->addWidget(serverListWidget_);
 
   // Set central widget
   setCentralWidget(stackedWidget_);
@@ -234,16 +237,24 @@ void MainWindow::setupUi() {
   // Connect signals
   connect(connectionWidget_, &ConnectionWidget::settingsRequested,
           this, &MainWindow::showSettingsView);
+  connect(connectionWidget_, &ConnectionWidget::serversRequested,
+          this, &MainWindow::showServerListView);
   connect(settingsWidget_, &SettingsWidget::backRequested,
           this, &MainWindow::showConnectionView);
   connect(diagnosticsWidget_, &DiagnosticsWidget::backRequested,
           this, &MainWindow::showConnectionView);
   connect(statisticsWidget_, &StatisticsWidget::backRequested,
           this, &MainWindow::showConnectionView);
+  connect(serverListWidget_, &ServerListWidget::backRequested,
+          this, &MainWindow::showConnectionView);
 
   // Update connection widget when settings are saved
   connect(settingsWidget_, &SettingsWidget::settingsSaved,
           connectionWidget_, &ConnectionWidget::loadServerSettings);
+
+  // Apply theme when changed in settings
+  connect(settingsWidget_, &SettingsWidget::themeChanged,
+          this, &MainWindow::applyTheme);
 }
 
 // Helper function to build ConnectionConfig from QSettings
@@ -707,6 +718,10 @@ void MainWindow::setupMenuBar() {
   settingsViewAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_2));
   connect(settingsViewAction, &QAction::triggered, this, &MainWindow::showSettingsView);
 
+  auto* serversAction = viewMenu->addAction(tr("S&ervers"));
+  serversAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_E));
+  connect(serversAction, &QAction::triggered, this, &MainWindow::showServerListView);
+
   auto* diagnosticsAction = viewMenu->addAction(tr("&Diagnostics"));
   diagnosticsAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_3));
   connect(diagnosticsAction, &QAction::triggered, this, &MainWindow::showDiagnosticsView);
@@ -813,6 +828,46 @@ void MainWindow::applyDarkTheme() {
   setStyleSheet(styleSheet() + windowStyle);
 }
 
+void MainWindow::loadThemePreference() {
+  QSettings settings("VEIL", "VPN Client");
+  int themeValue = settings.value("ui/theme", static_cast<int>(Theme::kDark)).toInt();
+
+  // Validate theme value
+  if (themeValue < 0 || themeValue > 2) {
+    themeValue = static_cast<int>(Theme::kDark);
+  }
+
+  currentTheme_ = static_cast<Theme>(themeValue);
+  applyTheme(currentTheme_);
+}
+
+void MainWindow::applyTheme(Theme theme) {
+  currentTheme_ = theme;
+
+  // Get the stylesheet for the theme
+  QString stylesheet = getThemeStylesheet(theme);
+
+  // Additional window-specific styles based on theme
+  Theme effectiveTheme = resolveTheme(theme);
+  QString backgroundColor = (effectiveTheme == Theme::kDark) ? "#0d1117" : "#f8f9fa";
+
+  QString windowStyle = QString(R"(
+    QMainWindow {
+      background-color: %1;
+    }
+    QStackedWidget {
+      background-color: %1;
+    }
+  )").arg(backgroundColor);
+
+  // Apply the combined stylesheet
+  setStyleSheet(stylesheet + windowStyle);
+
+  qDebug() << "MainWindow: Applied theme:"
+           << (effectiveTheme == Theme::kDark ? "Dark" : "Light")
+           << (theme == Theme::kSystem ? "(from system)" : "");
+}
+
 void MainWindow::showConnectionView() {
   stackedWidget_->setCurrentWidgetAnimated(stackedWidget_->indexOf(connectionWidget_));
   statusBar()->showMessage(tr("Connection"));
@@ -831,6 +886,11 @@ void MainWindow::showDiagnosticsView() {
 void MainWindow::showStatisticsView() {
   stackedWidget_->setCurrentWidgetAnimated(stackedWidget_->indexOf(statisticsWidget_));
   statusBar()->showMessage(tr("Statistics"));
+}
+
+void MainWindow::showServerListView() {
+  stackedWidget_->setCurrentWidgetAnimated(stackedWidget_->indexOf(serverListWidget_));
+  statusBar()->showMessage(tr("Server Management"));
 }
 
 void MainWindow::showAboutDialog() {

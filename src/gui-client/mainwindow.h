@@ -13,6 +13,7 @@
 #include <memory>
 
 #include "update_checker.h"
+#include "common/gui/theme.h"
 
 namespace veil::gui {
 
@@ -21,6 +22,7 @@ class SettingsWidget;
 class DiagnosticsWidget;
 class StatisticsWidget;
 class IpcClientManager;
+class ServerListWidget;
 
 /// Connection state for system tray icon updates
 enum class TrayConnectionState {
@@ -59,6 +61,9 @@ class MainWindow : public QMainWindow {
   /// Update the system tray icon based on connection state
   void updateTrayIcon(TrayConnectionState state);
 
+  /// Apply the specified theme to the application
+  void applyTheme(Theme theme);
+
  protected:
   /// Handle window close event - minimize to tray if enabled
   void closeEvent(QCloseEvent* event) override;
@@ -68,6 +73,7 @@ class MainWindow : public QMainWindow {
   void showSettingsView();
   void showDiagnosticsView();
   void showStatisticsView();
+  void showServerListView();
   void showAboutDialog();
   void onTrayIconActivated(QSystemTrayIcon::ActivationReason reason);
   void onQuickConnect();
@@ -85,6 +91,7 @@ class MainWindow : public QMainWindow {
   void setupSystemTray();
   void setupUpdateChecker();
   void applyDarkTheme();
+  void loadThemePreference();
 
 #ifdef _WIN32
   /// Ensure the Windows service is running, starting it if necessary
@@ -102,6 +109,7 @@ class MainWindow : public QMainWindow {
   SettingsWidget* settingsWidget_;
   DiagnosticsWidget* diagnosticsWidget_;
   StatisticsWidget* statisticsWidget_;
+  ServerListWidget* serverListWidget_;
   std::unique_ptr<IpcClientManager> ipcManager_;
 
   // System tray
@@ -118,6 +126,9 @@ class MainWindow : public QMainWindow {
   // Accumulated session bytes for statistics tracking
   uint64_t lastTotalTxBytes_{0};
   uint64_t lastTotalRxBytes_{0};
+
+  // Current theme
+  Theme currentTheme_{Theme::kDark};
 };
 
 }  // namespace veil::gui

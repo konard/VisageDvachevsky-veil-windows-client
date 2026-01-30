@@ -555,6 +555,25 @@ void SettingsWidget::createAdvancedSection(QWidget* parent) {
   developerModeCheck_->setToolTip("Enable diagnostics screen with protocol metrics");
   layout->addWidget(developerModeCheck_);
 
+  // Theme selector
+  auto* themeLayout = new QHBoxLayout();
+  auto* themeLabel = new QLabel("Theme:", group);
+  themeCombo_ = new QComboBox(group);
+  themeCombo_->addItem("Dark", static_cast<int>(Theme::kDark));
+  themeCombo_->addItem("Light", static_cast<int>(Theme::kLight));
+  themeCombo_->addItem("System", static_cast<int>(Theme::kSystem));
+  themeCombo_->setToolTip("Choose application theme (System follows Windows dark mode setting)");
+  connect(themeCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+          this, [this]() {
+            hasUnsavedChanges_ = true;
+            // Apply theme immediately for preview
+            Theme selectedTheme = static_cast<Theme>(themeCombo_->currentData().toInt());
+            emit themeChanged(selectedTheme);
+          });
+  themeLayout->addWidget(themeLabel);
+  themeLayout->addWidget(themeCombo_, 1);
+  layout->addLayout(themeLayout);
+
   parent->layout()->addWidget(group);
 }
 
@@ -781,6 +800,14 @@ void SettingsWidget::loadSettings() {
   verboseLoggingCheck_->setChecked(settings.value("advanced/verboseLogging", false).toBool());
   developerModeCheck_->setChecked(settings.value("advanced/developerMode", false).toBool());
 
+  // Theme
+  int themeValue = settings.value("ui/theme", static_cast<int>(Theme::kDark)).toInt();
+  // Find and set the combo box index for the theme
+  int themeIndex = themeCombo_->findData(themeValue);
+  if (themeIndex >= 0) {
+    themeCombo_->setCurrentIndex(themeIndex);
+  }
+
   hasUnsavedChanges_ = false;
   validateSettings();
 }
@@ -842,6 +869,9 @@ void SettingsWidget::saveSettings() {
   settings.setValue("advanced/obfuscation", obfuscationCheck_->isChecked());
   settings.setValue("advanced/verboseLogging", verboseLoggingCheck_->isChecked());
   settings.setValue("advanced/developerMode", developerModeCheck_->isChecked());
+
+  // Theme
+  settings.setValue("ui/theme", themeCombo_->currentData().toInt());
 
   settings.sync();
   hasUnsavedChanges_ = false;
