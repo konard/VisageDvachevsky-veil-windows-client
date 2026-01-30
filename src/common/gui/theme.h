@@ -30,7 +30,7 @@ inline qreal getDpiScaleFactor() {
 
 /// Scale a value based on DPI
 inline int scaleDpi(int baseValue) {
-  return std::lround(baseValue * getDpiScaleFactor());
+  return static_cast<int>(std::lround(baseValue * getDpiScaleFactor()));
 }
 
 /// Color palette as defined in client_ui_design.md
