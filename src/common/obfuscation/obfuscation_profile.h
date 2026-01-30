@@ -166,6 +166,13 @@ struct ObfuscationProfile {
 
   // Client-to-server direction (for WebSocket masking).
   bool is_client_to_server{true};
+
+  // Enable HTTP Upgrade handshake emulation for WebSocket wrapper.
+  // When enabled, the first packets will contain HTTP Upgrade request/response
+  // to make traffic appear as legitimate WebSocket connection establishment.
+  // This improves DPI evasion against systems that expect full WebSocket handshake.
+  // Overhead: 2 extra packets per connection (~1KB total).
+  bool enable_http_handshake_emulation{false};
 };
 
 // Obfuscation metrics for DPI/ML analysis.
