@@ -23,6 +23,7 @@ class SettingsWidget;
 class DiagnosticsWidget;
 class StatisticsWidget;
 class IpcClientManager;
+class SetupWizard;
 class ServerListWidget;
 
 /// Connection state for system tray icon updates
@@ -95,6 +96,8 @@ class MainWindow : public QMainWindow {
   void setupSystemTray();
   void setupUpdateChecker();
   void applyDarkTheme();
+  void showSetupWizardIfNeeded();
+  void onWizardFinished();
   void loadThemePreference();
 
 #ifdef _WIN32
@@ -112,6 +115,7 @@ class MainWindow : public QMainWindow {
   ConnectionWidget* connectionWidget_;
   SettingsWidget* settingsWidget_;
   DiagnosticsWidget* diagnosticsWidget_;
+  SetupWizard* setupWizard_;
   StatisticsWidget* statisticsWidget_;
   ServerListWidget* serverListWidget_;
   std::unique_ptr<IpcClientManager> ipcManager_;

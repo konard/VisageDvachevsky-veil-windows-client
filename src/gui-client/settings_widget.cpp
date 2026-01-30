@@ -662,6 +662,20 @@ QWidget* SettingsWidget::createAdvancedSection() {
   themeLayout->addWidget(themeCombo_, 1);
   layout->addLayout(themeLayout);
 
+  // Reset first-run wizard button
+  auto* resetWizardButton = new QPushButton("Reset Setup Wizard", group);
+  resetWizardButton->setProperty("buttonStyle", "ghost");
+  resetWizardButton->setToolTip("Reset the first-run flag so the setup wizard shows on next launch");
+  resetWizardButton->setCursor(Qt::PointingHandCursor);
+  connect(resetWizardButton, &QPushButton::clicked, this, [this]() {
+    QSettings settings("VEIL", "VPN Client");
+    settings.setValue("app/firstRunCompleted", false);
+    settings.sync();
+    QMessageBox::information(this, tr("Setup Wizard Reset"),
+        tr("The setup wizard will be shown the next time you start the application."));
+  });
+  layout->addWidget(resetWizardButton);
+
   return group;
 }
 

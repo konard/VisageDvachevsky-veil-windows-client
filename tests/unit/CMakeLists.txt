@@ -78,11 +78,14 @@ include(GoogleTest)
 gtest_discover_tests(veil_unit_tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
 
 # GUI widget tests (requires Qt6)
-find_package(Qt6 COMPONENTS Core Widgets QUIET)
+find_package(Qt6 COMPONENTS Core Widgets Network QUIET)
 if(Qt6_FOUND)
   set(CMAKE_AUTOMOC ON)
 
   add_executable(veil_gui_tests
+    setup_wizard_tests.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui-client/setup_wizard.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui-client/setup_wizard.h
     statistics_widget_tests.cpp
     ${CMAKE_SOURCE_DIR}/src/gui-client/statistics_widget.cpp
     ${CMAKE_SOURCE_DIR}/src/gui-client/statistics_widget.h
@@ -98,6 +101,7 @@ if(Qt6_FOUND)
     GTest::gtest_main
     Qt6::Core
     Qt6::Widgets
+    Qt6::Network
   )
 
   veil_set_warnings(veil_gui_tests)
