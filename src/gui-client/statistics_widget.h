@@ -6,11 +6,15 @@
 #include <QTimer>
 #include <QElapsedTimer>
 #include <QDateTime>
+#include <QComboBox>
+#include <QTabWidget>
 
 #include <deque>
 #include <vector>
 
 namespace veil::gui {
+
+class UsageTracker;
 
 /// A single data point for time-series graphs
 struct StatsDataPoint {
@@ -78,6 +82,9 @@ class StatisticsWidget : public QWidget {
  public:
   explicit StatisticsWidget(QWidget* parent = nullptr);
 
+  /// Set the usage tracker instance
+  void setUsageTracker(UsageTracker* tracker);
+
  signals:
   void backRequested();
 
@@ -97,13 +104,19 @@ class StatisticsWidget : public QWidget {
  private slots:
   void onExportClicked();
   void onClearHistoryClicked();
+  void onUsageViewChanged(int index);
+  void onUsageDataUpdated();
 
  private:
   void setupUi();
   void createBandwidthGraphSection(QWidget* parent);
   void createLatencyGraphSection(QWidget* parent);
   void createConnectionHistorySection(QWidget* parent);
+  void createUsageStatsSection(QWidget* parent);
   void updateHistoryDisplay();
+  void updateUsageDisplay();
+  QWidget* createUsageStatsWidget(const QString& label, uint64_t txBytes,
+                                  uint64_t rxBytes, int connections, int durationSec);
 
   QString formatBytes(uint64_t bytes) const;
   QString formatDuration(qint64 seconds) const;
@@ -122,6 +135,12 @@ class StatisticsWidget : public QWidget {
   QDateTime currentSessionStart_;
   QString currentServer_;
   uint16_t currentPort_{0};
+
+  // Usage tracking
+  UsageTracker* usageTracker_{nullptr};
+  QComboBox* usageViewSelector_;
+  QWidget* usageStatsContainer_;
+  QLabel* noUsageLabel_;
 
   // Export / controls
   QPushButton* exportButton_;

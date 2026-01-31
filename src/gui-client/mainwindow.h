@@ -25,6 +25,7 @@ class StatisticsWidget;
 class IpcClientManager;
 class SetupWizard;
 class ServerListWidget;
+class UsageTracker;
 
 /// Connection state for system tray icon updates
 enum class TrayConnectionState {
@@ -134,6 +135,9 @@ class MainWindow : public QMainWindow {
 
   // Update checker
   std::unique_ptr<UpdateChecker> updateChecker_;
+
+  // Usage tracker
+  std::unique_ptr<UsageTracker> usageTracker_;
 
   // Accumulated session bytes for statistics tracking
   uint64_t lastTotalTxBytes_{0};

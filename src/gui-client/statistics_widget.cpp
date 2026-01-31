@@ -9,8 +9,10 @@
 #include <QPainterPath>
 #include <QScrollArea>
 #include <QVBoxLayout>
+#include <QMessageBox>
 
 #include "common/gui/theme.h"
+#include "usage_tracker.h"
 
 namespace veil::gui {
 
@@ -299,6 +301,9 @@ void StatisticsWidget::setupUi() {
   // Connection history section
   createConnectionHistorySection(scrollContent);
 
+  // Usage statistics section
+  createUsageStatsSection(scrollContent);
+
   contentLayout->addStretch();
 
   scrollArea->setWidget(scrollContent);
@@ -435,6 +440,12 @@ void StatisticsWidget::onSessionEnded(uint64_t totalTx, uint64_t totalRx) {
   }
 
   updateHistoryDisplay();
+
+  // Record session in usage tracker
+  if (usageTracker_) {
+    usageTracker_->recordSession(record.startTime, record.endTime,
+                                 record.totalTxBytes, record.totalRxBytes);
+  }
 }
 
 void StatisticsWidget::updateHistoryDisplay() {
@@ -500,12 +511,32 @@ void StatisticsWidget::updateHistoryDisplay() {
 void StatisticsWidget::onExportClicked() {
   QString fileName = QFileDialog::getSaveFileName(
       this, "Export Statistics", "veil_statistics.json",
-      "JSON Files (*.json);;CSV Files (*.csv)");
+      "JSON Files (*.json);;Daily Usage CSV (*.csv);;Monthly Usage CSV (*.csv)");
 
   if (fileName.isEmpty()) return;
 
-  if (fileName.endsWith(".csv", Qt::CaseInsensitive)) {
-    // CSV export
+  if (fileName.contains("Daily") && fileName.endsWith(".csv", Qt::CaseInsensitive)) {
+    // Export daily usage CSV
+    if (usageTracker_) {
+      QString csv = usageTracker_->exportDailyToCsv();
+      QFile file(fileName);
+      if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        file.write(csv.toUtf8());
+        file.close();
+      }
+    }
+  } else if (fileName.contains("Monthly") && fileName.endsWith(".csv", Qt::CaseInsensitive)) {
+    // Export monthly usage CSV
+    if (usageTracker_) {
+      QString csv = usageTracker_->exportMonthlyToCsv();
+      QFile file(fileName);
+      if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        file.write(csv.toUtf8());
+        file.close();
+      }
+    }
+  } else if (fileName.endsWith(".csv", Qt::CaseInsensitive)) {
+    // CSV export - connection history
     QString csv;
     csv += "Start Time,End Time,Server,Port,Duration (s),TX Bytes,RX Bytes\n";
     for (const auto& rec : connectionHistory_) {
@@ -526,7 +557,7 @@ void StatisticsWidget::onExportClicked() {
       file.close();
     }
   } else {
-    // JSON export
+    // JSON export - include both connection history and usage data
     QJsonObject root;
 
     // Connection history
@@ -543,6 +574,17 @@ void StatisticsWidget::onExportClicked() {
       historyArray.append(entry);
     }
     root["connection_history"] = historyArray;
+
+    // Usage data (if tracker is available)
+    if (usageTracker_) {
+      QJsonDocument usageDoc = QJsonDocument::fromJson(usageTracker_->exportToJson().toUtf8());
+      if (usageDoc.isObject()) {
+        QJsonObject usageObj = usageDoc.object();
+        root["daily_usage"] = usageObj["daily_usage"];
+        root["monthly_usage"] = usageObj["monthly_usage"];
+      }
+    }
+
     root["exported_at"] = QDateTime::currentDateTime().toString(Qt::ISODate);
 
     QFile file(fileName);
@@ -578,6 +620,235 @@ QString StatisticsWidget::formatDuration(qint64 seconds) const {
   qint64 hours = seconds / 3600;
   qint64 mins = (seconds % 3600) / 60;
   return QString("%1h %2m").arg(hours).arg(mins);
+}
+
+void StatisticsWidget::setUsageTracker(UsageTracker* tracker) {
+  usageTracker_ = tracker;
+  if (usageTracker_) {
+    connect(usageTracker_, &UsageTracker::usageUpdated,
+            this, &StatisticsWidget::onUsageDataUpdated);
+    updateUsageDisplay();
+  }
+}
+
+void StatisticsWidget::createUsageStatsSection(QWidget* parent) {
+  auto* sectionCard = new QWidget(parent);
+  sectionCard->setObjectName("usageCard");
+  sectionCard->setStyleSheet(R"(
+    #usageCard {
+      background-color: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 16px;
+    }
+  )");
+
+  auto* sectionLayout = new QVBoxLayout(sectionCard);
+  sectionLayout->setSpacing(12);
+  sectionLayout->setContentsMargins(16, 12, 16, 12);
+
+  // Header row with view selector
+  auto* headerLayout = new QHBoxLayout();
+  auto* sectionTitle = new QLabel("Data Usage", sectionCard);
+  sectionTitle->setStyleSheet(R"(
+    font-size: 12px;
+    font-weight: 600;
+    color: #8b949e;
+    letter-spacing: 1.2px;
+  )");
+  headerLayout->addWidget(sectionTitle);
+  headerLayout->addStretch();
+
+  // View selector: Today / This Month / All Time
+  usageViewSelector_ = new QComboBox(sectionCard);
+  usageViewSelector_->addItem("Today");
+  usageViewSelector_->addItem("This Month");
+  usageViewSelector_->addItem("Last 7 Days");
+  usageViewSelector_->addItem("Last 30 Days");
+  usageViewSelector_->setFixedHeight(28);
+  usageViewSelector_->setStyleSheet(R"(
+    QComboBox {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      padding: 0 8px;
+      font-size: 11px;
+      color: #8b949e;
+    }
+    QComboBox:hover {
+      background: rgba(255, 255, 255, 0.06);
+    }
+    QComboBox::drop-down {
+      border: none;
+    }
+    QComboBox QAbstractItemView {
+      background: #161b22;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      selection-background-color: rgba(88, 166, 255, 0.2);
+      color: #f0f6fc;
+    }
+  )");
+  connect(usageViewSelector_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+          this, &StatisticsWidget::onUsageViewChanged);
+  headerLayout->addWidget(usageViewSelector_);
+
+  sectionLayout->addLayout(headerLayout);
+
+  // Container for usage statistics
+  usageStatsContainer_ = new QWidget(sectionCard);
+  usageStatsContainer_->setStyleSheet("background: transparent;");
+  new QVBoxLayout(usageStatsContainer_);
+  sectionLayout->addWidget(usageStatsContainer_);
+
+  // No-usage placeholder
+  noUsageLabel_ = new QLabel("No usage data yet", sectionCard);
+  noUsageLabel_->setAlignment(Qt::AlignCenter);
+  noUsageLabel_->setStyleSheet("color: #6e7681; font-size: 13px; padding: 20px;");
+  sectionLayout->addWidget(noUsageLabel_);
+
+  // Add to parent layout
+  if (auto* parentLayout = parent->layout(); parentLayout != nullptr) {
+    parentLayout->addWidget(sectionCard);
+  }
+}
+
+void StatisticsWidget::updateUsageDisplay() {
+  if (!usageTracker_) {
+    noUsageLabel_->setVisible(true);
+    return;
+  }
+
+  // Remove old items
+  auto* layout = usageStatsContainer_->layout();
+  QLayoutItem* item;
+  while ((item = layout->takeAt(0)) != nullptr) {
+    if (item->widget() != nullptr) {
+      item->widget()->deleteLater();
+    }
+    delete item;
+  }
+
+  const int viewIndex = usageViewSelector_ ? usageViewSelector_->currentIndex() : 0;
+
+  if (viewIndex == 0) {
+    // Today view
+    const auto todayUsage = usageTracker_->getTodayUsage();
+    noUsageLabel_->setVisible(todayUsage.totalBytes() == 0);
+
+    if (todayUsage.totalBytes() > 0) {
+      auto* statsWidget = createUsageStatsWidget(
+          todayUsage.date.toString("dddd, MMMM d"),
+          todayUsage.totalTxBytes,
+          todayUsage.totalRxBytes,
+          todayUsage.connectionCount,
+          todayUsage.totalDurationSec);
+      layout->addWidget(statsWidget);
+    }
+  } else if (viewIndex == 1) {
+    // This month view
+    const auto monthUsage = usageTracker_->getCurrentMonthUsage();
+    noUsageLabel_->setVisible(monthUsage.totalBytes() == 0);
+
+    if (monthUsage.totalBytes() > 0) {
+      const QDate firstDay(monthUsage.year, monthUsage.month, 1);
+      auto* statsWidget = createUsageStatsWidget(
+          firstDay.toString("MMMM yyyy"),
+          monthUsage.totalTxBytes,
+          monthUsage.totalRxBytes,
+          monthUsage.connectionCount,
+          monthUsage.totalDurationSec);
+      layout->addWidget(statsWidget);
+    }
+  } else if (viewIndex == 2 || viewIndex == 3) {
+    // Last 7 or 30 days view
+    const int days = (viewIndex == 2) ? 7 : 30;
+    const QDate endDate = QDate::currentDate();
+    const QDate startDate = endDate.addDays(-days + 1);
+    const auto dailyUsage = usageTracker_->getDailyUsageRange(startDate, endDate);
+
+    noUsageLabel_->setVisible(dailyUsage.isEmpty());
+
+    // Show each day in reverse chronological order
+    for (auto it = dailyUsage.rbegin(); it != dailyUsage.rend(); ++it) {
+      if (it->totalBytes() > 0) {
+        auto* statsWidget = createUsageStatsWidget(
+            it->date.toString("ddd, MMM d"),
+            it->totalTxBytes,
+            it->totalRxBytes,
+            it->connectionCount,
+            it->totalDurationSec);
+        layout->addWidget(statsWidget);
+      }
+    }
+  }
+}
+
+QWidget* StatisticsWidget::createUsageStatsWidget(const QString& label,
+                                                   uint64_t txBytes,
+                                                   uint64_t rxBytes,
+                                                   int connections,
+                                                   int durationSec) {
+  auto* widget = new QWidget();
+  widget->setStyleSheet(R"(
+    QWidget {
+      background: rgba(255, 255, 255, 0.02);
+      border-radius: 8px;
+    }
+  )");
+
+  auto* widgetLayout = new QVBoxLayout(widget);
+  widgetLayout->setContentsMargins(12, 10, 12, 10);
+  widgetLayout->setSpacing(8);
+
+  // Date/period label
+  auto* dateLabel = new QLabel(label, widget);
+  dateLabel->setStyleSheet("color: #f0f6fc; font-size: 13px; font-weight: 500;");
+  widgetLayout->addWidget(dateLabel);
+
+  // Data usage row
+  auto* dataRow = new QHBoxLayout();
+  dataRow->setSpacing(16);
+
+  auto* uploadLabel = new QLabel(
+      QString("\u2191 %1").arg(formatBytes(txBytes)), widget);
+  uploadLabel->setStyleSheet("color: #58a6ff; font-size: 12px;");
+  dataRow->addWidget(uploadLabel);
+
+  auto* downloadLabel = new QLabel(
+      QString("\u2193 %1").arg(formatBytes(rxBytes)), widget);
+  downloadLabel->setStyleSheet("color: #3fb950; font-size: 12px;");
+  dataRow->addWidget(downloadLabel);
+
+  auto* totalLabel = new QLabel(
+      QString("Total: %1").arg(formatBytes(txBytes + rxBytes)), widget);
+  totalLabel->setStyleSheet("color: #8b949e; font-size: 12px;");
+  dataRow->addWidget(totalLabel);
+  dataRow->addStretch();
+
+  widgetLayout->addLayout(dataRow);
+
+  // Metadata row
+  auto* metaRow = new QHBoxLayout();
+  auto* metaLabel = new QLabel(
+      QString("%1 connection%2  |  %3")
+          .arg(connections)
+          .arg(connections == 1 ? "" : "s")
+          .arg(formatDuration(durationSec)),
+      widget);
+  metaLabel->setStyleSheet("color: #6e7681; font-size: 11px;");
+  metaRow->addWidget(metaLabel);
+  metaRow->addStretch();
+
+  widgetLayout->addLayout(metaRow);
+
+  return widget;
+}
+
+void StatisticsWidget::onUsageViewChanged(int /*index*/) {
+  updateUsageDisplay();
+}
+
+void StatisticsWidget::onUsageDataUpdated() {
+  updateUsageDisplay();
 }
 
 }  // namespace veil::gui

@@ -90,10 +90,13 @@ if(Qt6_FOUND)
     ${CMAKE_SOURCE_DIR}/src/gui-client/setup_wizard.h
     statistics_widget_tests.cpp
     quick_actions_widget_tests.cpp
+    usage_tracker_tests.cpp
     ${CMAKE_SOURCE_DIR}/src/gui-client/statistics_widget.cpp
     ${CMAKE_SOURCE_DIR}/src/gui-client/statistics_widget.h
     ${CMAKE_SOURCE_DIR}/src/gui-client/quick_actions_widget.cpp
     ${CMAKE_SOURCE_DIR}/src/gui-client/quick_actions_widget.h
+    ${CMAKE_SOURCE_DIR}/src/gui-client/usage_tracker.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui-client/usage_tracker.h
   )
 
   target_include_directories(veil_gui_tests PRIVATE

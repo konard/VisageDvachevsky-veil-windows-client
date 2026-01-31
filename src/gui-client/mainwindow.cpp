@@ -37,6 +37,7 @@
 #include "update_checker.h"
 #include "server_list_widget.h"
 #include "quick_actions_widget.h"
+#include "usage_tracker.h"
 
 #ifdef _WIN32
 #include <chrono>
@@ -124,12 +125,17 @@ MainWindow::MainWindow(QWidget* parent)
       statisticsWidget_(new StatisticsWidget(this)),
       serverListWidget_(new ServerListWidget(this)),
       ipcManager_(std::make_unique<IpcClientManager>(this)),
+      usageTracker_(std::make_unique<UsageTracker>(this)),
       trayIcon_(nullptr),
       trayMenu_(nullptr),
       trayConnectAction_(nullptr),
       trayDisconnectAction_(nullptr),
       updateChecker_(std::make_unique<UpdateChecker>(this)) {
   qDebug() << "MainWindow: Initializing GUI components...";
+
+  // Connect usage tracker to statistics widget
+  statisticsWidget_->setUsageTracker(usageTracker_.get());
+
   setupUi();
   setupIpcConnections();
   setupMenuBar();
