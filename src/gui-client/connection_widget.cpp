@@ -170,7 +170,7 @@ ConnectionWidget::ConnectionWidget(QWidget* parent) : QWidget(parent) {
   auto* spaceShortcut = new QShortcut(QKeySequence(Qt::Key_Space), this);
   connect(spaceShortcut, &QShortcut::activated, this, [this]() {
     // Only trigger if connect button has focus
-    if (connectButton_ && connectButton_->hasFocus()) {
+    if (connectButton_ != nullptr && connectButton_->hasFocus()) {
       onConnectClicked();
     }
   });
@@ -524,12 +524,12 @@ void ConnectionWidget::setConnectionState(ConnectionState state) {
   state_ = state;
 
   // Update the status ring
-  if (statusRing_) {
+  if (statusRing_ != nullptr) {
     static_cast<StatusRing*>(statusRing_)->setState(state);
   }
 
   // Update quick actions widget
-  if (quickActionsWidget_) {
+  if (quickActionsWidget_ != nullptr) {
     quickActionsWidget_->setConnectionState(state);
   }
 
@@ -749,7 +749,7 @@ void ConnectionWidget::setServerAddress(const QString& server, uint16_t port) {
   serverLabel_->setText(QString("%1:%2").arg(server).arg(port));
 
   // Update quick actions with server info
-  if (quickActionsWidget_) {
+  if (quickActionsWidget_ != nullptr) {
     quickActionsWidget_->setIpAddress(server, port);
   }
 }
@@ -776,7 +776,7 @@ void ConnectionWidget::onPulseAnimation() {
     animationPhase_ -= 1.0;
   }
 
-  if (statusRing_) {
+  if (statusRing_ != nullptr) {
     static_cast<StatusRing*>(statusRing_)->setPulsePhase(animationPhase_);
   }
 }
@@ -805,7 +805,7 @@ void ConnectionWidget::startPulseAnimation() {
 void ConnectionWidget::stopPulseAnimation() {
   pulseTimer_->stop();
   animationPhase_ = 0.0;
-  if (statusRing_) {
+  if (statusRing_ != nullptr) {
     static_cast<StatusRing*>(statusRing_)->setPulsePhase(0.0);
   }
 }

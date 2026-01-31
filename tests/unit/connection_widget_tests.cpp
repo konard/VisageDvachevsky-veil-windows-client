@@ -205,9 +205,8 @@ TEST_F(ConnectionWidgetTest, SetStructuredError) {
   widget_->setConnectionState(ConnectionState::kError);
   ErrorMessage error;
   error.title = "Connection Failed";
-  error.message = "Unable to establish secure connection";
-  error.category = ErrorCategory::kConnection;
-  error.severity = ErrorSeverity::kError;
+  error.description = "Unable to establish secure connection";
+  error.category = ErrorCategory::kNetwork;
   widget_->setError(error);
   // Should display structured error
 }
@@ -216,9 +215,9 @@ TEST_F(ConnectionWidgetTest, SetErrorWithDetails) {
   widget_->setConnectionState(ConnectionState::kError);
   ErrorMessage error;
   error.title = "Authentication Failed";
-  error.message = "Invalid credentials";
-  error.details = "Server returned 401 Unauthorized";
-  error.category = ErrorCategory::kAuth;
+  error.description = "Invalid credentials";
+  error.technical_details = "Server returned 401 Unauthorized";
+  error.category = ErrorCategory::kPermission;
   widget_->setError(error);
   // Should display error with details
 }
@@ -227,8 +226,8 @@ TEST_F(ConnectionWidgetTest, SetErrorWithAction) {
   widget_->setConnectionState(ConnectionState::kError);
   ErrorMessage error;
   error.title = "Network Unreachable";
-  error.message = "Cannot reach VPN server";
-  error.actionText = "Check your internet connection";
+  error.description = "Cannot reach VPN server";
+  error.action = "Check your internet connection";
   error.category = ErrorCategory::kNetwork;
   widget_->setError(error);
   // Should display error with action text
