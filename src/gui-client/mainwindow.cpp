@@ -24,6 +24,7 @@
 #include <QDebug>
 #include <QProgressDialog>
 
+#include "common/constants.h"
 #include "common/gui/theme.h"
 #include "common/ipc/ipc_protocol.h"
 #include "common/version.h"
@@ -1804,14 +1805,12 @@ bool MainWindow::ensureServiceRunning() {
 }
 
 bool MainWindow::waitForServiceReady(int timeout_ms) {
-  static constexpr const char* kReadyEventName = "Global\\VEIL_SERVICE_READY";
-  static constexpr const char* kPipeName = "\\\\.\\pipe\\veil-client";
   static constexpr int kPollIntervalMs = 100;
 
   qDebug() << "waitForServiceReady: Waiting up to" << timeout_ms << "ms for service IPC to be ready...";
 
   // Phase 1: Try the Windows Event signal (set by the service after IPC server starts)
-  HANDLE event = OpenEventA(SYNCHRONIZE, FALSE, kReadyEventName);
+  HANDLE event = OpenEventA(SYNCHRONIZE, FALSE, veil::kServiceReadyEventName);
   if (event) {
     qDebug() << "waitForServiceReady: Found service ready event, waiting for signal...";
     DWORD result = WaitForSingleObject(event, static_cast<DWORD>(timeout_ms));
@@ -1830,7 +1829,7 @@ bool MainWindow::waitForServiceReady(int timeout_ms) {
   // and possibly cleaned up) or the event could not be created.
   auto start = std::chrono::steady_clock::now();
   while (true) {
-    if (WaitNamedPipeA(kPipeName, 0)) {
+    if (WaitNamedPipeA(veil::kIpcClientPipeName, 0)) {
       qDebug() << "waitForServiceReady: Named Pipe is available - IPC server is ready";
       return true;
     }
