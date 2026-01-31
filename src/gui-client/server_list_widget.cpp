@@ -427,6 +427,9 @@ void ServerListWidget::applySortMode() {
         return a.lastConnected > b.lastConnected;
       });
       break;
+    default:
+      servers = serverManager_->getAllServers();
+      break;
   }
 
   serverList_->clear();
@@ -552,7 +555,7 @@ void ServerListWidget::onExportServer(const QString& serverId) {
 
 void ServerListWidget::onServerItemClicked(QListWidgetItem* item) {
   ServerListItem* widget = qobject_cast<ServerListItem*>(serverList_->itemWidget(item));
-  if (widget) {
+  if (widget != nullptr) {
     emit serverSelected(widget->serverId());
   }
 }
@@ -570,10 +573,10 @@ void ServerListWidget::onSortModeChanged(int index) {
 
 QString ServerListWidget::getSelectedServerId() const {
   auto* item = serverList_->currentItem();
-  if (!item) return "";
+  if (item == nullptr) return "";
 
   ServerListItem* widget = qobject_cast<ServerListItem*>(serverList_->itemWidget(item));
-  return widget ? widget->serverId() : "";
+  return widget != nullptr ? widget->serverId() : "";
 }
 
 void ServerListWidget::showServerDialog(const ServerConfig& server, bool isNew) {
@@ -674,7 +677,7 @@ void ServerListWidget::pingServerAsync(const QString& serverId) {
   for (int i = 0; i < serverList_->count(); ++i) {
     QListWidgetItem* item = serverList_->item(i);
     ServerListItem* widget = qobject_cast<ServerListItem*>(serverList_->itemWidget(item));
-    if (widget && widget->serverId() == serverId) {
+    if (widget != nullptr && widget->serverId() == serverId) {
       // Simple TCP connect latency test
       auto* socket = new QTcpSocket(this);
       QElapsedTimer timer;

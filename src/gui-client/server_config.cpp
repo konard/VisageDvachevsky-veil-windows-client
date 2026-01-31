@@ -225,7 +225,7 @@ std::optional<ServerConfig> ServerListManager::importFromUri(const QString& uri,
   QUrl url(uri);
 
   if (url.scheme() != "veil") {
-    if (error) *error = "Invalid URI scheme. Expected 'veil://'";
+    if (error != nullptr) *error = "Invalid URI scheme. Expected 'veil://'";
     return std::nullopt;
   }
 
@@ -246,7 +246,7 @@ std::optional<ServerConfig> ServerListManager::importFromUri(const QString& uri,
   config.notes = query.queryItemValue("notes");
 
   if (!config.isValid()) {
-    if (error) *error = "Invalid server configuration in URI";
+    if (error != nullptr) *error = "Invalid server configuration in URI";
     return std::nullopt;
   }
 
@@ -256,7 +256,7 @@ std::optional<ServerConfig> ServerListManager::importFromUri(const QString& uri,
 std::optional<ServerConfig> ServerListManager::importFromJsonFile(const QString& filePath, QString* error) {
   QFile file(filePath);
   if (!file.open(QIODevice::ReadOnly)) {
-    if (error) *error = "Failed to open file: " + file.errorString();
+    if (error != nullptr) *error = "Failed to open file: " + file.errorString();
     return std::nullopt;
   }
 
@@ -265,12 +265,12 @@ std::optional<ServerConfig> ServerListManager::importFromJsonFile(const QString&
   file.close();
 
   if (parseError.error != QJsonParseError::NoError) {
-    if (error) *error = "JSON parse error: " + parseError.errorString();
+    if (error != nullptr) *error = "JSON parse error: " + parseError.errorString();
     return std::nullopt;
   }
 
   if (!doc.isObject()) {
-    if (error) *error = "Invalid JSON format: expected object";
+    if (error != nullptr) *error = "Invalid JSON format: expected object";
     return std::nullopt;
   }
 
@@ -283,7 +283,7 @@ std::optional<ServerConfig> ServerListManager::importFromJsonFile(const QString&
   config.dateAdded = QDateTime::currentDateTime();
 
   if (!config.isValid()) {
-    if (error) *error = "Invalid server configuration in JSON";
+    if (error != nullptr) *error = "Invalid server configuration in JSON";
     return std::nullopt;
   }
 
