@@ -105,6 +105,8 @@ if(Qt6_FOUND)
     ${CMAKE_SOURCE_DIR}/src/gui-client/server_config.h
     ${CMAKE_SOURCE_DIR}/src/gui-client/notification_preferences.cpp
     ${CMAKE_SOURCE_DIR}/src/gui-client/notification_preferences.h
+    ${CMAKE_SOURCE_DIR}/src/gui-client/notification_history_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui-client/notification_history_dialog.h
     ipc_client_manager_tests.cpp
     ${CMAKE_SOURCE_DIR}/src/gui-client/ipc_client_manager.cpp
     ${CMAKE_SOURCE_DIR}/src/gui-client/ipc_client_manager.h
