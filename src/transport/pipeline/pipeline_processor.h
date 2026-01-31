@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <thread>
@@ -166,9 +167,17 @@ using ErrorCallback = std::function<void(std::uint64_t session_id,
  * - start(), stop() must be called from a single managing thread
  * - submit_rx(), submit_tx() are thread-safe (single producer each)
  * - Callbacks are invoked from the process/TX threads
+ * - TransportSession access is protected by internal mutex (Issue #163)
+ *
+ * Session Synchronization (Issue #163):
+ * The pipeline accesses the TransportSession from the process thread for both
+ * encryption and decryption. Since TransportSession is NOT thread-safe, all
+ * session method calls are protected by session_mutex_. This prevents concurrent
+ * access to session state (sequence counters, replay window, retransmit buffer).
  *
  * @see docs/thread_model.md for the VEIL threading model documentation.
  * @see Issue #85 for the multi-threading performance improvement initiative.
+ * @see Issue #163 for the thread safety fix for TransportSession access.
  */
 class PipelineProcessor {
  public:
@@ -286,6 +295,13 @@ class PipelineProcessor {
 
   // UDP socket for sending
   UdpSocket* socket_{nullptr};
+
+  // Mutex to protect session_ access from multiple threads.
+  // THREAD-SAFETY (Issue #163): TransportSession is not thread-safe, so we must
+  // serialize all accesses to it. The process_worker_ thread calls session methods
+  // (encrypt_data, decrypt_packet) for both incoming and outgoing packets.
+  // This mutex ensures that concurrent calls to these methods don't race.
+  mutable std::mutex session_mutex_;
 
   // Lock-free queues for inter-thread communication
   std::unique_ptr<utils::SpscQueue<PipelinePacket>> rx_queue_;

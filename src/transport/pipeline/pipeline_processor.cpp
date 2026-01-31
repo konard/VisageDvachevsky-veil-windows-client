@@ -164,14 +164,17 @@ void PipelineProcessor::process_thread_loop() {
 
     if (packet.outgoing) {
       // Encrypt outgoing data
-      // Note: encrypt_data is not thread-safe, so in a real implementation
-      // we would need per-thread sessions or locking. For now, this demonstrates
-      // the architecture.
+      // THREAD-SAFETY (Issue #163): TransportSession is not thread-safe.
+      // We must hold session_mutex_ while calling session methods.
+      std::lock_guard<std::mutex> lock(session_mutex_);
       auto encrypted = session_->encrypt_data(packet.data);
       result.packets = std::move(encrypted);
       result.success = true;
     } else {
       // Decrypt incoming packet
+      // THREAD-SAFETY (Issue #163): TransportSession is not thread-safe.
+      // We must hold session_mutex_ while calling session methods.
+      std::lock_guard<std::mutex> lock(session_mutex_);
       auto decrypted = session_->decrypt_packet(packet.data);
       if (decrypted) {
         result.frames = std::move(*decrypted);
