@@ -8,6 +8,7 @@
 #include <QSettings>
 #include <QScrollArea>
 #include <algorithm>
+#include <utility>
 
 #include "common/gui/theme.h"
 
@@ -15,13 +16,13 @@ namespace veil::gui {
 
 // AppListItem implementation
 
-AppListItem::AppListItem(const std::string& appName,
-                         const std::string& exePath,
+AppListItem::AppListItem(std::string appName,
+                         std::string exePath,
                          bool isSystemApp,
                          QWidget* parent)
     : QWidget(parent),
-      appName_(appName),
-      exePath_(exePath),
+      appName_(std::move(appName)),
+      exePath_(std::move(exePath)),
       isSystemApp_(isSystemApp) {
   setupUi();
 }

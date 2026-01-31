@@ -1394,7 +1394,7 @@ void SettingsWidget::loadSettings() {
   enablePerAppRoutingCheck_->setChecked(settings.value("routing/enablePerAppRouting", false).toBool());
 
   // Load per-app routing settings
-  if (appSplitTunnelWidget_) {
+  if (appSplitTunnelWidget_ != nullptr) {
     appSplitTunnelWidget_->loadFromSettings();
   }
 
@@ -1537,7 +1537,7 @@ void SettingsWidget::saveSettings() {
   settings.setValue("routing/enablePerAppRouting", enablePerAppRoutingCheck_->isChecked());
 
   // Save per-app routing settings
-  if (appSplitTunnelWidget_) {
+  if (appSplitTunnelWidget_ != nullptr) {
     appSplitTunnelWidget_->saveToSettings();
   }
 
