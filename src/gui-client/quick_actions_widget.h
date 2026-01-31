@@ -7,10 +7,9 @@
 #include <QFrame>
 #include <QVBoxLayout>
 
-namespace veil::gui {
+#include "connection_state.h"
 
-/// Connection state forward declaration (from connection_widget.h)
-enum class ConnectionState;
+namespace veil::gui {
 
 /// Expandable quick actions panel for frequently used operations.
 ///
@@ -101,7 +100,7 @@ class QuickActionsWidget : public QWidget {
   bool obfuscationEnabled_{true};
   QString ipAddress_;
   uint16_t port_{0};
-  ConnectionState connectionState_;
+  ConnectionState connectionState_{ConnectionState::kDisconnected};
 };
 
 }  // namespace veil::gui
