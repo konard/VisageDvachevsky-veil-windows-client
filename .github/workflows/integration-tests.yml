@@ -21,7 +21,7 @@ jobs:
             ninja-build \
             clang \
             lld \
-            libsodium-dev
+            libsodium-dev libcurl4-openssl-dev
 
       - name: Configure CMake (Debug + Sanitizers)
         run: |
