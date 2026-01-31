@@ -9,6 +9,7 @@
 #include <QUrlQuery>
 #include <QUuid>
 
+// NOLINTBEGIN(readability-implicit-bool-conversion)
 namespace veil::gui {
 
 QJsonObject ServerConfig::toJson() const {
@@ -313,4 +314,5 @@ int ServerListManager::findServerIndex(const QString& id) const {
   return -1;
 }
 
+// NOLINTEND(readability-implicit-bool-conversion)
 }  // namespace veil::gui

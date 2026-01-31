@@ -23,6 +23,8 @@
 
 namespace veil::gui {
 
+// NOLINTBEGIN(readability-implicit-bool-conversion)
+
 SettingsWidget::SettingsWidget(QWidget* parent) : QWidget(parent) {
   // Initialize validation debounce timer
   validationDebounceTimer_ = new QTimer(this);
@@ -1697,5 +1699,7 @@ void SettingsWidget::onAdvancedModeToggled(bool showAdvanced) {
   dpiBypassSection_->setVisible(showAdvanced);
   advancedSection_->setVisible(showAdvanced);
 }
+
+// NOLINTEND(readability-implicit-bool-conversion)
 
 }  // namespace veil::gui

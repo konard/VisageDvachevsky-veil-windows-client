@@ -333,6 +333,8 @@ void run_service() {
   // Main service loop
   LOG_DEBUG("Entering main service loop");
   std::chrono::steady_clock::time_point last_status_log = std::chrono::steady_clock::now();
+  std::chrono::steady_clock::time_point last_heartbeat = std::chrono::steady_clock::now();
+  constexpr int kHeartbeatIntervalSec = 10;
 
   while (g_running) {
     // Poll IPC server for messages
@@ -348,8 +350,28 @@ void run_service() {
       }
     }
 
-    // Periodic status logging (every 60 seconds)
+    // Send heartbeat to all connected clients (every 10 seconds)
     auto now = std::chrono::steady_clock::now();
+    if (std::chrono::duration_cast<std::chrono::seconds>(now - last_heartbeat).count() >= kHeartbeatIntervalSec) {
+      std::lock_guard<std::mutex> lock(g_ipc_server_mutex);
+      if (g_ipc_server) {
+        // Send heartbeat event to all connected clients
+        ipc::HeartbeatEvent heartbeat_event;
+        heartbeat_event.timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::system_clock::now().time_since_epoch()
+        ).count();
+
+        ipc::Message heartbeat_msg;
+        heartbeat_msg.type = ipc::MessageType::kEvent;
+        heartbeat_msg.payload = ipc::Event{heartbeat_event};
+
+        g_ipc_server->broadcast_message(heartbeat_msg);
+        LOG_DEBUG("Heartbeat sent to all clients (timestamp: {})", heartbeat_event.timestamp_ms);
+      }
+      last_heartbeat = now;
+    }
+
+    // Periodic status logging (every 60 seconds)
     if (std::chrono::duration_cast<std::chrono::seconds>(now - last_status_log).count() >= 60) {
       LOG_DEBUG("Service status: running={}, connected={}", g_running.load(), g_connected.load());
       if (g_tunnel) {

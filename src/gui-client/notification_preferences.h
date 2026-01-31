@@ -6,6 +6,8 @@
 #include <QVector>
 #include <utility>
 
+#include <utility>
+
 namespace veil::gui {
 
 /// Represents a single notification event in history
