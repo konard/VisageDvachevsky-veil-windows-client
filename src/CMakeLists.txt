@@ -9,6 +9,7 @@ if(WIN32)
     windows/console_handler.cpp
     windows/app_enumerator.cpp
     windows/shortcut_manager.cpp
+    windows/firewall_manager.cpp
   )
   # Windows doesn't use POSIX signals or daemonization
   set(VEIL_SIGNAL_SOURCES)
