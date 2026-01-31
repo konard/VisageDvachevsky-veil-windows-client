@@ -146,10 +146,10 @@ TEST_F(DebugLoggingOverheadTest,
   transport::TransportSession server(server_handshake_, config, now_fn);
 
   // Send multiple messages that each require fragmentation.
-  for (int msg = 0; msg < 3; ++msg) {
+  for (std::size_t msg = 0; msg < 3; ++msg) {
     std::vector<std::uint8_t> plaintext(30);
     for (std::size_t i = 0; i < plaintext.size(); ++i) {
-      plaintext[i] = static_cast<std::uint8_t>((msg * 30 + i) & 0xFF);
+      plaintext[i] = static_cast<std::uint8_t>((msg * 30U + i) & 0xFFU);
     }
 
     auto encrypted_packets = client.encrypt_data(plaintext, 0, true);
