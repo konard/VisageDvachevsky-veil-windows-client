@@ -217,7 +217,7 @@ TEST_F(ConnectionWidgetTest, SetErrorWithDetails) {
   error.title = "Authentication Failed";
   error.description = "Invalid credentials";
   error.technical_details = "Server returned 401 Unauthorized";
-  error.category = ErrorCategory::kPermission;
+  error.category = ErrorCategory::kConfiguration;
   widget_->setError(error);
   // Should display error with details
 }

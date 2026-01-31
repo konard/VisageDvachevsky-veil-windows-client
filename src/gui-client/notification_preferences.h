@@ -6,6 +6,7 @@
 #include <QString>
 #include <QDateTime>
 #include <QVector>
+#include <utility>
 
 namespace veil::gui {
 

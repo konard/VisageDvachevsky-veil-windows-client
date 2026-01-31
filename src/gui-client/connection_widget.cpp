@@ -108,9 +108,9 @@ class StatusRing : public QWidget {
       // Shield check icon
       painter.setBrush(baseColor);
       QPainterPath shield;
-      int iconSize = 36;
-      int ix = centerX - iconSize / 2;
-      int iy = centerY - iconSize / 2;
+      qreal iconSize = 36.0;
+      qreal ix = centerX - iconSize / 2.0;
+      qreal iy = centerY - iconSize / 2.0;
       shield.moveTo(ix + iconSize / 2.0, iy);
       shield.lineTo(ix + iconSize, iy + iconSize * 0.3);
       shield.lineTo(ix + iconSize, iy + iconSize * 0.6);
@@ -122,16 +122,16 @@ class StatusRing : public QWidget {
 
       // Checkmark
       painter.setPen(QPen(QColor("#0d1117"), 3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-      painter.drawLine(ix + 12, iy + 20, ix + 16, iy + 26);
-      painter.drawLine(ix + 16, iy + 26, ix + 26, iy + 14);
+      painter.drawLine(QPointF(ix + 12, iy + 20), QPointF(ix + 16, iy + 26));
+      painter.drawLine(QPointF(ix + 16, iy + 26), QPointF(ix + 26, iy + 14));
     } else if (state_ == ConnectionState::kDisconnected) {
       // Shield outline
       painter.setPen(QPen(baseColor, 2));
       painter.setBrush(Qt::NoBrush);
       QPainterPath shield;
-      int iconSize = 36;
-      int ix = centerX - iconSize / 2;
-      int iy = centerY - iconSize / 2;
+      qreal iconSize = 36.0;
+      qreal ix = centerX - iconSize / 2.0;
+      qreal iy = centerY - iconSize / 2.0;
       shield.moveTo(ix + iconSize / 2.0, iy);
       shield.lineTo(ix + iconSize, iy + iconSize * 0.3);
       shield.lineTo(ix + iconSize, iy + iconSize * 0.6);

@@ -122,9 +122,8 @@ target_link_libraries(veil_common
     nlohmann_json::nlohmann_json
 )
 
-# Linux-specific libraries
+# Non-Windows: link libcurl for auto_updater HTTP requests
 if(NOT WIN32)
-  # libcurl is used by auto_updater.cpp for HTTP requests on non-Windows platforms
   find_package(CURL REQUIRED)
   target_link_libraries(veil_common PUBLIC CURL::libcurl)
 endif()

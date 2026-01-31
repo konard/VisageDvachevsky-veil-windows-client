@@ -663,6 +663,7 @@ bool AutoUpdater::install_update(
   std::exit(0);
 #else
   // On Linux, we might use a different approach (e.g., package manager)
+  (void)installer_path;  // Unused on non-Windows platforms
   LOG_WARN("Auto-installation not implemented for this platform");
   error = "Auto-installation not implemented for this platform";
   return false;

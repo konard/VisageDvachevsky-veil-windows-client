@@ -392,7 +392,7 @@ void ServerListWidget::applySearchFilter() {
       item->setHidden(false);
     } else {
       auto server = serverManager_->getServer(widget->serverId());
-      bool matches = server && (server->name.toLower().contains(search) ||
+      bool matches = server.has_value() && (server->name.toLower().contains(search) ||
                                 server->address.toLower().contains(search));
       item->setHidden(!matches);
     }
@@ -456,14 +456,14 @@ void ServerListWidget::onAddServer() {
 
 void ServerListWidget::onEditServer(const QString& serverId) {
   auto server = serverManager_->getServer(serverId);
-  if (server) {
+  if (server.has_value()) {
     showServerDialog(*server, false);
   }
 }
 
 void ServerListWidget::onDeleteServer(const QString& serverId) {
   auto server = serverManager_->getServer(serverId);
-  if (!server) return;
+  if (!server.has_value()) return;
 
   auto reply = QMessageBox::question(
       this, "Delete Server",
@@ -502,7 +502,7 @@ void ServerListWidget::onImportFromUri() {
   if (ok && !uri.trimmed().isEmpty()) {
     QString error;
     auto server = serverManager_->importFromUri(uri, &error);
-    if (server) {
+    if (server.has_value()) {
       serverManager_->addServer(*server);
       refreshServerList();
       QMessageBox::information(this, "Success", "Server imported successfully!");
@@ -520,7 +520,7 @@ void ServerListWidget::onImportFromFile() {
   if (!filePath.isEmpty()) {
     QString error;
     auto server = serverManager_->importFromJsonFile(filePath, &error);
-    if (server) {
+    if (server.has_value()) {
       serverManager_->addServer(*server);
       refreshServerList();
       QMessageBox::information(this, "Success", "Server imported successfully!");
@@ -668,7 +668,7 @@ void ServerListWidget::showServerDialog(const ServerConfig& server, bool isNew) 
 
 void ServerListWidget::pingServerAsync(const QString& serverId) {
   auto server = serverManager_->getServer(serverId);
-  if (!server) return;
+  if (!server.has_value()) return;
 
   // Find widget and update UI
   for (int i = 0; i < serverList_->count(); ++i) {
@@ -684,7 +684,7 @@ void ServerListWidget::pingServerAsync(const QString& serverId) {
         int latency = static_cast<int>(timer.elapsed());
         serverManager_->updateLatency(serverId, latency);
         auto updatedServer = serverManager_->getServer(serverId);
-        if (updatedServer) {
+        if (updatedServer.has_value()) {
           widget->updateServer(*updatedServer);
         }
         socket->disconnectFromHost();
@@ -695,7 +695,7 @@ void ServerListWidget::pingServerAsync(const QString& serverId) {
               [this, serverId, widget, socket](QAbstractSocket::SocketError) {
         serverManager_->updateLatency(serverId, -1);
         auto updatedServer = serverManager_->getServer(serverId);
-        if (updatedServer) {
+        if (updatedServer.has_value()) {
           widget->updateServer(*updatedServer);
         }
         socket->deleteLater();

@@ -506,4 +506,50 @@ TEST(UpdateDialogTests, DontRemindAgainFlag) {
   EXPECT_FALSE(result.dont_remind_again);
 }
 
+// ============================================================================
+// install_update Tests (non-Windows platform behavior)
+// ============================================================================
+
+#ifndef _WIN32
+TEST(AutoUpdaterTests, InstallUpdateNotImplementedOnLinux) {
+  updater::AutoUpdater updater;
+  std::string error;
+  // On Linux, install_update should return false with a descriptive error.
+  // This also verifies that the installer_path parameter is properly handled
+  // (was previously causing -Wunused-parameter build failure on Linux).
+  bool result = updater.install_update("/tmp/fake-installer.exe", error);
+  EXPECT_FALSE(result);
+  EXPECT_FALSE(error.empty());
+  EXPECT_NE(error.find("not implemented"), std::string::npos);
+}
+#endif
+
+// ============================================================================
+// Impl Destructor Cleanup Tests
+// ============================================================================
+
+TEST(AutoUpdaterTests, DestructorCleansUpWithoutCrash) {
+  // Verify that AutoUpdater can be created and destroyed without issues.
+  // The Impl destructor contains a catch block for exception cleanup
+  // that must be properly annotated to avoid bugprone-empty-catch warnings.
+  {
+    updater::AutoUpdater updater;
+    // Destructor runs here - should not crash even with empty task list
+  }
+  SUCCEED();
+}
+
+TEST(AutoUpdaterTests, DestructorAfterConfigChange) {
+  // Verify cleanup after configuration changes.
+  {
+    updater::AutoUpdater updater;
+    updater::UpdateConfig config;
+    config.github_owner = "test";
+    config.github_repo = "test";
+    updater.set_config(config);
+    // Destructor should clean up properly
+  }
+  SUCCEED();
+}
+
 }  // namespace veil::tests
