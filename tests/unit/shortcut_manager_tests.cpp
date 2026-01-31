@@ -222,12 +222,12 @@ TEST_F(ShortcutManagerTests, CreateShortcutWithArguments) {
       ShortcutManager::Location::kDesktop,
       test_shortcut_name_,
       target_path,
+      error,
       arguments,
       "Test shortcut with arguments",
       "",
       0,
-      "",
-      error
+      ""
   );
 
   if (created) {
