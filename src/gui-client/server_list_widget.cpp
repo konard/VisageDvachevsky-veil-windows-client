@@ -236,7 +236,7 @@ void ServerListWidget::setupUi() {
   // Title
   auto* titleLabel = new QLabel("Server Management", this);
   titleLabel->setStyleSheet(QString("font-size: %1px; font-weight: 700; color: #f0f6fc; margin-bottom: 8px;")
-                                .arg(fonts::kFontSizeHeadline));
+                                .arg(fonts::kFontSizeHeadline()));
   mainLayout->addWidget(titleLabel);
 
   // === Toolbar ===

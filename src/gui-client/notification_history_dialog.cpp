@@ -82,7 +82,7 @@ void NotificationHistoryDialog::setupUi() {
   // Title
   auto* titleLabel = new QLabel("Notification History", this);
   titleLabel->setStyleSheet(QString("font-size: %1px; font-weight: 700; color: %2;")
-                                .arg(fonts::kFontSizeHeadline)
+                                .arg(fonts::kFontSizeHeadline())
                                 .arg(colors::dark::kTextPrimary));
   mainLayout->addWidget(titleLabel);
 
