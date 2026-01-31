@@ -42,6 +42,7 @@ struct ReleaseAsset {
   std::string download_url;
   std::string content_type;
   std::size_t size{0};
+  std::string sha256_checksum;  // Optional SHA256 checksum for verification
 };
 
 struct ReleaseInfo {
@@ -93,6 +94,7 @@ class AutoUpdater {
   using DownloadProgressCallback = std::function<void(std::size_t downloaded, std::size_t total)>;
   using DownloadCompleteCallback = std::function<void(bool success, const std::string& path_or_error)>;
   using ErrorCallback = std::function<void(const std::string& error)>;
+  using ShutdownCallback = std::function<void()>;  // Called before application exit for cleanup
 
   explicit AutoUpdater(UpdateConfig config = {});
   ~AutoUpdater();
@@ -125,6 +127,9 @@ class AutoUpdater {
   // Set error callback
   void on_error(ErrorCallback callback);
 
+  // Set shutdown callback (called before application exit during update installation)
+  void on_shutdown(ShutdownCallback callback);
+
   // Get/set configuration
   const UpdateConfig& config() const { return config_; }
   void set_config(UpdateConfig config) { config_ = std::move(config); }
@@ -143,6 +148,7 @@ class AutoUpdater {
 
   UpdateConfig config_;
   ErrorCallback error_callback_;
+  ShutdownCallback shutdown_callback_;
   std::optional<ReleaseInfo> cached_release_;
   std::vector<Version> ignored_versions_;
 };
