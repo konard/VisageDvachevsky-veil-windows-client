@@ -412,9 +412,10 @@ struct AutoUpdater::Impl {
       if (task.valid()) {
         try {
           task.wait();
-        } catch (const std::exception&) {
-          // Ignore exceptions during cleanup - nothing we can do at this point
           // NOLINTNEXTLINE(bugprone-empty-catch)
+        } catch (const std::exception&) {
+          // Intentionally empty: ignore exceptions during cleanup since
+          // the destructor cannot propagate them and there is no recovery.
         }
       }
     }
@@ -629,8 +630,9 @@ void AutoUpdater::download_update(const ReleaseInfo& release,
   impl_->pending_tasks.push_back(std::move(future));
 }
 
-bool AutoUpdater::install_update(const std::string& installer_path,
-                                 std::string& error) {
+bool AutoUpdater::install_update(
+    [[maybe_unused]] const std::string& installer_path,
+    std::string& error) {
 #ifdef _WIN32
   // Use ShellExecute to run the installer with elevation
   SHELLEXECUTEINFOA sei = {};

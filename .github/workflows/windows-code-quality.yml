@@ -156,7 +156,8 @@ jobs:
             -DVEIL_BUILD_TESTS=ON `
             -DVEIL_BUILD_GUI=OFF `
             -DVEIL_BUILD_SERVER=OFF `
-            -DVEIL_BUILD_SERVICE=ON
+            -DVEIL_BUILD_SERVICE=ON `
+            -DCMAKE_CXX_FLAGS="-DFMT_USE_CONSTEVAL=0"
 
       - name: Build with clang-tidy
         run: cmake --build build --config Debug 2>&1 | Tee-Object -FilePath clang-tidy.log

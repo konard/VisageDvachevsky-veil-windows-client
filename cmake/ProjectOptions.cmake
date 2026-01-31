@@ -25,15 +25,24 @@ if(VEIL_ENABLE_SANITIZERS)
 endif()
 
 if(VEIL_ENABLE_CLANG_TIDY)
-  find_program(CLANG_TIDY_EXE NAMES clang-tidy)
-  if(CLANG_TIDY_EXE)
-    # Store the clang-tidy executable path but don't set CMAKE_CXX_CLANG_TIDY
-    # globally, as that would apply to external dependencies too.
-    # Instead, we'll apply it per-target using veil_set_warnings().
-    set(VEIL_CLANG_TIDY_COMMAND "${CLANG_TIDY_EXE}" CACHE STRING "")
-    message(STATUS "clang-tidy found: ${CLANG_TIDY_EXE}")
+  # Disable clang-tidy on MSVC builds: the MSVC-bundled clang-tidy uses
+  # --driver-mode=cl and does not properly inherit /EHsc, causing false
+  # "cannot use 'throw' with exceptions disabled" errors.  The dedicated
+  # Windows Code Quality workflow runs clang-tidy separately with the
+  # LLVM/Clang compiler where exceptions work correctly.
+  if(NOT MSVC)
+    find_program(CLANG_TIDY_EXE NAMES clang-tidy)
+    if(CLANG_TIDY_EXE)
+      # Store the clang-tidy executable path but don't set CMAKE_CXX_CLANG_TIDY
+      # globally, as that would apply to external dependencies too.
+      # Instead, we'll apply it per-target using veil_set_warnings().
+      set(VEIL_CLANG_TIDY_COMMAND "${CLANG_TIDY_EXE}" CACHE STRING "")
+      message(STATUS "clang-tidy found: ${CLANG_TIDY_EXE}")
+    else()
+      message(WARNING "clang-tidy requested but not found")
+    endif()
   else()
-    message(WARNING "clang-tidy requested but not found")
+    message(STATUS "clang-tidy disabled on MSVC builds (use Windows Code Quality workflow instead)")
   endif()
 endif()
 
