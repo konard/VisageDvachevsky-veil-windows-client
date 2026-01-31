@@ -10,6 +10,7 @@
 #include <system_error>
 #include <vector>
 
+#include "../constants.h"
 #include "ipc_protocol.h"
 
 #ifdef _WIN32
@@ -24,11 +25,11 @@ namespace veil::ipc {
 
 // Default socket/pipe paths
 #ifdef _WIN32
-constexpr const char* kDefaultClientSocketPath = "\\\\.\\pipe\\veil-client";
-constexpr const char* kDefaultServerSocketPath = "\\\\.\\pipe\\veil-server";
+constexpr const char* kDefaultClientSocketPath = veil::kIpcClientPipeName;
+constexpr const char* kDefaultServerSocketPath = veil::kIpcServerPipeName;
 #else
-constexpr const char* kDefaultClientSocketPath = "/tmp/veil-client.sock";
-constexpr const char* kDefaultServerSocketPath = "/tmp/veil-server.sock";
+constexpr const char* kDefaultClientSocketPath = veil::kIpcClientSocketPath;
+constexpr const char* kDefaultServerSocketPath = veil::kIpcServerSocketPath;
 #endif
 
 // Forward declarations for platform-specific implementations
