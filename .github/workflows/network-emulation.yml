@@ -48,7 +48,7 @@ jobs:
             --timeout 180 \
             -R "veil_integration_transport"
         env:
-          ASAN_OPTIONS: detect_leaks=0
+          ASAN_OPTIONS: detect_leaks=1
 
       - name: Clean netem (delay)
         if: always()
@@ -69,7 +69,7 @@ jobs:
             --timeout 180 \
             -R "veil_integration_reliability"
         env:
-          ASAN_OPTIONS: detect_leaks=0
+          ASAN_OPTIONS: detect_leaks=1
 
       - name: Clean netem (packet loss)
         if: always()
@@ -90,7 +90,7 @@ jobs:
             --timeout 300 \
             -R "veil_integration_"
         env:
-          ASAN_OPTIONS: detect_leaks=0
+          ASAN_OPTIONS: detect_leaks=1
 
       - name: Clean netem (high latency)
         if: always()
@@ -111,7 +111,7 @@ jobs:
             --timeout 300 \
             -R "veil_integration_transport"
         env:
-          ASAN_OPTIONS: detect_leaks=0
+          ASAN_OPTIONS: detect_leaks=1
 
       - name: Final netem cleanup
         if: always()

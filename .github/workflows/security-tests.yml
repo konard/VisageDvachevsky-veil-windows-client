@@ -39,7 +39,7 @@ jobs:
             --gtest_filter="CryptoTests.*:HandshakeTests.*:ReplayWindowTests.*:HandshakeReplayCacheTests.*" \
             --gtest_output=xml:crypto-test-results.xml
         env:
-          ASAN_OPTIONS: detect_leaks=0
+          ASAN_OPTIONS: detect_leaks=1
 
       - name: Run security integration tests
         run: |
@@ -49,7 +49,7 @@ jobs:
             -R "veil_integration_security"
         env:
           VEIL_SKIP_NETEM: 1
-          ASAN_OPTIONS: detect_leaks=0
+          ASAN_OPTIONS: detect_leaks=1
 
       - name: Run handshake integration tests
         run: |
@@ -59,7 +59,7 @@ jobs:
             -R "veil_integration_handshake"
         env:
           VEIL_SKIP_NETEM: 1
-          ASAN_OPTIONS: detect_leaks=0
+          ASAN_OPTIONS: detect_leaks=1
 
       - name: Run obfuscation tests
         run: |
@@ -67,7 +67,7 @@ jobs:
             --gtest_filter="ObfuscationTests.*" \
             --gtest_output=xml:obfuscation-test-results.xml
         env:
-          ASAN_OPTIONS: detect_leaks=0
+          ASAN_OPTIONS: detect_leaks=1
 
       - name: Verify packet encryption tests
         run: |
@@ -75,7 +75,7 @@ jobs:
             --gtest_filter="PacketTests.*" \
             --gtest_output=xml:packet-test-results.xml
         env:
-          ASAN_OPTIONS: detect_leaks=0
+          ASAN_OPTIONS: detect_leaks=1
 
       - name: Upload test results
         if: always()
