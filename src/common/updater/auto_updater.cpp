@@ -3,11 +3,14 @@
 #include <algorithm>
 #include <chrono>
 #include <fstream>
+#include <future>
+#include <iomanip>
 #include <regex>
 #include <sstream>
 #include <thread>
 
 #include <nlohmann/json.hpp>
+#include <sodium.h>
 
 #include "../logging/logger.h"
 
@@ -249,7 +252,7 @@ static size_t write_callback(void* contents, size_t size, size_t nmemb,
 
 static std::string http_get(const std::string& url, std::string& error) {
   CURL* curl = curl_easy_init();
-  if (!curl) {
+  if (curl == nullptr) {
     error = "Failed to initialize libcurl";
     return "";
   }
@@ -279,7 +282,7 @@ struct DownloadProgress {
 static int progress_callback(void* clientp, curl_off_t dltotal, curl_off_t dlnow,
                              curl_off_t /*ultotal*/, curl_off_t /*ulnow*/) {
   auto* progress = static_cast<DownloadProgress*>(clientp);
-  if (progress && progress->callback && *progress->callback) {
+  if (progress != nullptr && progress->callback != nullptr && *progress->callback) {
     (*progress->callback)(static_cast<size_t>(dlnow),
                           static_cast<size_t>(dltotal));
   }
@@ -290,13 +293,13 @@ static bool http_download(const std::string& url, const std::string& path,
                           std::function<void(size_t, size_t)> progress,
                           std::string& error) {
   CURL* curl = curl_easy_init();
-  if (!curl) {
+  if (curl == nullptr) {
     error = "Failed to initialize libcurl";
     return false;
   }
 
   FILE* file = fopen(path.c_str(), "wb");
-  if (!file) {
+  if (file == nullptr) {
     error = "Failed to create file: " + path;
     curl_easy_cleanup(curl);
     return false;
@@ -330,11 +333,93 @@ static bool http_download(const std::string& url, const std::string& path,
 #endif
 
 // ============================================================================
+// Checksum Verification
+// ============================================================================
+
+// Calculate SHA256 checksum of a file
+static std::string calculate_sha256(const std::string& file_path,
+                                     std::string& error) {
+  std::ifstream file(file_path, std::ios::binary);
+  if (!file) {
+    error = "Failed to open file for checksum: " + file_path;
+    return "";
+  }
+
+  crypto_hash_sha256_state state;
+  crypto_hash_sha256_init(&state);
+
+  char buffer[8192];
+  while (file.read(buffer, sizeof(buffer)) || file.gcount() > 0) {
+    crypto_hash_sha256_update(&state,
+                              reinterpret_cast<unsigned char*>(buffer),
+                              static_cast<unsigned long long>(file.gcount()));
+  }
+
+  unsigned char hash[crypto_hash_sha256_BYTES];
+  crypto_hash_sha256_final(&state, hash);
+
+  // Convert to hex string
+  std::stringstream ss;
+  ss << std::hex << std::setfill('0');
+  for (const unsigned char byte : hash) {
+    ss << std::setw(2) << static_cast<int>(byte);
+  }
+
+  return ss.str();
+}
+
+// Verify SHA256 checksum of a file
+static bool verify_sha256(const std::string& file_path,
+                          const std::string& expected_checksum,
+                          std::string& error) {
+  if (expected_checksum.empty()) {
+    // No checksum provided, skip verification
+    LOG_WARN("No SHA256 checksum provided for file: {}", file_path);
+    return true;
+  }
+
+  std::string actual_checksum = calculate_sha256(file_path, error);
+  if (actual_checksum.empty()) {
+    return false;
+  }
+
+  // Case-insensitive comparison
+  std::string expected_lower = expected_checksum;
+  std::transform(expected_lower.begin(), expected_lower.end(),
+                 expected_lower.begin(), ::tolower);
+
+  if (actual_checksum != expected_lower) {
+    error = "SHA256 checksum mismatch. Expected: " + expected_checksum +
+            ", Actual: " + actual_checksum;
+    return false;
+  }
+
+  LOG_DEBUG("SHA256 checksum verified: {}", file_path);
+  return true;
+}
+
+// ============================================================================
 // AutoUpdater Implementation
 // ============================================================================
 
 struct AutoUpdater::Impl {
   std::string last_check_time;
+  std::vector<std::future<void>> pending_tasks;  // Track async tasks
+
+  ~Impl() {
+    // Wait for all pending tasks to complete during cleanup
+    for (auto& task : pending_tasks) {
+      if (task.valid()) {
+        try {
+          task.wait();
+        } catch (const std::exception&) {
+          // Ignore exceptions during cleanup - nothing we can do at this point
+          // NOLINTNEXTLINE(bugprone-empty-catch)
+        }
+      }
+    }
+    pending_tasks.clear();
+  }
 };
 
 AutoUpdater::AutoUpdater(UpdateConfig config)
@@ -351,13 +436,25 @@ Version AutoUpdater::current_version() {
   return v;
 }
 
-void AutoUpdater::check_for_updates(CheckCallback callback) {
-  std::thread([this, callback]() {
-    auto release = check_for_updates_sync();
-    if (callback) {
-      callback(release.has_value(), release.value_or(ReleaseInfo{}));
+void AutoUpdater::check_for_updates(const CheckCallback& callback) {
+  // Use std::async instead of detached thread for better error handling
+  auto future = std::async(std::launch::async, [this, callback]() {
+    try {
+      auto release = check_for_updates_sync();
+      if (callback) {
+        callback(release.has_value(), release.value_or(ReleaseInfo{}));
+      }
+    } catch (const std::exception& e) {
+      // NOLINTNEXTLINE(bugprone-lambda-function-name)
+      LOG_ERROR("Exception in check_for_updates: {}", e.what());
+      if (error_callback_) {
+        error_callback_(std::string("Check error: ") + e.what());
+      }
     }
-  }).detach();
+  });
+
+  // Store the future to ensure cleanup on destruction
+  impl_->pending_tasks.push_back(std::move(future));
 }
 
 std::optional<ReleaseInfo> AutoUpdater::check_for_updates_sync() {
@@ -411,15 +508,23 @@ std::optional<ReleaseInfo> AutoUpdater::check_for_updates_sync() {
         ra.name = asset.value("name", "");
         ra.download_url = asset.value("browser_download_url", "");
         ra.content_type = asset.value("content_type", "");
-        ra.size = asset.value("size", 0);
+        ra.size = static_cast<std::size_t>(asset.value("size", 0));
         release.assets.push_back(ra);
       }
     }
 
-    // Update last check time
+    // Update last check time (thread-safe)
     auto now = std::chrono::system_clock::now();
     auto time = std::chrono::system_clock::to_time_t(now);
-    impl_->last_check_time = std::ctime(&time);
+    std::tm tm_buf;
+#ifdef _WIN32
+    localtime_s(&tm_buf, &time);
+#else
+    localtime_r(&time, &tm_buf);
+#endif
+    std::ostringstream oss;
+    oss << std::put_time(&tm_buf, "%Y-%m-%d %H:%M:%S");
+    impl_->last_check_time = oss.str();
 
     // Check if this is a newer version
     Version current = current_version();
@@ -457,46 +562,71 @@ std::optional<ReleaseInfo> AutoUpdater::check_for_updates_sync() {
 }
 
 void AutoUpdater::download_update(const ReleaseInfo& release,
-                                  DownloadProgressCallback progress_callback,
-                                  DownloadCompleteCallback complete_callback) {
-  std::thread([this, release, progress_callback, complete_callback]() {
-    auto installer = release.find_installer();
-    if (!installer) {
-      if (complete_callback) {
-        complete_callback(false, "No installer found for this platform");
+                                  const DownloadProgressCallback& progress_callback,
+                                  const DownloadCompleteCallback& complete_callback) {
+  // Use std::async instead of detached thread for better error handling
+  auto future = std::async(std::launch::async,
+                          [this, release, progress_callback, complete_callback]() {
+    try {
+      auto installer = release.find_installer();
+      if (!installer) {
+        if (complete_callback) {
+          complete_callback(false, "No installer found for this platform");
+        }
+        return;
       }
-      return;
-    }
 
-    // Determine download path
-    std::string download_dir = config_.download_directory;
-    if (download_dir.empty()) {
+      // Determine download path
+      std::string download_dir = config_.download_directory;
+      if (download_dir.empty()) {
 #ifdef _WIN32
-      char temp_path[MAX_PATH];
-      GetTempPathA(MAX_PATH, temp_path);
-      download_dir = temp_path;
+        char temp_path[MAX_PATH];
+        GetTempPathA(MAX_PATH, temp_path);
+        download_dir = temp_path;
 #else
-      download_dir = "/tmp";
+        download_dir = "/tmp";
 #endif
-    }
+      }
 
-    std::string download_path = download_dir + "/" + installer->name;
+      std::string download_path = download_dir + "/" + installer->name;
 
-    LOG_INFO("Downloading update: {} -> {}", installer->download_url,
-             download_path);
+      // NOLINTNEXTLINE(bugprone-lambda-function-name)
+      LOG_INFO("Downloading update: {} -> {}", installer->download_url,
+               download_path);
 
-    std::string error;
-    bool success = http_download(installer->download_url, download_path,
-                                 progress_callback, error);
+      std::string error;
+      bool success = http_download(installer->download_url, download_path,
+                                   progress_callback, error);
 
-    if (complete_callback) {
-      if (success) {
-        complete_callback(true, download_path);
-      } else {
-        complete_callback(false, error);
+      if (success && !installer->sha256_checksum.empty()) {
+        // Verify checksum if provided
+        // NOLINTNEXTLINE(bugprone-lambda-function-name)
+        LOG_INFO("Verifying SHA256 checksum: {}", installer->sha256_checksum);
+        if (!verify_sha256(download_path, installer->sha256_checksum, error)) {
+          // NOLINTNEXTLINE(bugprone-lambda-function-name)
+          LOG_ERROR("Checksum verification failed: {}", error);
+          success = false;
+        }
+      }
+
+      if (complete_callback) {
+        if (success) {
+          complete_callback(true, download_path);
+        } else {
+          complete_callback(false, error);
+        }
+      }
+    } catch (const std::exception& e) {
+      // NOLINTNEXTLINE(bugprone-lambda-function-name)
+      LOG_ERROR("Exception in download_update: {}", e.what());
+      if (complete_callback) {
+        complete_callback(false, std::string("Download error: ") + e.what());
       }
     }
-  }).detach();
+  });
+
+  // Store the future to ensure cleanup on destruction
+  impl_->pending_tasks.push_back(std::move(future));
 }
 
 bool AutoUpdater::install_update(const std::string& installer_path,
@@ -515,9 +645,20 @@ bool AutoUpdater::install_update(const std::string& installer_path,
     return false;
   }
 
-  // Exit the current application to allow the installer to proceed
-  LOG_INFO("Installer launched, exiting application");
-  ExitProcess(0);
+  // Call shutdown callback for graceful cleanup before exit
+  LOG_INFO("Installer launched, initiating graceful shutdown");
+  if (shutdown_callback_) {
+    try {
+      shutdown_callback_();
+    } catch (const std::exception& e) {
+      LOG_ERROR("Exception during shutdown callback: {}", e.what());
+    }
+  }
+
+  // Exit the application (after cleanup)
+  // Note: The application should handle the shutdown callback to close
+  // connections, save state, etc. before this point
+  std::exit(0);
 #else
   // On Linux, we might use a different approach (e.g., package manager)
   LOG_WARN("Auto-installation not implemented for this platform");
@@ -534,6 +675,10 @@ std::optional<ReleaseInfo> AutoUpdater::get_cached_release() const {
 
 void AutoUpdater::on_error(ErrorCallback callback) {
   error_callback_ = std::move(callback);
+}
+
+void AutoUpdater::on_shutdown(ShutdownCallback callback) {
+  shutdown_callback_ = std::move(callback);
 }
 
 std::string AutoUpdater::get_last_check_time() const {

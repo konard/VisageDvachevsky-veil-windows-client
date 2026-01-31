@@ -24,6 +24,7 @@
 #include <QDebug>
 #include <QProgressDialog>
 
+#include "common/constants.h"
 #include "common/gui/theme.h"
 #include "common/ipc/ipc_protocol.h"
 #include "common/version.h"
@@ -1815,11 +1816,8 @@ bool MainWindow::ensureServiceRunning() {
 }
 
 bool MainWindow::checkServiceReady() {
-  static constexpr const char* kReadyEventName = "Global\\VEIL_SERVICE_READY";
-  static constexpr const char* kPipeName = "\\\\.\\pipe\\veil-client";
-
   // Phase 1: Try the Windows Event signal (non-blocking check)
-  HANDLE event = OpenEventA(SYNCHRONIZE, FALSE, kReadyEventName);
+  HANDLE event = OpenEventA(SYNCHRONIZE, FALSE, veil::kServiceReadyEventName);
   if (event) {
     DWORD result = WaitForSingleObject(event, 0);  // 0 = immediate check, no wait
     CloseHandle(event);
@@ -1830,7 +1828,7 @@ bool MainWindow::checkServiceReady() {
   }
 
   // Phase 2: Check if Named Pipe is available (non-blocking)
-  if (WaitNamedPipeA(kPipeName, 0)) {  // 0 = immediate check, no wait
+  if (WaitNamedPipeA(veil::kIpcClientPipeName, 0)) {  // 0 = immediate check, no wait
     qDebug() << "checkServiceReady: Named Pipe is available - IPC server is ready";
     return true;
   }

@@ -23,6 +23,7 @@
 #include <thread>
 #include <type_traits>
 
+#include "../common/constants.h"
 #include "../common/ipc/ipc_protocol.h"
 #include "../common/ipc/ipc_socket.h"
 #include "../common/logging/logger.h"
@@ -56,9 +57,6 @@ static bool g_routes_configured{false};
 static bool g_route_all_traffic{false};
 static std::vector<std::string> g_custom_routes;
 static HANDLE g_ready_event{nullptr};
-
-// Name of the Windows Event used to signal that the IPC server is ready
-static constexpr const char* kServiceReadyEventName = "Global\\VEIL_SERVICE_READY";
 
 // Forward declarations
 void WINAPI service_main(DWORD argc, LPSTR* argv);
@@ -271,10 +269,10 @@ void WINAPI service_main(DWORD /*argc*/, LPSTR* /*argv*/) {
 // connect before the Named Pipe is created.
 
 void signal_ready() {
-  g_ready_event = CreateEventA(nullptr, TRUE, FALSE, kServiceReadyEventName);
+  g_ready_event = CreateEventA(nullptr, TRUE, FALSE, veil::kServiceReadyEventName);
   if (g_ready_event) {
     SetEvent(g_ready_event);
-    LOG_INFO("Service ready event signaled: {}", kServiceReadyEventName);
+    LOG_INFO("Service ready event signaled: {}", veil::kServiceReadyEventName);
   } else {
     LOG_WARN("Failed to create service ready event (error {}), GUI will "
              "fall back to Named Pipe polling",
@@ -319,7 +317,7 @@ void run_service() {
     LOG_WARN("Service will continue but GUI will not be able to connect");
   } else {
     LOG_INFO("IPC server started successfully");
-    LOG_INFO("Listening on named pipe: \\\\.\\pipe\\veil-client");
+    LOG_INFO("Listening on named pipe: {}", veil::kIpcClientPipeName);
     signal_ready();
   }
 

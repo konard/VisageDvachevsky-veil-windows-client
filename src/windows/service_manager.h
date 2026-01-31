@@ -7,6 +7,8 @@
 #include <functional>
 #include <string>
 
+#include "../common/constants.h"
+
 namespace veil::windows {
 
 // ============================================================================
@@ -18,10 +20,9 @@ namespace veil::windows {
 class ServiceManager {
  public:
   // Service name and display name
-  static constexpr const char* kServiceName = "VeilVPN";
-  static constexpr const char* kServiceDisplayName = "VEIL VPN Service";
-  static constexpr const char* kServiceDescription =
-      "Provides secure VPN connectivity through the VEIL protocol";
+  static constexpr const char* kServiceName = veil::kServiceName;
+  static constexpr const char* kServiceDisplayName = veil::kServiceDisplayName;
+  static constexpr const char* kServiceDescription = veil::kServiceDescription;
 
   // Install the service
   // executable_path: Full path to veil-service.exe
