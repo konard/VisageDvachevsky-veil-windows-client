@@ -24,8 +24,8 @@ class AppListItem : public QWidget {
   Q_OBJECT
 
  public:
-  explicit AppListItem(const std::string& appName,
-                       const std::string& exePath,
+  explicit AppListItem(std::string appName,
+                       std::string exePath,
                        bool isSystemApp,
                        QWidget* parent = nullptr);
 

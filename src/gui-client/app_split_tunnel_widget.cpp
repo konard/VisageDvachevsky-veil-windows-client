@@ -8,6 +8,7 @@
 #include <QSettings>
 #include <QScrollArea>
 #include <algorithm>
+#include <utility>
 
 #include "common/gui/theme.h"
 
@@ -15,13 +16,13 @@ namespace veil::gui {
 
 // AppListItem implementation
 
-AppListItem::AppListItem(const std::string& appName,
-                         const std::string& exePath,
+AppListItem::AppListItem(std::string appName,
+                         std::string exePath,
                          bool isSystemApp,
                          QWidget* parent)
     : QWidget(parent),
-      appName_(appName),
-      exePath_(exePath),
+      appName_(std::move(appName)),
+      exePath_(std::move(exePath)),
       isSystemApp_(isSystemApp) {
   setupUi();
 }
@@ -216,7 +217,7 @@ void AppSplitTunnelWidget::setupUi() {
   auto* customLayout = new QHBoxLayout(customGroup);
 
   customPathEdit_ = new QLineEdit(this);
-  customPathEdit_->setPlaceholderText("C:\\Path\\to\\application.exe");
+  customPathEdit_->setPlaceholderText(R"(C:\Path\to\application.exe)");
   customLayout->addWidget(customPathEdit_, 1);
 
   browseCustomButton_ = new QPushButton("Browse...", this);
