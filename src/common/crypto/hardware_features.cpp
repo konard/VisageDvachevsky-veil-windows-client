@@ -7,7 +7,14 @@
 // Platform-specific CPUID detection
 #if defined(_MSC_VER)
   #include <intrin.h>
-  #define VEIL_HAS_CPUID 1
+  #if defined(_M_X64) || defined(_M_IX86)
+    #define VEIL_HAS_CPUID 1
+  #endif
+  // Clang on Windows also defines _MSC_VER; include <cpuid.h> so
+  // the GCC/Clang-style __cpuid() wrapper is available.
+  #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__))
+    #include <cpuid.h>
+  #endif
 #elif defined(__GNUC__) || defined(__clang__)
   #if defined(__x86_64__) || defined(__i386__)
     #include <cpuid.h>
@@ -39,21 +46,9 @@ namespace {
 
 #if defined(VEIL_HAS_CPUID)
 
-#if defined(_MSC_VER)
-// MSVC CPUID wrapper
-void cpuid(int info[4], int function_id) {
-  __cpuid(info, function_id);
-}
-
-void cpuidex(int info[4], int function_id, int subfunction_id) {
-  __cpuidex(info, function_id, subfunction_id);
-}
-
-std::uint64_t xgetbv(unsigned int index) {
-  return _xgetbv(index);
-}
-#else
-// GCC/Clang CPUID wrapper
+#if defined(__clang__) || defined(__GNUC__)
+// GCC/Clang CPUID wrapper (must check before _MSC_VER since Clang on
+// Windows defines both __clang__ and _MSC_VER)
 void cpuid(int info[4], int function_id) {
   __cpuid(function_id,
           reinterpret_cast<unsigned int&>(info[0]),
@@ -75,6 +70,19 @@ std::uint64_t xgetbv(unsigned int index) {
   std::uint32_t edx = 0;
   __asm__ __volatile__("xgetbv" : "=a"(eax), "=d"(edx) : "c"(index));
   return (static_cast<std::uint64_t>(edx) << 32) | eax;
+}
+#elif defined(_MSC_VER)
+// MSVC CPUID wrapper
+void cpuid(int info[4], int function_id) {
+  __cpuid(info, function_id);
+}
+
+void cpuidex(int info[4], int function_id, int subfunction_id) {
+  __cpuidex(info, function_id, subfunction_id);
+}
+
+std::uint64_t xgetbv(unsigned int index) {
+  return _xgetbv(index);
 }
 #endif  // _MSC_VER
 

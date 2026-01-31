@@ -11,14 +11,9 @@
 #include "common/crypto/hardware_features.h"
 
 // Include platform-specific intrinsics for AES-NI
-#if defined(_MSC_VER)
-  #include <intrin.h>
-  #if defined(_M_X64) || defined(_M_IX86)
-    #include <wmmintrin.h>  // AES-NI
-    #include <emmintrin.h>  // SSE2
-    #define VEIL_HAS_AES_INTRINSICS 1
-  #endif
-#elif defined(__GNUC__) || defined(__clang__)
+// Note: Clang check must come before _MSC_VER because Clang on Windows
+// also defines _MSC_VER but requires -maes for AES intrinsics.
+#if defined(__clang__) || defined(__GNUC__)
   #if defined(__x86_64__) || defined(__i386__)
     #if defined(__AES__) && defined(__SSE2__)
       #include <wmmintrin.h>  // AES-NI
@@ -29,6 +24,13 @@
       // We'll use runtime detection and software fallback
       #define VEIL_HAS_AES_INTRINSICS 0
     #endif
+  #endif
+#elif defined(_MSC_VER)
+  #include <intrin.h>
+  #if defined(_M_X64) || defined(_M_IX86)
+    #include <wmmintrin.h>  // AES-NI
+    #include <emmintrin.h>  // SSE2
+    #define VEIL_HAS_AES_INTRINSICS 1
   #endif
 #endif
 
