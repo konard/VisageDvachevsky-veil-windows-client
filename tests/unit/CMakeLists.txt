@@ -112,6 +112,12 @@ if(Qt6_FOUND)
     ${CMAKE_SOURCE_DIR}/src/gui-client/collapsible_section.h
     ${CMAKE_SOURCE_DIR}/src/gui-client/app_split_tunnel_widget.cpp
     ${CMAKE_SOURCE_DIR}/src/gui-client/app_split_tunnel_widget.h
+    ${CMAKE_SOURCE_DIR}/src/gui-client/notification_preferences.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui-client/notification_preferences.h
+    ${CMAKE_SOURCE_DIR}/src/gui-client/notification_history_dialog.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui-client/notification_history_dialog.h
+    ${CMAKE_SOURCE_DIR}/src/gui-client/server_config.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui-client/server_config.h
   )
 
   target_include_directories(veil_gui_tests PRIVATE
