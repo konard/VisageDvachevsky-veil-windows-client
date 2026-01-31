@@ -35,7 +35,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
@@ -206,7 +206,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download build artifacts
         uses: actions/download-artifact@v4
@@ -247,7 +247,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
