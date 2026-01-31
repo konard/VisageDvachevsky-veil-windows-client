@@ -66,6 +66,7 @@ add_executable(veil_unit_tests
   thread_pool_tests.cpp
   packet_pool_tests.cpp
   error_message_tests.cpp
+  ipc_protocol_tests.cpp
   ${VEIL_PLATFORM_TEST_SOURCES}
 )
 
