@@ -4,6 +4,7 @@
 #include <QString>
 #include <QDateTime>
 #include <QVector>
+#include <utility>
 
 namespace veil::gui {
 
@@ -15,11 +16,11 @@ struct NotificationEvent {
   QString eventType;  // "connection", "minimized", "update", "error"
 
   NotificationEvent() = default;
-  NotificationEvent(const QString& title_, const QString& message_, const QString& eventType_)
+  NotificationEvent(QString title_, QString message_, QString eventType_)
       : timestamp(QDateTime::currentDateTime()),
-        title(title_),
-        message(message_),
-        eventType(eventType_) {}
+        title(std::move(title_)),
+        message(std::move(message_)),
+        eventType(std::move(eventType_)) {}
 };
 
 /// Manages notification preferences and history
@@ -71,10 +72,11 @@ class NotificationPreferences {
   /// Check if a specific notification type should be shown
   bool shouldShowNotification(const QString& eventType) const;
 
- private:
-  NotificationPreferences() = default;
   NotificationPreferences(const NotificationPreferences&) = delete;
   NotificationPreferences& operator=(const NotificationPreferences&) = delete;
+
+ private:
+  NotificationPreferences() = default;
 
   void loadHistory();
   void saveHistory();

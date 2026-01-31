@@ -231,7 +231,7 @@ void IpcClientManager::handleMessage(const ipc::Message& msg) {
   if (msg.type == ipc::MessageType::kEvent) {
     qDebug() << "[IpcClientManager] Message is an Event";
     const auto* event = std::get_if<ipc::Event>(&msg.payload);
-    if (!event) {
+    if (event == nullptr) {
       qWarning() << "[IpcClientManager] Failed to extract Event from message payload";
       return;
     }
@@ -285,7 +285,7 @@ void IpcClientManager::handleMessage(const ipc::Message& msg) {
   else if (msg.type == ipc::MessageType::kResponse) {
     qDebug() << "[IpcClientManager] Message is a Response";
     const auto* response = std::get_if<ipc::Response>(&msg.payload);
-    if (!response) {
+    if (response == nullptr) {
       qWarning() << "[IpcClientManager] Failed to extract Response from message payload";
       return;
     }

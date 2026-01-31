@@ -29,7 +29,8 @@ jobs:
             ninja-build \
             clang \
             lld \
-            libsodium-dev
+            libsodium-dev \
+            libcurl4-openssl-dev
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4

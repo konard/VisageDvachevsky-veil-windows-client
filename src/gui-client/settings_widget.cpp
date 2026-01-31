@@ -1116,7 +1116,7 @@ void SettingsWidget::onBrowseObfuscationSeed() {
   }
 }
 
-void SettingsWidget::onLaunchOnStartupChanged(int state) {
+void SettingsWidget::onLaunchOnStartupChanged([[maybe_unused]] int state) {
 #ifdef _WIN32
   // Update Windows registry to add/remove application from startup
   QSettings registrySettings(
@@ -1394,7 +1394,7 @@ void SettingsWidget::loadSettings() {
   enablePerAppRoutingCheck_->setChecked(settings.value("routing/enablePerAppRouting", false).toBool());
 
   // Load per-app routing settings
-  if (appSplitTunnelWidget_) {
+  if (appSplitTunnelWidget_ != nullptr) {
     appSplitTunnelWidget_->loadFromSettings();
   }
 
@@ -1537,7 +1537,7 @@ void SettingsWidget::saveSettings() {
   settings.setValue("routing/enablePerAppRouting", enablePerAppRoutingCheck_->isChecked());
 
   // Save per-app routing settings
-  if (appSplitTunnelWidget_) {
+  if (appSplitTunnelWidget_ != nullptr) {
     appSplitTunnelWidget_->saveToSettings();
   }
 

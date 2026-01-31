@@ -212,7 +212,7 @@ void ServerSelectorWidget::onManageServersClicked() {
 
 void ServerSelectorWidget::onRefreshLatency() {
   auto server = getCurrentServer();
-  if (!server) {
+  if (!server.has_value()) {
     latencyLabel_->setText("<span style='color: #6e7681;'>—</span>");
     return;
   }
@@ -255,7 +255,7 @@ void ServerSelectorWidget::onRefreshLatency() {
 
 void ServerSelectorWidget::updateLatencyDisplay() {
   auto server = getCurrentServer();
-  if (!server) {
+  if (!server.has_value()) {
     latencyLabel_->setText("<span style='color: #6e7681;'>—</span>");
     return;
   }

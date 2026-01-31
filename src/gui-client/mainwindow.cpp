@@ -182,37 +182,47 @@ MainWindow::MainWindow(QWidget* parent)
         connectionProgress->setLabelText(tr("Starting VEIL service..."));
         if (ensureServiceRunning()) {
           qDebug() << "MainWindow: Service startup succeeded, waiting for IPC server to be ready...";
-          // Wait for the service's IPC Named Pipe to be available before connecting
+          // Wait for the service's IPC Named Pipe to be available before connecting (async)
           connectionProgress->setLabelText(tr("Waiting for service to be ready..."));
-          if (waitForServiceReady(5000)) {
-            qDebug() << "MainWindow: Service IPC is ready, connecting...";
-            connectionProgress->setLabelText(tr("Connecting to daemon..."));
-            if (!ipcManager_->connectToDaemon()) {
-              qWarning() << "MainWindow: Failed to connect to daemon after service ready";
-              statusBar()->showMessage(tr("Failed to connect to daemon after service start"), 5000);
+          waitForServiceReadyAsync(5000, [this, connectionProgress](bool ready) {
+            if (ready) {
+              qDebug() << "MainWindow: Service IPC is ready, connecting...";
+              connectionProgress->setLabelText(tr("Connecting to daemon..."));
+              if (!ipcManager_->connectToDaemon()) {
+                qWarning() << "MainWindow: Failed to connect to daemon after service ready";
+                statusBar()->showMessage(tr("Failed to connect to daemon after service start"), 5000);
+              } else {
+                qDebug() << "MainWindow: Successfully connected to daemon after service start";
+              }
             } else {
-              qDebug() << "MainWindow: Successfully connected to daemon after service start";
+              qWarning() << "MainWindow: Timed out waiting for service IPC, attempting connection anyway...";
+              if (!ipcManager_->connectToDaemon()) {
+                qWarning() << "MainWindow: Failed to connect to daemon after timeout";
+                statusBar()->showMessage(tr("Failed to connect to daemon after service start"), 5000);
+              } else {
+                qDebug() << "MainWindow: Successfully connected to daemon despite timeout";
+              }
             }
-          } else {
-            qWarning() << "MainWindow: Timed out waiting for service IPC, attempting connection anyway...";
-            if (!ipcManager_->connectToDaemon()) {
-              qWarning() << "MainWindow: Failed to connect to daemon after timeout";
-              statusBar()->showMessage(tr("Failed to connect to daemon after service start"), 5000);
-            } else {
-              qDebug() << "MainWindow: Successfully connected to daemon despite timeout";
-            }
-          }
+            // Close the progress dialog after async operation completes
+            connectionProgress->close();
+            connectionProgress->deleteLater();
+          });
+          // Return early - the callback will handle completion
+          return;
         } else {
           qWarning() << "MainWindow: Failed to ensure service is running";
           statusBar()->showMessage(tr("Failed to start VEIL service - run as administrator"), 5000);
+          // Close the progress dialog
+          connectionProgress->close();
+          connectionProgress->deleteLater();
         }
       } else {
         qDebug() << "MainWindow: Successfully connected to daemon on retry";
         statusBar()->showMessage(tr("Connected to daemon"), 3000);
+        // Close the progress dialog
+        connectionProgress->close();
+        connectionProgress->deleteLater();
       }
-      // Close the progress dialog
-      connectionProgress->close();
-      connectionProgress->deleteLater();
     });
 #else
     statusBar()->showMessage(tr("Daemon not running - start veil-client first"), 5000);
@@ -482,27 +492,28 @@ void MainWindow::setupIpcConnections() {
 
         qDebug() << "[MainWindow] Service should be running now, waiting for IPC server to be ready...";
 
-        // Wait for service IPC to be ready, then retry connection
+        // Wait for service IPC to be ready, then retry connection (async)
         connectionWidget_->setConnectionState(ConnectionState::kConnecting);
         updateTrayIcon(TrayConnectionState::kConnecting);
 
-        bool service_ready = waitForServiceReady(5000);
-        if (!service_ready) {
-          qWarning() << "[MainWindow] Timed out waiting for service IPC, attempting connection anyway...";
-        }
+        waitForServiceReadyAsync(5000, [this](bool service_ready) {
+          if (!service_ready) {
+            qWarning() << "[MainWindow] Timed out waiting for service IPC, attempting connection anyway...";
+          }
 
-        qDebug() << "[MainWindow] Retrying daemon connection after service startup...";
-        if (!ipcManager_->connectToDaemon()) {
-          qWarning() << "[MainWindow] Failed to connect to daemon even after service start";
-          showError(errors::daemon_not_running(), true);
-        } else {
-          qDebug() << "[MainWindow] Successfully connected to daemon after service start";
-          qDebug() << "[MainWindow] Now building and sending connection configuration...";
+          qDebug() << "[MainWindow] Retrying daemon connection after service startup...";
+          if (!ipcManager_->connectToDaemon()) {
+            qWarning() << "[MainWindow] Failed to connect to daemon even after service start";
+            showError(errors::daemon_not_running(), true);
+          } else {
+            qDebug() << "[MainWindow] Successfully connected to daemon after service start";
+            qDebug() << "[MainWindow] Now building and sending connection configuration...";
 
-          // Now that we're connected, send the connect command with full config
-          ipc::ConnectionConfig config = buildConnectionConfig();
-          ipcManager_->sendConnect(config);
-        }
+            // Now that we're connected, send the connect command with full config
+            ipc::ConnectionConfig config = buildConnectionConfig();
+            ipcManager_->sendConnect(config);
+          }
+        });
         return;
 #else
         // Failed to connect to daemon - show error
@@ -776,7 +787,7 @@ void MainWindow::setupIpcConnections() {
           this, [this](uint64_t currentUsage, uint64_t limit) {
     Q_UNUSED(limit);
     auto& prefs = NotificationPreferences::instance();
-    if (trayIcon_) {
+    if (trayIcon_ != nullptr) {
       QString msg = QString("Monthly data usage limit reached (%1). ")
                         .arg(currentUsage >= 1073741824ULL
                                  ? QString("%1 GB").arg(static_cast<double>(currentUsage) / 1073741824.0, 0, 'f', 1)
@@ -1313,7 +1324,7 @@ void MainWindow::onQuickDisconnect() {
 }
 
 void MainWindow::updateTrayIcon(TrayConnectionState state) {
-  if (!trayIcon_) return;
+  if (trayIcon_ == nullptr) return;
 
   currentTrayState_ = state;
   QString iconPath;
@@ -1351,13 +1362,13 @@ void MainWindow::updateTrayIcon(TrayConnectionState state) {
   trayIcon_->setIcon(QIcon(iconPath));
   trayIcon_->setToolTip(tooltip);
 
-  if (trayConnectAction_) {
+  if (trayConnectAction_ != nullptr) {
     trayConnectAction_->setEnabled(connectEnabled);
   }
-  if (trayDisconnectAction_) {
+  if (trayDisconnectAction_ != nullptr) {
     trayDisconnectAction_->setEnabled(disconnectEnabled);
   }
-  if (trayCopyIpAction_) {
+  if (trayCopyIpAction_ != nullptr) {
     trayCopyIpAction_->setEnabled(state == TrayConnectionState::kConnected);
   }
 
@@ -1804,46 +1815,66 @@ bool MainWindow::ensureServiceRunning() {
   return false;
 }
 
-bool MainWindow::waitForServiceReady(int timeout_ms) {
-  static constexpr int kPollIntervalMs = 100;
-
-  qDebug() << "waitForServiceReady: Waiting up to" << timeout_ms << "ms for service IPC to be ready...";
-
-  // Phase 1: Try the Windows Event signal (set by the service after IPC server starts)
+bool MainWindow::checkServiceReady() {
+  // Phase 1: Try the Windows Event signal (non-blocking check)
   HANDLE event = OpenEventA(SYNCHRONIZE, FALSE, veil::kServiceReadyEventName);
-  if (event) {
-    qDebug() << "waitForServiceReady: Found service ready event, waiting for signal...";
-    DWORD result = WaitForSingleObject(event, static_cast<DWORD>(timeout_ms));
+  if (event != nullptr) {
+    DWORD result = WaitForSingleObject(event, 0);  // 0 = immediate check, no wait
     CloseHandle(event);
     if (result == WAIT_OBJECT_0) {
-      qDebug() << "waitForServiceReady: Service ready event signaled - IPC server is ready";
+      qDebug() << "checkServiceReady: Service ready event signaled - IPC server is ready";
       return true;
     }
-    qWarning() << "waitForServiceReady: Wait on event timed out or failed (result:" << result << ")";
-  } else {
-    qDebug() << "waitForServiceReady: Service ready event not found, falling back to Named Pipe polling";
   }
 
-  // Phase 2: Fall back to polling for Named Pipe existence
-  // This handles the case where the service was already running (event already signaled
-  // and possibly cleaned up) or the event could not be created.
-  auto start = std::chrono::steady_clock::now();
-  while (true) {
-    if (WaitNamedPipeA(veil::kIpcClientPipeName, 0)) {
-      qDebug() << "waitForServiceReady: Named Pipe is available - IPC server is ready";
-      return true;
+  // Phase 2: Check if Named Pipe is available (non-blocking)
+  if (WaitNamedPipeA(veil::kIpcClientPipeName, 0)) {  // 0 = immediate check, no wait
+    qDebug() << "checkServiceReady: Named Pipe is available - IPC server is ready";
+    return true;
+  }
+
+  return false;
+}
+
+void MainWindow::waitForServiceReadyAsync(int timeout_ms, std::function<void(bool)> callback) {
+  static constexpr int kPollIntervalMs = 100;
+
+  qDebug() << "waitForServiceReadyAsync: Waiting up to" << timeout_ms
+           << "ms for service IPC to be ready (non-blocking)...";
+
+  // Check immediately first
+  if (checkServiceReady()) {
+    qDebug() << "waitForServiceReadyAsync: Service is already ready";
+    callback(true);
+    return;
+  }
+
+  // Set up polling with QTimer (non-blocking, keeps UI responsive)
+  auto startTime = std::chrono::steady_clock::now();
+  auto* timer = new QTimer(this);
+  timer->setInterval(kPollIntervalMs);
+
+  connect(timer, &QTimer::timeout, this, [this, timer, startTime, timeout_ms, callback]() {
+    if (checkServiceReady()) {
+      qDebug() << "waitForServiceReadyAsync: Service is ready";
+      timer->stop();
+      timer->deleteLater();
+      callback(true);
+      return;
     }
 
-    auto elapsed = std::chrono::steady_clock::now() - start;
+    // Check if we've timed out
+    auto elapsed = std::chrono::steady_clock::now() - startTime;
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
     if (elapsed_ms >= timeout_ms) {
-      qWarning() << "waitForServiceReady: Timed out after" << elapsed_ms
-                 << "ms waiting for Named Pipe";
-      return false;
+      qWarning() << "waitForServiceReadyAsync: Timed out after" << elapsed_ms << "ms";
+      timer->stop();
+      timer->deleteLater();
+      callback(false);
     }
+  });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(kPollIntervalMs));
-  }
+  timer->start();
 }
 #endif
 

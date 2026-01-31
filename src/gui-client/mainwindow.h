@@ -11,6 +11,7 @@
 #include <QParallelAnimationGroup>
 #include <QGraphicsOpacityEffect>
 #include <memory>
+#include <functional>
 
 #include "update_checker.h"
 #include "common/gui/error_message.h"
@@ -107,11 +108,16 @@ class MainWindow : public QMainWindow {
   /// Ensure the Windows service is running, starting it if necessary
   bool ensureServiceRunning();
 
-  /// Wait for the service IPC server to be ready for connections.
-  /// Uses a two-phase approach: first checks a Windows Event signal from the
-  /// service, then falls back to polling for the Named Pipe existence.
-  /// Returns true if the service is ready within the timeout.
-  bool waitForServiceReady(int timeout_ms = 5000);
+  /// Wait for the service IPC server to be ready for connections (ASYNC).
+  /// Uses QTimer-based polling to avoid blocking the UI thread.
+  /// Invokes the callback with true if ready, false if timed out.
+  /// @param timeout_ms Maximum time to wait in milliseconds
+  /// @param callback Function to call when ready or timed out
+  void waitForServiceReadyAsync(int timeout_ms, std::function<void(bool)> callback);
+
+  /// Check if the service IPC server is ready right now (non-blocking).
+  /// Returns true if the service is ready for connections.
+  bool checkServiceReady();
 #endif
 
   AnimatedStackedWidget* stackedWidget_;
