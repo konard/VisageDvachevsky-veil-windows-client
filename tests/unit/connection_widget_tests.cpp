@@ -113,7 +113,7 @@ TEST_F(ConnectionWidgetTest, StateTransitionToError) {
 
 TEST_F(ConnectionWidgetTest, UpdateMetricsBasic) {
   widget_->setConnectionState(ConnectionState::kConnected);
-  widget_->updateMetrics(50, 1024 * 100, 1024 * 50);  // 50ms, 100KB/s, 50KB/s
+  widget_->updateMetrics(50, 1024ULL * 100, 1024ULL * 50);  // 50ms, 100KB/s, 50KB/s
   // Should not crash
 }
 
