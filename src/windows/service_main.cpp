@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <iostream>
 #include <map>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -45,6 +46,7 @@ struct ServiceStats {
 static std::atomic<bool> g_running{false};
 static std::atomic<bool> g_connected{false};
 static std::unique_ptr<ipc::IpcServer> g_ipc_server;
+static std::mutex g_ipc_server_mutex;  // Protects g_ipc_server from concurrent access
 static ServiceStats g_stats;
 static std::unique_ptr<tunnel::Tunnel> g_tunnel;
 static std::unique_ptr<std::thread> g_tunnel_thread;
@@ -335,12 +337,15 @@ void run_service() {
 
   while (g_running) {
     // Poll IPC server for messages
-    if (g_ipc_server) {
-      std::error_code ipc_ec;
-      g_ipc_server->poll(ipc_ec);
-      if (ipc_ec && ipc_ec.value() != 0) {
-        // Only log actual errors, not "would block" conditions
-        LOG_DEBUG("IPC poll error (may be normal): {}", ipc_ec.message());
+    {
+      std::lock_guard<std::mutex> lock(g_ipc_server_mutex);
+      if (g_ipc_server) {
+        std::error_code ipc_ec;
+        g_ipc_server->poll(ipc_ec);
+        if (ipc_ec && ipc_ec.value() != 0) {
+          // Only log actual errors, not "would block" conditions
+          LOG_DEBUG("IPC poll error (may be normal): {}", ipc_ec.message());
+        }
       }
     }
 
@@ -380,11 +385,14 @@ void run_service() {
     LOG_INFO("VPN tunnel stopped and cleaned up");
   }
 
-  if (g_ipc_server) {
-    LOG_DEBUG("Stopping IPC server...");
-    g_ipc_server->stop();
-    g_ipc_server.reset();
-    LOG_INFO("IPC server stopped");
+  {
+    std::lock_guard<std::mutex> lock(g_ipc_server_mutex);
+    if (g_ipc_server) {
+      LOG_DEBUG("Stopping IPC server...");
+      g_ipc_server->stop();
+      g_ipc_server.reset();
+      LOG_INFO("IPC server stopped");
+    }
   }
 
   LOG_INFO("========================================");
@@ -688,7 +696,10 @@ void handle_ipc_message(const ipc::Message& msg, int client_fd) {
               LOG_DEBUG("Starting tunnel thread...");
 
               // Start tunnel in background thread
-              g_tunnel_thread = std::make_unique<std::thread>([&]() {
+              // Note: Lambda captures nothing by value/reference because all variables
+              // used are globals. This avoids use-after-free bugs from capturing
+              // stack-local variables from the std::visit visitor lambda.
+              g_tunnel_thread = std::make_unique<std::thread>([]() {
                 LOG_INFO("========================================");
                 LOG_INFO("VPN TUNNEL THREAD STARTED");
                 LOG_INFO("========================================");
@@ -713,8 +724,11 @@ void handle_ipc_message(const ipc::Message& msg, int client_fd) {
                 ipc::Message event_msg;
                 event_msg.type = ipc::MessageType::kEvent;
                 event_msg.payload = ipc::Event{event};
-                if (g_ipc_server) {
-                  g_ipc_server->broadcast_message(event_msg);
+                {
+                  std::lock_guard<std::mutex> lock(g_ipc_server_mutex);
+                  if (g_ipc_server) {
+                    g_ipc_server->broadcast_message(event_msg);
+                  }
                 }
               });
 
@@ -736,7 +750,12 @@ void handle_ipc_message(const ipc::Message& msg, int client_fd) {
               ipc::Message event_msg;
               event_msg.type = ipc::MessageType::kEvent;
               event_msg.payload = ipc::Event{event};
-              g_ipc_server->broadcast_message(event_msg);
+              {
+                std::lock_guard<std::mutex> lock(g_ipc_server_mutex);
+                if (g_ipc_server) {
+                  g_ipc_server->broadcast_message(event_msg);
+                }
+              }
               LOG_DEBUG("Connection state change event broadcasted");
             }
           }
@@ -768,7 +787,12 @@ void handle_ipc_message(const ipc::Message& msg, int client_fd) {
             ipc::Message event_msg;
             event_msg.type = ipc::MessageType::kEvent;
             event_msg.payload = ipc::Event{event};
-            g_ipc_server->broadcast_message(event_msg);
+            {
+              std::lock_guard<std::mutex> lock(g_ipc_server_mutex);
+              if (g_ipc_server) {
+                g_ipc_server->broadcast_message(event_msg);
+              }
+            }
           } else {
             response = ipc::ErrorResponse{"Not connected", ""};
           }
@@ -897,10 +921,13 @@ void handle_ipc_message(const ipc::Message& msg, int client_fd) {
   }
 
   std::error_code ec;
-  if (!g_ipc_server->send_message(client_fd, response_msg, ec)) {
-    LOG_ERROR("Failed to send IPC response: {}", ec.message());
-  } else {
-    LOG_DEBUG("IPC response sent successfully");
+  {
+    std::lock_guard<std::mutex> lock(g_ipc_server_mutex);
+    if (g_ipc_server && !g_ipc_server->send_message(client_fd, response_msg, ec)) {
+      LOG_ERROR("Failed to send IPC response: {}", ec.message());
+    } else if (g_ipc_server) {
+      LOG_DEBUG("IPC response sent successfully");
+    }
   }
   LOG_DEBUG("========================================");
 }
