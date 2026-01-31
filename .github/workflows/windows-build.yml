@@ -35,7 +35,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
@@ -56,7 +56,7 @@ jobs:
         run: choco install ninja -y
 
       - name: Cache vcpkg packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ${{ github.workspace }}/vcpkg
@@ -206,10 +206,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: veil-vpn-windows-x64
           path: installer/
@@ -247,10 +247,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: release-artifacts/
 
@@ -284,7 +284,7 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.version }}
           name: VEIL VPN ${{ steps.version.outputs.version }}

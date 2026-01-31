@@ -31,7 +31,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0  # Full history for changelog
 
@@ -66,7 +66,7 @@ jobs:
         run: choco install ninja -y
 
       - name: Cache vcpkg packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ${{ github.workspace }}/vcpkg
@@ -170,10 +170,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download Windows artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: veil-vpn-windows-x64
           path: installer/
@@ -232,7 +232,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -383,12 +383,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: release-artifacts/
 
