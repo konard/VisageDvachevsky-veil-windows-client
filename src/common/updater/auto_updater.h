@@ -107,15 +107,15 @@ class AutoUpdater {
   static Version current_version();
 
   // Check for updates (async)
-  void check_for_updates(CheckCallback callback);
+  void check_for_updates(const CheckCallback& callback);
 
   // Check for updates (blocking)
   std::optional<ReleaseInfo> check_for_updates_sync();
 
   // Download update (async)
   void download_update(const ReleaseInfo& release,
-                       DownloadProgressCallback progress_callback,
-                       DownloadCompleteCallback complete_callback);
+                       const DownloadProgressCallback& progress_callback,
+                       const DownloadCompleteCallback& complete_callback);
 
   // Install update
   // This will launch the installer and exit the current application

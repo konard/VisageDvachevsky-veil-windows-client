@@ -252,7 +252,7 @@ static size_t write_callback(void* contents, size_t size, size_t nmemb,
 
 static std::string http_get(const std::string& url, std::string& error) {
   CURL* curl = curl_easy_init();
-  if (!curl) {
+  if (curl == nullptr) {
     error = "Failed to initialize libcurl";
     return "";
   }
@@ -282,7 +282,7 @@ struct DownloadProgress {
 static int progress_callback(void* clientp, curl_off_t dltotal, curl_off_t dlnow,
                              curl_off_t /*ultotal*/, curl_off_t /*ulnow*/) {
   auto* progress = static_cast<DownloadProgress*>(clientp);
-  if (progress && progress->callback && *progress->callback) {
+  if (progress != nullptr && progress->callback != nullptr && *progress->callback) {
     (*progress->callback)(static_cast<size_t>(dlnow),
                           static_cast<size_t>(dltotal));
   }
@@ -293,13 +293,13 @@ static bool http_download(const std::string& url, const std::string& path,
                           std::function<void(size_t, size_t)> progress,
                           std::string& error) {
   CURL* curl = curl_easy_init();
-  if (!curl) {
+  if (curl == nullptr) {
     error = "Failed to initialize libcurl";
     return false;
   }
 
   FILE* file = fopen(path.c_str(), "wb");
-  if (!file) {
+  if (file == nullptr) {
     error = "Failed to create file: " + path;
     curl_easy_cleanup(curl);
     return false;
@@ -352,7 +352,7 @@ static std::string calculate_sha256(const std::string& file_path,
   while (file.read(buffer, sizeof(buffer)) || file.gcount() > 0) {
     crypto_hash_sha256_update(&state,
                               reinterpret_cast<unsigned char*>(buffer),
-                              file.gcount());
+                              static_cast<unsigned long long>(file.gcount()));
   }
 
   unsigned char hash[crypto_hash_sha256_BYTES];
@@ -361,8 +361,8 @@ static std::string calculate_sha256(const std::string& file_path,
   // Convert to hex string
   std::stringstream ss;
   ss << std::hex << std::setfill('0');
-  for (size_t i = 0; i < crypto_hash_sha256_BYTES; ++i) {
-    ss << std::setw(2) << static_cast<int>(hash[i]);
+  for (const unsigned char byte : hash) {
+    ss << std::setw(2) << static_cast<int>(byte);
   }
 
   return ss.str();
@@ -412,8 +412,9 @@ struct AutoUpdater::Impl {
       if (task.valid()) {
         try {
           task.wait();
-        } catch (const std::exception& e) {
-          // Ignore exceptions during cleanup
+        } catch (const std::exception&) {
+          // Ignore exceptions during cleanup - nothing we can do at this point
+          // NOLINTNEXTLINE(bugprone-empty-catch)
         }
       }
     }
@@ -435,7 +436,7 @@ Version AutoUpdater::current_version() {
   return v;
 }
 
-void AutoUpdater::check_for_updates(CheckCallback callback) {
+void AutoUpdater::check_for_updates(const CheckCallback& callback) {
   // Use std::async instead of detached thread for better error handling
   auto future = std::async(std::launch::async, [this, callback]() {
     try {
@@ -444,6 +445,7 @@ void AutoUpdater::check_for_updates(CheckCallback callback) {
         callback(release.has_value(), release.value_or(ReleaseInfo{}));
       }
     } catch (const std::exception& e) {
+      // NOLINTNEXTLINE(bugprone-lambda-function-name)
       LOG_ERROR("Exception in check_for_updates: {}", e.what());
       if (error_callback_) {
         error_callback_(std::string("Check error: ") + e.what());
@@ -506,7 +508,7 @@ std::optional<ReleaseInfo> AutoUpdater::check_for_updates_sync() {
         ra.name = asset.value("name", "");
         ra.download_url = asset.value("browser_download_url", "");
         ra.content_type = asset.value("content_type", "");
-        ra.size = asset.value("size", 0);
+        ra.size = static_cast<std::size_t>(asset.value("size", 0));
         release.assets.push_back(ra);
       }
     }
@@ -560,8 +562,8 @@ std::optional<ReleaseInfo> AutoUpdater::check_for_updates_sync() {
 }
 
 void AutoUpdater::download_update(const ReleaseInfo& release,
-                                  DownloadProgressCallback progress_callback,
-                                  DownloadCompleteCallback complete_callback) {
+                                  const DownloadProgressCallback& progress_callback,
+                                  const DownloadCompleteCallback& complete_callback) {
   // Use std::async instead of detached thread for better error handling
   auto future = std::async(std::launch::async,
                           [this, release, progress_callback, complete_callback]() {
@@ -588,6 +590,7 @@ void AutoUpdater::download_update(const ReleaseInfo& release,
 
       std::string download_path = download_dir + "/" + installer->name;
 
+      // NOLINTNEXTLINE(bugprone-lambda-function-name)
       LOG_INFO("Downloading update: {} -> {}", installer->download_url,
                download_path);
 
@@ -597,8 +600,10 @@ void AutoUpdater::download_update(const ReleaseInfo& release,
 
       if (success && !installer->sha256_checksum.empty()) {
         // Verify checksum if provided
+        // NOLINTNEXTLINE(bugprone-lambda-function-name)
         LOG_INFO("Verifying SHA256 checksum: {}", installer->sha256_checksum);
         if (!verify_sha256(download_path, installer->sha256_checksum, error)) {
+          // NOLINTNEXTLINE(bugprone-lambda-function-name)
           LOG_ERROR("Checksum verification failed: {}", error);
           success = false;
         }
@@ -612,6 +617,7 @@ void AutoUpdater::download_update(const ReleaseInfo& release,
         }
       }
     } catch (const std::exception& e) {
+      // NOLINTNEXTLINE(bugprone-lambda-function-name)
       LOG_ERROR("Exception in download_update: {}", e.what());
       if (complete_callback) {
         complete_callback(false, std::string("Download error: ") + e.what());
