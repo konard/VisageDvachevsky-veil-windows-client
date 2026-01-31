@@ -8,6 +8,7 @@
 #include <QSettings>
 #include <QScrollArea>
 #include <algorithm>
+#include <utility>
 
 #include "common/gui/theme.h"
 

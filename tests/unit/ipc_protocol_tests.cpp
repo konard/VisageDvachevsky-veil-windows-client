@@ -347,6 +347,126 @@ TEST_F(IPCProtocolTest, LogEventData_Serialization) {
   EXPECT_EQ(log_evt.event.message, "Connection established");
 }
 
+TEST_F(IPCProtocolTest, HeartbeatEvent_Serialization) {
+  Message msg;
+  msg.type = MessageType::kEvent;
+  msg.id = 2930;
+
+  HeartbeatEvent evt;
+  evt.timestamp_ms = 1706745600000;  // Example timestamp in ms
+
+  msg.payload = Event{evt};
+
+  VerifyMessageRoundTrip<Event>(msg);
+
+  // Verify specific fields
+  auto serialized = serialize_message(msg);
+  auto deserialized = deserialize_message(serialized);
+  ASSERT_TRUE(deserialized.has_value());
+
+  auto& deserialized_evt = std::get<Event>(deserialized->payload);
+  auto& heartbeat_evt = std::get<HeartbeatEvent>(deserialized_evt);
+
+  EXPECT_EQ(heartbeat_evt.timestamp_ms, 1706745600000);
+}
+
+TEST_F(IPCProtocolTest, HeartbeatEvent_ZeroTimestamp) {
+  Message msg;
+  msg.type = MessageType::kEvent;
+  msg.id = 2931;
+
+  HeartbeatEvent evt;
+  evt.timestamp_ms = 0;
+
+  msg.payload = Event{evt};
+
+  VerifyMessageRoundTrip<Event>(msg);
+
+  auto serialized = serialize_message(msg);
+  auto deserialized = deserialize_message(serialized);
+  ASSERT_TRUE(deserialized.has_value());
+
+  auto& deserialized_evt = std::get<Event>(deserialized->payload);
+  auto& heartbeat_evt = std::get<HeartbeatEvent>(deserialized_evt);
+
+  EXPECT_EQ(heartbeat_evt.timestamp_ms, 0);
+}
+
+TEST_F(IPCProtocolTest, HeartbeatEvent_MaxTimestamp) {
+  Message msg;
+  msg.type = MessageType::kEvent;
+  msg.id = 2932;
+
+  HeartbeatEvent evt;
+  evt.timestamp_ms = std::numeric_limits<std::uint64_t>::max();
+
+  msg.payload = Event{evt};
+
+  VerifyMessageRoundTrip<Event>(msg);
+}
+
+TEST_F(IPCProtocolTest, HeartbeatEvent_WithoutID) {
+  Message msg;
+  msg.type = MessageType::kEvent;
+  // No ID set
+
+  HeartbeatEvent evt;
+  evt.timestamp_ms = 9876543210000;
+
+  msg.payload = Event{evt};
+
+  VerifyMessageRoundTrip<Event>(msg);
+
+  auto serialized = serialize_message(msg);
+  auto deserialized = deserialize_message(serialized);
+  ASSERT_TRUE(deserialized.has_value());
+  EXPECT_FALSE(deserialized->id.has_value());
+
+  auto& deserialized_evt = std::get<Event>(deserialized->payload);
+  auto& heartbeat_evt = std::get<HeartbeatEvent>(deserialized_evt);
+  EXPECT_EQ(heartbeat_evt.timestamp_ms, 9876543210000);
+}
+
+TEST_F(IPCProtocolTest, HeartbeatEvent_DeserializeFromJSON) {
+  // Test deserializing a heartbeat event from raw JSON
+  std::string json_str = R"({
+    "type": "event",
+    "id": 2933,
+    "payload": {
+      "event_type": "heartbeat",
+      "timestamp_ms": 1706745600000
+    }
+  })";
+
+  auto msg_opt = deserialize_message(json_str);
+  ASSERT_TRUE(msg_opt.has_value());
+  EXPECT_EQ(msg_opt->type, MessageType::kEvent);
+  EXPECT_EQ(msg_opt->id.value(), 2933);
+
+  auto& evt = std::get<Event>(msg_opt->payload);
+  auto& heartbeat_evt = std::get<HeartbeatEvent>(evt);
+  EXPECT_EQ(heartbeat_evt.timestamp_ms, 1706745600000);
+}
+
+TEST_F(IPCProtocolTest, HeartbeatEvent_DeserializeMissingTimestamp) {
+  // Test deserializing heartbeat with missing timestamp_ms field
+  std::string json_str = R"({
+    "type": "event",
+    "id": 2934,
+    "payload": {
+      "event_type": "heartbeat"
+    }
+  })";
+
+  auto msg_opt = deserialize_message(json_str);
+  ASSERT_TRUE(msg_opt.has_value());
+
+  auto& evt = std::get<Event>(msg_opt->payload);
+  auto& heartbeat_evt = std::get<HeartbeatEvent>(evt);
+  // Default value should be 0
+  EXPECT_EQ(heartbeat_evt.timestamp_ms, 0);
+}
+
 TEST_F(IPCProtocolTest, ClientListUpdateEvent_Serialization) {
   Message msg;
   msg.type = MessageType::kEvent;
@@ -927,16 +1047,17 @@ TEST_F(IPCProtocolTest, AllMessageTypes_RoundTrip) {
   messages.push_back(Message{MessageType::kEvent, 11, Event{ConnectionStateChangeEvent{}}});
   messages.push_back(Message{MessageType::kEvent, 12, Event{ErrorEvent{}}});
   messages.push_back(Message{MessageType::kEvent, 13, Event{LogEventData{}}});
-  messages.push_back(Message{MessageType::kEvent, 14, Event{ClientListUpdateEvent{}}});
-  messages.push_back(Message{MessageType::kEvent, 15, Event{ServerStatusUpdateEvent{}}});
+  messages.push_back(Message{MessageType::kEvent, 14, Event{HeartbeatEvent{}}});
+  messages.push_back(Message{MessageType::kEvent, 15, Event{ClientListUpdateEvent{}}});
+  messages.push_back(Message{MessageType::kEvent, 16, Event{ServerStatusUpdateEvent{}}});
 
   // Responses
-  messages.push_back(Message{MessageType::kResponse, 16, Response{StatusResponse{}}});
-  messages.push_back(Message{MessageType::kResponse, 17, Response{MetricsResponse{}}});
-  messages.push_back(Message{MessageType::kResponse, 18, Response{DiagnosticsResponse{}}});
-  messages.push_back(Message{MessageType::kResponse, 19, Response{ClientListResponse{}}});
-  messages.push_back(Message{MessageType::kResponse, 20, Response{SuccessResponse{}}});
-  messages.push_back(Message{MessageType::kResponse, 21, Response{ErrorResponse{}}});
+  messages.push_back(Message{MessageType::kResponse, 17, Response{StatusResponse{}}});
+  messages.push_back(Message{MessageType::kResponse, 18, Response{MetricsResponse{}}});
+  messages.push_back(Message{MessageType::kResponse, 19, Response{DiagnosticsResponse{}}});
+  messages.push_back(Message{MessageType::kResponse, 20, Response{ClientListResponse{}}});
+  messages.push_back(Message{MessageType::kResponse, 21, Response{SuccessResponse{}}});
+  messages.push_back(Message{MessageType::kResponse, 22, Response{ErrorResponse{}}});
 
   for (const auto& msg : messages) {
     auto serialized = serialize_message(msg);

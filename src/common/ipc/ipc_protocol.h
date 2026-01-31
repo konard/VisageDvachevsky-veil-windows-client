@@ -51,7 +51,8 @@ enum class EventType {
   kMetricsUpdate,
   kConnectionStateChange,
   kError,
-  kLogEvent
+  kLogEvent,
+  kHeartbeat
 };
 
 // ============================================================================
@@ -240,6 +241,11 @@ struct LogEventData {
   LogEvent event;
 };
 
+// Heartbeat event for keepalive monitoring
+struct HeartbeatEvent {
+  std::uint64_t timestamp_ms{0};
+};
+
 // Server-specific: Client list update
 struct ClientListUpdateEvent {
   std::vector<ClientSession> clients;
@@ -257,6 +263,7 @@ using Event = std::variant<
   ConnectionStateChangeEvent,
   ErrorEvent,
   LogEventData,
+  HeartbeatEvent,
   ClientListUpdateEvent,
   ServerStatusUpdateEvent
 >;

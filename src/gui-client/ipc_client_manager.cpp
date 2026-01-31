@@ -9,7 +9,8 @@ IpcClientManager::IpcClientManager(QObject* parent)
     : QObject(parent),
       client_(std::make_unique<ipc::IpcClient>()),
       pollTimer_(new QTimer(this)),
-      reconnectTimer_(new QTimer(this)) {
+      reconnectTimer_(new QTimer(this)),
+      heartbeatTimer_(new QTimer(this)) {
   qDebug() << "[IpcClientManager] Initializing IPC Client Manager";
 
   // Set up IPC message handler
@@ -32,6 +33,13 @@ IpcClientManager::IpcClientManager(QObject* parent)
   connect(reconnectTimer_, &QTimer::timeout, this, &IpcClientManager::attemptReconnect);
   reconnectTimer_->setInterval(kReconnectIntervalMs);
   qDebug() << "[IpcClientManager] Reconnect timer interval:" << reconnectTimer_->interval() << "ms";
+
+  // Set up heartbeat monitoring timer
+  connect(heartbeatTimer_, &QTimer::timeout, this, &IpcClientManager::checkHeartbeatTimeout);
+  heartbeatTimer_->setInterval(kHeartbeatCheckIntervalMs);
+  qDebug() << "[IpcClientManager] Heartbeat check interval:" << heartbeatTimer_->interval() << "ms";
+  qDebug() << "[IpcClientManager] Heartbeat timeout threshold:" << kHeartbeatTimeoutSec << "seconds";
+
   qDebug() << "[IpcClientManager] Initialization complete";
 }
 
@@ -68,6 +76,12 @@ bool IpcClientManager::connectToDaemon() {
   daemonConnected_ = true;
   pollTimer_->start();
   qDebug() << "[IpcClientManager] Started message polling timer";
+
+  // Start heartbeat monitoring
+  lastHeartbeat_ = std::chrono::steady_clock::now();
+  heartbeatTimer_->start();
+  qDebug() << "[IpcClientManager] Started heartbeat monitoring";
+
   emit daemonConnectionChanged(true);
   return true;
 }
@@ -76,6 +90,8 @@ void IpcClientManager::disconnect() {
   qDebug() << "[IpcClientManager] Disconnecting from daemon";
   pollTimer_->stop();
   qDebug() << "[IpcClientManager] Stopped polling timer";
+  heartbeatTimer_->stop();
+  qDebug() << "[IpcClientManager] Stopped heartbeat monitoring";
   client_->disconnect();
   qDebug() << "[IpcClientManager] IPC client disconnected";
   daemonConnected_ = false;
@@ -277,6 +293,11 @@ void IpcClientManager::handleMessage(const ipc::Message& msg) {
                << QString::fromStdString(logEvent->event.message);
       emit logEventReceived(logEvent->event);
     }
+    else if (const auto* heartbeatEvent = std::get_if<ipc::HeartbeatEvent>(event)) {
+      qDebug() << "[IpcClientManager] Received HeartbeatEvent (timestamp: " << heartbeatEvent->timestamp_ms << ")";
+      // Update last heartbeat timestamp
+      lastHeartbeat_ = std::chrono::steady_clock::now();
+    }
     else {
       qWarning() << "[IpcClientManager] Received unknown event type";
     }
@@ -338,14 +359,18 @@ void IpcClientManager::handleConnectionChange(bool connected) {
   emit daemonConnectionChanged(connected);
 
   if (!connected) {
-    qDebug() << "[IpcClientManager] Stopping poll timer and starting reconnection attempts";
+    qDebug() << "[IpcClientManager] Stopping poll timer and heartbeat monitoring, starting reconnection attempts";
     pollTimer_->stop();
+    heartbeatTimer_->stop();
     // Start trying to reconnect in background
     startReconnectTimer();
   } else {
     qDebug() << "[IpcClientManager] Connection established, stopping reconnection timer";
     // Stop reconnection timer on successful connection
     stopReconnectTimer();
+    // Start heartbeat monitoring
+    lastHeartbeat_ = std::chrono::steady_clock::now();
+    heartbeatTimer_->start();
   }
 }
 
@@ -368,6 +393,12 @@ void IpcClientManager::attemptReconnect() {
     stopReconnectTimer();
     daemonConnected_ = true;
     pollTimer_->start();
+
+    // Restart heartbeat monitoring
+    lastHeartbeat_ = std::chrono::steady_clock::now();
+    heartbeatTimer_->start();
+    qDebug() << "[IpcClientManager] Restarted heartbeat monitoring after reconnection";
+
     emit daemonConnectionChanged(true);
   } else {
     qDebug() << "[IpcClientManager] Reconnection failed. Error:" << QString::fromStdString(ec.message());
@@ -393,6 +424,40 @@ void IpcClientManager::startReconnectTimer() {
 void IpcClientManager::stopReconnectTimer() {
   reconnectTimer_->stop();
   reconnectAttempts_ = 0;
+}
+
+void IpcClientManager::checkHeartbeatTimeout() {
+  if (!daemonConnected_ || !client_->is_connected()) {
+    // Not connected, no need to check heartbeat
+    return;
+  }
+
+  auto now = std::chrono::steady_clock::now();
+  auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastHeartbeat_).count();
+
+  if (elapsed >= kHeartbeatTimeoutSec) {
+    // Heartbeat timeout - service is likely dead
+    qWarning() << "[IpcClientManager] Heartbeat timeout detected!";
+    qWarning() << "[IpcClientManager] No heartbeat received for" << elapsed << "seconds (threshold:" << kHeartbeatTimeoutSec << "seconds)";
+    qWarning() << "[IpcClientManager] Service is likely unreachable or crashed";
+
+    // Stop heartbeat monitoring
+    heartbeatTimer_->stop();
+
+    // Mark as disconnected
+    daemonConnected_ = false;
+    pollTimer_->stop();
+
+    // Emit error and connection change
+    emit errorOccurred(
+        tr("Service unreachable"),
+        tr("The VEIL client service has not responded for %1 seconds. The service may have crashed.").arg(elapsed));
+    emit daemonConnectionChanged(false);
+
+    // Start reconnection attempts
+    qDebug() << "[IpcClientManager] Starting reconnection attempts after heartbeat timeout";
+    startReconnectTimer();
+  }
 }
 
 }  // namespace veil::gui
