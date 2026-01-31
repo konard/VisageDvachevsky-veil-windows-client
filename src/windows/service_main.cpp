@@ -28,6 +28,7 @@
 #include "../tunnel/tunnel.h"
 #include "../tun/routing.h"
 #include "console_handler.h"
+#include "firewall_manager.h"
 #include "service_manager.h"
 
 using namespace veil;
@@ -512,6 +513,7 @@ void cleanup_routes() {
 // ============================================================================
 
 static std::string g_firewall_rule_name;
+static std::unique_ptr<FirewallManager> g_firewall_manager;
 
 void configure_firewall_rule(std::uint16_t port) {
   // Create a firewall rule to allow incoming UDP traffic on the VPN port
@@ -519,24 +521,42 @@ void configure_firewall_rule(std::uint16_t port) {
 
   g_firewall_rule_name = "VEIL_VPN_UDP_" + std::to_string(port);
 
+  LOG_INFO("Adding Windows Firewall rule for UDP port {}", port);
+
+  // Create FirewallManager instance if not already created
+  if (!g_firewall_manager) {
+    g_firewall_manager = std::make_unique<FirewallManager>();
+    std::string error;
+    if (!g_firewall_manager->initialize(error)) {
+      LOG_ERROR("Failed to initialize FirewallManager: {}", error);
+      LOG_WARN("Firewall rule creation failed. This may affect incoming VPN packets.");
+      LOG_WARN("You may need to manually add a firewall rule for UDP port {}", port);
+      g_firewall_manager.reset();
+      return;
+    }
+  }
+
+  std::string error;
+
   // First, try to delete any existing rule with the same name
-  std::string delete_cmd = "netsh advfirewall firewall delete rule name=\"" + g_firewall_rule_name + "\" >nul 2>&1";
-  system(delete_cmd.c_str());
+  if (g_firewall_manager->rule_exists(g_firewall_rule_name)) {
+    LOG_DEBUG("Removing existing firewall rule '{}'", g_firewall_rule_name);
+    if (!g_firewall_manager->remove_rule(g_firewall_rule_name, error)) {
+      LOG_WARN("Failed to remove existing firewall rule: {}", error);
+      // Continue anyway, the Add operation might overwrite it
+    }
+  }
 
   // Create the inbound rule for UDP
-  std::string add_cmd = "netsh advfirewall firewall add rule "
-                        "name=\"" + g_firewall_rule_name + "\" "
-                        "dir=in action=allow protocol=UDP localport=" + std::to_string(port) + " "
-                        "enable=yes profile=any";
-
-  LOG_INFO("Adding Windows Firewall rule for UDP port {}", port);
-  LOG_DEBUG("Firewall command: {}", add_cmd);
-
-  int result = system(add_cmd.c_str());
-  if (result == 0) {
+  std::string description = "Allow incoming UDP traffic for VEIL VPN on port " + std::to_string(port);
+  if (g_firewall_manager->add_rule(g_firewall_rule_name, description,
+                                    FirewallManager::Direction::kInbound,
+                                    FirewallManager::Protocol::kUDP, port,
+                                    FirewallManager::Action::kAllow, true, error)) {
     LOG_INFO("Firewall rule '{}' created successfully", g_firewall_rule_name);
   } else {
-    LOG_WARN("Failed to create firewall rule (exit code: {}). This may affect incoming VPN packets.", result);
+    LOG_ERROR("Failed to create firewall rule: {}", error);
+    LOG_WARN("This may affect incoming VPN packets.");
     LOG_WARN("You may need to manually add a firewall rule for UDP port {}", port);
   }
 }
@@ -546,9 +566,15 @@ void cleanup_firewall_rule() {
     return;
   }
 
-  std::string delete_cmd = "netsh advfirewall firewall delete rule name=\"" + g_firewall_rule_name + "\" >nul 2>&1";
   LOG_INFO("Removing Windows Firewall rule '{}'", g_firewall_rule_name);
-  system(delete_cmd.c_str());
+
+  if (g_firewall_manager) {
+    std::string error;
+    if (!g_firewall_manager->remove_rule(g_firewall_rule_name, error)) {
+      LOG_WARN("Failed to remove firewall rule: {}", error);
+    }
+  }
+
   g_firewall_rule_name.clear();
 }
 
