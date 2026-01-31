@@ -292,7 +292,7 @@ std::optional<ServerConfig> ServerListManager::importFromJsonFile(const QString&
 
 QString ServerListManager::exportServerToJson(const QString& id) const {
   auto server = getServer(id);
-  if (!server) {
+  if (!server.has_value()) {
     return "";
   }
 

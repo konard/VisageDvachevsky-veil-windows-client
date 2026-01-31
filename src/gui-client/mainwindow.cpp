@@ -787,7 +787,7 @@ void MainWindow::setupIpcConnections() {
           this, [this](uint64_t currentUsage, uint64_t limit) {
     Q_UNUSED(limit);
     auto& prefs = NotificationPreferences::instance();
-    if (trayIcon_) {
+    if (trayIcon_ != nullptr) {
       QString msg = QString("Monthly data usage limit reached (%1). ")
                         .arg(currentUsage >= 1073741824ULL
                                  ? QString("%1 GB").arg(static_cast<double>(currentUsage) / 1073741824.0, 0, 'f', 1)
@@ -1324,7 +1324,7 @@ void MainWindow::onQuickDisconnect() {
 }
 
 void MainWindow::updateTrayIcon(TrayConnectionState state) {
-  if (!trayIcon_) return;
+  if (trayIcon_ == nullptr) return;
 
   currentTrayState_ = state;
   QString iconPath;
@@ -1362,13 +1362,13 @@ void MainWindow::updateTrayIcon(TrayConnectionState state) {
   trayIcon_->setIcon(QIcon(iconPath));
   trayIcon_->setToolTip(tooltip);
 
-  if (trayConnectAction_) {
+  if (trayConnectAction_ != nullptr) {
     trayConnectAction_->setEnabled(connectEnabled);
   }
-  if (trayDisconnectAction_) {
+  if (trayDisconnectAction_ != nullptr) {
     trayDisconnectAction_->setEnabled(disconnectEnabled);
   }
-  if (trayCopyIpAction_) {
+  if (trayCopyIpAction_ != nullptr) {
     trayCopyIpAction_->setEnabled(state == TrayConnectionState::kConnected);
   }
 
@@ -1818,7 +1818,7 @@ bool MainWindow::ensureServiceRunning() {
 bool MainWindow::checkServiceReady() {
   // Phase 1: Try the Windows Event signal (non-blocking check)
   HANDLE event = OpenEventA(SYNCHRONIZE, FALSE, veil::kServiceReadyEventName);
-  if (event) {
+  if (event != nullptr) {
     DWORD result = WaitForSingleObject(event, 0);  // 0 = immediate check, no wait
     CloseHandle(event);
     if (result == WAIT_OBJECT_0) {
