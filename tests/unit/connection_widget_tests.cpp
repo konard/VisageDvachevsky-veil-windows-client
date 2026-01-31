@@ -219,7 +219,7 @@ TEST_F(ConnectionWidgetTest, SetErrorWithDetails) {
   error.technical_details = "Server returned 401 Unauthorized";
   error.category = ErrorCategory::kConfiguration;
   widget_->setError(error);
-  // Should display error with details
+  // Should display error with technical details
 }
 
 TEST_F(ConnectionWidgetTest, SetErrorWithAction) {

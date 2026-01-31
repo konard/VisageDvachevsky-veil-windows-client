@@ -25,7 +25,7 @@ struct ErrorMessage {
   ErrorMessage()
       : category(ErrorCategory::kUnknown) {}
 
-  // NOLINTNEXTLINE(performance-unnecessary-value-param) — pass-by-value + move is intentional
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   ErrorMessage(ErrorCategory cat, std::string t, std::string desc,
                std::string act, std::string details = "")  // NOLINT(performance-unnecessary-value-param)
       : category(cat), title(std::move(t)), description(std::move(desc)),

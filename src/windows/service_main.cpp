@@ -427,10 +427,8 @@ void stop_service() {
   // Close the service ready event handle
   close_ready_event();
 
-  // Also stop the tunnel if it's running
-  if (g_tunnel) {
-    g_tunnel->stop();
-  }
+  // Note: Tunnel cleanup (including stop()) is handled in run_service() cleanup path.
+  // Tunnel::stop() is now idempotent, so multiple calls are safe if needed.
 }
 
 // ============================================================================

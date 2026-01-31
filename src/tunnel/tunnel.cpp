@@ -375,7 +375,12 @@ void Tunnel::run() {
 }
 
 void Tunnel::stop() {
-  running_.store(false);
+  // Idempotent: safe to call multiple times (e.g., from stop_service() and cleanup)
+  if (!running_.exchange(false)) {
+    // Already stopped
+    return;
+  }
+
   if (event_loop_) {
     event_loop_->stop();
   }

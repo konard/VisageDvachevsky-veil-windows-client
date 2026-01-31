@@ -69,6 +69,7 @@ add_executable(veil_unit_tests
   auto_updater_tests.cpp
   debug_logging_overhead_tests.cpp
   ipc_protocol_tests.cpp
+  tunnel_stop_tests.cpp
   ${VEIL_PLATFORM_TEST_SOURCES}
 )
 
@@ -104,6 +105,8 @@ if(Qt6_FOUND)
     ${CMAKE_SOURCE_DIR}/src/gui-client/server_selector_widget.h
     ${CMAKE_SOURCE_DIR}/src/gui-client/server_config.cpp
     ${CMAKE_SOURCE_DIR}/src/gui-client/server_config.h
+    ${CMAKE_SOURCE_DIR}/src/gui-client/server_list_widget.cpp
+    ${CMAKE_SOURCE_DIR}/src/gui-client/server_list_widget.h
     ${CMAKE_SOURCE_DIR}/src/gui-client/notification_preferences.cpp
     ${CMAKE_SOURCE_DIR}/src/gui-client/notification_preferences.h
     ${CMAKE_SOURCE_DIR}/src/gui-client/notification_history_dialog.cpp
@@ -118,8 +121,6 @@ if(Qt6_FOUND)
     ${CMAKE_SOURCE_DIR}/src/gui-client/collapsible_section.h
     ${CMAKE_SOURCE_DIR}/src/gui-client/app_split_tunnel_widget.cpp
     ${CMAKE_SOURCE_DIR}/src/gui-client/app_split_tunnel_widget.h
-    ${CMAKE_SOURCE_DIR}/src/gui-client/server_config.cpp
-    ${CMAKE_SOURCE_DIR}/src/gui-client/server_config.h
     ${CMAKE_SOURCE_DIR}/src/gui-client/notification_preferences.cpp
     ${CMAKE_SOURCE_DIR}/src/gui-client/notification_preferences.h
     ${CMAKE_SOURCE_DIR}/src/gui-client/notification_history_dialog.cpp
