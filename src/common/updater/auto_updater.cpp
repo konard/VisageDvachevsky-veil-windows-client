@@ -412,9 +412,9 @@ struct AutoUpdater::Impl {
       if (task.valid()) {
         try {
           task.wait();
+          // NOLINTNEXTLINE(bugprone-empty-catch)
         } catch (const std::exception&) {
           // Ignore exceptions during cleanup - nothing we can do at this point
-          // NOLINTNEXTLINE(bugprone-empty-catch)
         }
       }
     }
@@ -661,6 +661,7 @@ bool AutoUpdater::install_update(const std::string& installer_path,
   std::exit(0);
 #else
   // On Linux, we might use a different approach (e.g., package manager)
+  (void)installer_path;  // Unused on non-Windows platforms
   LOG_WARN("Auto-installation not implemented for this platform");
   error = "Auto-installation not implemented for this platform";
   return false;
