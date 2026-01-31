@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <QObject>
 #include <QTimer>
 #include <memory>
@@ -80,12 +81,23 @@ class IpcClientManager : public QObject {
   std::unique_ptr<ipc::IpcClient> client_;
   QTimer* pollTimer_;
   QTimer* reconnectTimer_;
+  QTimer* heartbeatTimer_;
   bool daemonConnected_{false};
   int reconnectAttempts_{0};
+  std::chrono::steady_clock::time_point lastHeartbeat_;
 
   // Reconnection constants
   static constexpr int kReconnectIntervalMs = 5000;  // 5 seconds
   static constexpr int kMaxReconnectAttempts = 12;   // Try for 1 minute
+
+  // Heartbeat monitoring constants
+  static constexpr int kHeartbeatIntervalSec = 10;   // Service sends heartbeat every 10 seconds
+  static constexpr int kHeartbeatTimeoutSec = 20;    // Consider service dead after 2x interval
+  static constexpr int kHeartbeatCheckIntervalMs = 5000;  // Check heartbeat timeout every 5 seconds
+
+ private slots:
+  /// Check if heartbeat timeout has occurred
+  void checkHeartbeatTimeout();
 };
 
 }  // namespace veil::gui

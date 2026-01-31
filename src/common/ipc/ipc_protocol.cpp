@@ -240,6 +240,20 @@ void from_json(const json& j, LogEvent& event) {
 }
 
 // ============================================================================
+// JSON Conversion - HeartbeatEvent
+// ============================================================================
+
+void to_json(json& j, const HeartbeatEvent& event) {
+  j = json{
+    {"timestamp_ms", event.timestamp_ms}
+  };
+}
+
+void from_json(const json& j, HeartbeatEvent& event) {
+  if (j.contains("timestamp_ms")) j.at("timestamp_ms").get_to(event.timestamp_ms);
+}
+
+// ============================================================================
 // JSON Conversion - DiagnosticsData
 // ============================================================================
 
@@ -414,6 +428,10 @@ json serialize_event(const Event& evt) {
       json event_json;
       to_json(event_json, e.event);
       payload["event"] = event_json;
+    }
+    else if constexpr (std::is_same_v<T, HeartbeatEvent>) {
+      payload["event_type"] = "heartbeat";
+      payload["timestamp_ms"] = e.timestamp_ms;
     }
     else if constexpr (std::is_same_v<T, ClientListUpdateEvent>) {
       payload["event_type"] = "client_list_update";
@@ -605,6 +623,13 @@ std::optional<Event> deserialize_event(const json& payload) {
     LogEventData evt;
     if (payload.contains("event")) {
       from_json(payload.at("event"), evt.event);
+    }
+    return evt;
+  }
+  else if (evt_type == "heartbeat") {
+    HeartbeatEvent evt;
+    if (payload.contains("timestamp_ms")) {
+      payload.at("timestamp_ms").get_to(evt.timestamp_ms);
     }
     return evt;
   }
