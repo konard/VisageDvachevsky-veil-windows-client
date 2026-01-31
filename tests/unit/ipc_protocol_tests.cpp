@@ -249,8 +249,8 @@ TEST_F(IPCProtocolTest, MetricsUpdateEvent_Serialization) {
   evt.metrics.latency_ms = 50;
   evt.metrics.tx_bytes_per_sec = 1024000;
   evt.metrics.rx_bytes_per_sec = 2048000;
-  evt.metrics.total_tx_bytes = 1024 * 1024 * 100;
-  evt.metrics.total_rx_bytes = 1024 * 1024 * 200;
+  evt.metrics.total_tx_bytes = 1024ULL * 1024ULL * 100ULL;
+  evt.metrics.total_rx_bytes = 1024ULL * 1024ULL * 200ULL;
 
   msg.payload = Event{evt};
 
