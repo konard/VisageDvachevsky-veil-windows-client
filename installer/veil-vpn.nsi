@@ -30,8 +30,8 @@
 !define PRODUCT_VERSION_MINOR 0
 !define PRODUCT_VERSION_PATCH 0
 !define PRODUCT_PUBLISHER "VEIL Project"
-!define PRODUCT_WEB_SITE "https://github.com/VisageDvachevsky/veil-windows-client"
-!define PRODUCT_UPDATE_URL "https://api.github.com/repos/VisageDvachevsky/veil-windows-client/releases/latest"
+!define PRODUCT_WEB_SITE "https://github.com/VisageDvachevsky/veil-core"
+!define PRODUCT_UPDATE_URL "https://api.github.com/repos/VisageDvachevsky/veil-core/releases/latest"
 !define PRODUCT_DIR_REGKEY "Software\Microsoft\Windows\CurrentVersion\App Paths\veil-vpn.exe"
 !define PRODUCT_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
 !define PRODUCT_UNINST_ROOT_KEY "HKLM"

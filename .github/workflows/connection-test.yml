@@ -28,7 +28,7 @@ jobs:
     name: Live Server Connection Test (Linux)
     runs-on: ubuntu-latest
     # Only run if secrets are available (not on forks without secrets)
-    if: ${{ github.event_name == 'workflow_dispatch' || github.repository == 'VisageDvachevsky/veil-windows-client' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.repository == 'VisageDvachevsky/veil-core' }}
 
     env:
       VEIL_SERVER_IP: ${{ secrets.SERVER_IP }}

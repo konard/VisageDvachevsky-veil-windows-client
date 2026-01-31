@@ -61,7 +61,7 @@ BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 # Configuration variables
-VEIL_REPO="${VEIL_REPO:-https://github.com/VisageDvachevsky/veil-windows-client.git}"
+VEIL_REPO="${VEIL_REPO:-https://github.com/VisageDvachevsky/veil-core.git}"
 VEIL_BRANCH="${VEIL_BRANCH:-main}"
 INSTALL_DIR="/usr/local"
 CONFIG_DIR="/etc/veil"

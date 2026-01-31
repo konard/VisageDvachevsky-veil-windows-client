@@ -409,6 +409,6 @@ Phase 5 (P4 - Nice to Have):
 
 ## References
 
-- [Issue #76](https://github.com/VisageDvachevsky/veil-windows-client/issues/76) - Performance and UX improvements
+- [Issue #76](https://github.com/VisageDvachevsky/veil-core/issues/76) - Performance and UX improvements
 - [Qt High DPI Guide](https://doc.qt.io/qt-5/highdpi.html)
 - [WCAG 2.1 Guidelines](https://www.w3.org/WAI/WCAG21/quickref/)

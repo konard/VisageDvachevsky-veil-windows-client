@@ -267,9 +267,9 @@ Phase 4 (P3 - Low):
 
 ## References
 
-- [Issue #76](https://github.com/VisageDvachevsky/veil-windows-client/issues/76) - Very slow connection (parent issue)
-- [Issue #83](https://github.com/VisageDvachevsky/veil-windows-client/issues/83) - Predictable session rotation
-- [Issue #86](https://github.com/VisageDvachevsky/veil-windows-client/issues/86) - 0-RTT resumption
-- [Issue #87](https://github.com/VisageDvachevsky/veil-windows-client/issues/87) - Per-client keys
+- [Issue #76](https://github.com/VisageDvachevsky/veil-core/issues/76) - Very slow connection (parent issue)
+- [Issue #83](https://github.com/VisageDvachevsky/veil-core/issues/83) - Predictable session rotation
+- [Issue #86](https://github.com/VisageDvachevsky/veil-core/issues/86) - 0-RTT resumption
+- [Issue #87](https://github.com/VisageDvachevsky/veil-core/issues/87) - Per-client keys
 - [RFC 6298](https://tools.ietf.org/html/rfc6298) - Computing TCP's Retransmission Timer
 - [QUIC Loss Detection](https://tools.ietf.org/html/draft-ietf-quic-recovery) - Reference for modern congestion control

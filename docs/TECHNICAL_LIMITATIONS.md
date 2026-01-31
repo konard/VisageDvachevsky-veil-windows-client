@@ -510,36 +510,36 @@ Review AckBitmap implementation and ensure SACK bits are being set properly for 
 
 | Issue | GitHub | Impact | Complexity | Priority | Est. Effort |
 |-------|--------|--------|-----------|----------|-------------|
-| Out-of-order rejection | [#78](https://github.com/VisageDvachevsky/veil-windows-client/issues/78) | **Performance-critical** | Medium | **CRITICAL** | 1-2 weeks |
-| High pending count | [#79](https://github.com/VisageDvachevsky/veil-windows-client/issues/79) | Performance | Low | High | 1 week |
-| SACK not working | [#80](https://github.com/VisageDvachevsky/veil-windows-client/issues/80) | Performance | Medium | High | 1 week |
-| WebSocket w/o HTTP | [#81](https://github.com/VisageDvachevsky/veil-windows-client/issues/81) | Detection risk | Medium | High | 1-2 weeks |
-| No TLS wrapper | [#82](https://github.com/VisageDvachevsky/veil-windows-client/issues/82) | Detection risk | High | High | 3-4 weeks |
-| Fixed rotation time | [#83](https://github.com/VisageDvachevsky/veil-windows-client/issues/83) | ML detection | Low | Medium | 1 day |
-| No ML testing | [#84](https://github.com/VisageDvachevsky/veil-windows-client/issues/84) | Unknown risk | High | **Critical** | 4-6 weeks |
-| Single-threaded | [#85](https://github.com/VisageDvachevsky/veil-windows-client/issues/85) | Performance | Very High | Medium | 2-3 months |
-| No 0-RTT | [#86](https://github.com/VisageDvachevsky/veil-windows-client/issues/86) | UX latency | High | Low | 2-3 weeks |
-| PSK auth | [#87](https://github.com/VisageDvachevsky/veil-windows-client/issues/87) | Scalability | Very High | Low | 1-2 months |
+| Out-of-order rejection | [#78](https://github.com/VisageDvachevsky/veil-core/issues/78) | **Performance-critical** | Medium | **CRITICAL** | 1-2 weeks |
+| High pending count | [#79](https://github.com/VisageDvachevsky/veil-core/issues/79) | Performance | Low | High | 1 week |
+| SACK not working | [#80](https://github.com/VisageDvachevsky/veil-core/issues/80) | Performance | Medium | High | 1 week |
+| WebSocket w/o HTTP | [#81](https://github.com/VisageDvachevsky/veil-core/issues/81) | Detection risk | Medium | High | 1-2 weeks |
+| No TLS wrapper | [#82](https://github.com/VisageDvachevsky/veil-core/issues/82) | Detection risk | High | High | 3-4 weeks |
+| Fixed rotation time | [#83](https://github.com/VisageDvachevsky/veil-core/issues/83) | ML detection | Low | Medium | 1 day |
+| No ML testing | [#84](https://github.com/VisageDvachevsky/veil-core/issues/84) | Unknown risk | High | **Critical** | 4-6 weeks |
+| Single-threaded | [#85](https://github.com/VisageDvachevsky/veil-core/issues/85) | Performance | Very High | Medium | 2-3 months |
+| No 0-RTT | [#86](https://github.com/VisageDvachevsky/veil-core/issues/86) | UX latency | High | Low | 2-3 weeks |
+| PSK auth | [#87](https://github.com/VisageDvachevsky/veil-core/issues/87) | Scalability | Very High | Low | 1-2 months |
 
 ---
 
 ## Roadmap Recommendation
 
 **Immediate (This Week) - Performance Critical:**
-1. **[#78](https://github.com/VisageDvachevsky/veil-windows-client/issues/78):** Investigate out-of-order packet rejection - root cause analysis
-2. **[#80](https://github.com/VisageDvachevsky/veil-windows-client/issues/80):** Verify SACK bitmap functionality
-3. **[#79](https://github.com/VisageDvachevsky/veil-windows-client/issues/79):** Tune ACK interval and retransmission parameters
+1. **[#78](https://github.com/VisageDvachevsky/veil-core/issues/78):** Investigate out-of-order packet rejection - root cause analysis
+2. **[#80](https://github.com/VisageDvachevsky/veil-core/issues/80):** Verify SACK bitmap functionality
+3. **[#79](https://github.com/VisageDvachevsky/veil-core/issues/79):** Tune ACK interval and retransmission parameters
 
 **Short-term (1-3 months):**
-1. [#83](https://github.com/VisageDvachevsky/veil-windows-client/issues/83): Add jitter to session rotation (1 day)
-2. [#81](https://github.com/VisageDvachevsky/veil-windows-client/issues/81): HTTP handshake emulation (critical for QUIC-Like mode)
-3. [#82](https://github.com/VisageDvachevsky/veil-windows-client/issues/82): TLS record wrapper (major DPI evasion improvement)
-4. [#84](https://github.com/VisageDvachevsky/veil-windows-client/issues/84): Begin ML-based DPI testing (foundational)
+1. [#83](https://github.com/VisageDvachevsky/veil-core/issues/83): Add jitter to session rotation (1 day)
+2. [#81](https://github.com/VisageDvachevsky/veil-core/issues/81): HTTP handshake emulation (critical for QUIC-Like mode)
+3. [#82](https://github.com/VisageDvachevsky/veil-core/issues/82): TLS record wrapper (major DPI evasion improvement)
+4. [#84](https://github.com/VisageDvachevsky/veil-core/issues/84): Begin ML-based DPI testing (foundational)
 
 **Long-term (3-6 months):**
-1. [#85](https://github.com/VisageDvachevsky/veil-windows-client/issues/85): Multi-threaded architecture (if performance becomes bottleneck)
-2. [#87](https://github.com/VisageDvachevsky/veil-windows-client/issues/87): Per-client authentication (if scaling beyond 100 clients)
-3. [#86](https://github.com/VisageDvachevsky/veil-windows-client/issues/86): 0-RTT (nice-to-have UX improvement)
+1. [#85](https://github.com/VisageDvachevsky/veil-core/issues/85): Multi-threaded architecture (if performance becomes bottleneck)
+2. [#87](https://github.com/VisageDvachevsky/veil-core/issues/87): Per-client authentication (if scaling beyond 100 clients)
+3. [#86](https://github.com/VisageDvachevsky/veil-core/issues/86): 0-RTT (nice-to-have UX improvement)
 
 ---
 
