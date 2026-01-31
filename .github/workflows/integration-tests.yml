@@ -41,7 +41,7 @@ jobs:
             -R "veil_integration_handshake"
         env:
           VEIL_SKIP_NETEM: 1
-          ASAN_OPTIONS: detect_leaks=0
+          ASAN_OPTIONS: detect_leaks=1
 
       - name: Run transport integration tests
         run: |
@@ -51,7 +51,7 @@ jobs:
             -R "veil_integration_transport"
         env:
           VEIL_SKIP_NETEM: 1
-          ASAN_OPTIONS: detect_leaks=0
+          ASAN_OPTIONS: detect_leaks=1
 
       - name: Run reliability integration tests
         run: |
@@ -61,7 +61,7 @@ jobs:
             -R "veil_integration_reliability"
         env:
           VEIL_SKIP_NETEM: 1
-          ASAN_OPTIONS: detect_leaks=0
+          ASAN_OPTIONS: detect_leaks=1
 
       - name: Run security integration tests
         run: |
@@ -71,7 +71,7 @@ jobs:
             -R "veil_integration_security"
         env:
           VEIL_SKIP_NETEM: 1
-          ASAN_OPTIONS: detect_leaks=0
+          ASAN_OPTIONS: detect_leaks=1
 
       - name: Run tunnel integration tests
         run: |
@@ -81,7 +81,7 @@ jobs:
             -R "veil_integration_tunnel"
         env:
           VEIL_SKIP_NETEM: 1
-          ASAN_OPTIONS: detect_leaks=0
+          ASAN_OPTIONS: detect_leaks=1
 
       - name: Upload test results on failure
         if: failure()

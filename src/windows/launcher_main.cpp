@@ -9,6 +9,7 @@
 
 #include <string>
 
+#include "../common/constants.h"
 #include "service_manager.h"
 
 namespace {
@@ -73,7 +74,7 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE /*hPrevInstance*/,
   }
 
   // 4. Wait for the IPC named pipe to be ready.
-  if (!wait_for_named_pipe("\\\\.\\pipe\\veil-client", 5000)) {
+  if (!wait_for_named_pipe(veil::kIpcClientPipeName, 5000)) {
     MessageBoxA(nullptr,
                 "Service started but IPC not ready. Please try again.",
                 "VEIL VPN - Warning", MB_OK | MB_ICONWARNING);
