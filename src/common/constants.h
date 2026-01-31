@@ -23,8 +23,8 @@ constexpr const char* kServiceReadyEventName = "Global\\VEIL_SERVICE_READY";
 
 // IPC Named Pipe Paths (Windows)
 // These named pipes facilitate communication between the service and GUI clients.
-constexpr const char* kIpcClientPipeName = "\\\\.\\pipe\\veil-client";
-constexpr const char* kIpcServerPipeName = "\\\\.\\pipe\\veil-server";
+constexpr const char* kIpcClientPipeName = R"(\\.\pipe\veil-client)";
+constexpr const char* kIpcServerPipeName = R"(\\.\pipe\veil-server)";
 
 // IPC Socket Paths (Unix/Linux)
 // Unix domain sockets used for IPC on non-Windows platforms.
