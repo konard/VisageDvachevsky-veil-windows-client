@@ -24,40 +24,77 @@
 
 namespace {
 
-/// Custom message handler that flushes stderr after every Qt debug/warning message.
+/// Log file handle for persistent crash diagnostics.
+/// Output is written to both stderr and a log file so diagnostics survive
+/// even when the console window closes on crash.
+FILE* g_logFile = nullptr;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
+/// Custom message handler that flushes output after every Qt debug/warning message.
+/// Writes to both stderr (console) and a log file in the app directory.
 /// This ensures log output is visible even if the application crashes immediately after.
 void flushingMessageHandler(QtMsgType type, const QMessageLogContext& context, const QString& msg) {
   QByteArray localMsg = msg.toLocal8Bit();
   const char* msgStr = localMsg.constData();
 
+  const char* prefix = "";
   switch (type) {
-    case QtDebugMsg:
-      fprintf(stderr, "%s\n", msgStr);
-      break;
-    case QtInfoMsg:
-      fprintf(stderr, "Info: %s\n", msgStr);
-      break;
-    case QtWarningMsg:
-      fprintf(stderr, "Warning: %s\n", msgStr);
-      break;
-    case QtCriticalMsg:
-      fprintf(stderr, "Critical: %s\n", msgStr);
-      break;
-    case QtFatalMsg:
-      fprintf(stderr, "Fatal: %s\n", msgStr);
-      break;
+    case QtDebugMsg:    prefix = "";          break;
+    case QtInfoMsg:     prefix = "Info: ";    break;
+    case QtWarningMsg:  prefix = "Warning: "; break;
+    case QtCriticalMsg: prefix = "Critical: "; break;
+    case QtFatalMsg:    prefix = "Fatal: ";   break;
   }
+
+  fprintf(stderr, "%s%s\n", prefix, msgStr);
   fflush(stderr);
+
+  if (g_logFile != nullptr) {
+    fprintf(g_logFile, "%s%s\n", prefix, msgStr);
+    fflush(g_logFile);
+  }
 
   // Suppress unused parameter warning
   (void)context;
 }
 
+/// Open log file next to the executable for persistent crash diagnostics.
+void openLogFile() {
+#ifdef _WIN32
+  char path[MAX_PATH];
+  GetModuleFileNameA(nullptr, path, MAX_PATH);
+  std::string logPath(path);
+  auto pos = logPath.find_last_of('\\');
+  if (pos != std::string::npos) {
+    logPath = logPath.substr(0, pos + 1);
+  }
+  logPath += "veil-client-gui.log";
+  g_logFile = fopen(logPath.c_str(), "w");  // NOLINT(cppcoreguidelines-owning-memory)
+  if (g_logFile != nullptr) {
+    fprintf(stderr, "Log file: %s\n", logPath.c_str());
+    fflush(stderr);
+  }
+#endif
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
-  // Install flushing message handler so log output is visible even on crash
+  // Open log file and install flushing message handler for crash diagnostics.
+  // The log file is written next to the executable so output survives console closing.
+  openLogFile();
   qInstallMessageHandler(flushingMessageHandler);
+
+  // Install terminate handler to log crashes that bypass try-catch
+  std::set_terminate([]() {
+    const char* msg = "FATAL: std::terminate() called — likely an uncaught exception or abort\n";
+    fprintf(stderr, "%s", msg);
+    fflush(stderr);
+    if (g_logFile != nullptr) {
+      fprintf(g_logFile, "%s", msg);
+      fflush(g_logFile);
+    }
+    std::abort();
+  });
 
   QApplication app(argc, argv);
 
