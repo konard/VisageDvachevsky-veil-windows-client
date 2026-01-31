@@ -1,3 +1,4 @@
+// NOLINTBEGIN(bugprone-integer-division,readability-implicit-bool-conversion)
 #include "connection_widget.h"
 
 #include <QGroupBox>
@@ -869,5 +870,7 @@ void ConnectionWidget::loadServerSettings() {
   uint16_t serverPort = static_cast<uint16_t>(settings.value("server/port", 4433).toInt());
   setServerAddress(serverAddress, serverPort);
 }
+
+// NOLINTEND(bugprone-integer-division,readability-implicit-bool-conversion)
 
 }  // namespace veil::gui

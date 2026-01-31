@@ -118,7 +118,7 @@ TEST_F(IpcClientManagerTest, SendConnectLegacyWhenNotConnected) {
 
 TEST_F(IpcClientManagerTest, SendDisconnectWhenNotConnected) {
   // Should handle disconnect command even when not connected
-  bool result = manager_->sendDisconnect();
+  [[maybe_unused]] bool result = manager_->sendDisconnect();
 
   // May fail or succeed depending on implementation
   // Just ensure it doesn't crash
@@ -211,8 +211,8 @@ TEST_F(IpcClientManagerTest, SendConnectWithCustomRoutes) {
   ipc::ConnectionConfig config;
   config.server_address = "vpn.example.com";
   config.server_port = 4433;
-  config.custom_routes.push_back("192.168.1.0/24");
-  config.custom_routes.push_back("10.0.0.0/8");
+  config.custom_routes.emplace_back("192.168.1.0/24");
+  config.custom_routes.emplace_back("10.0.0.0/8");
 
   bool result = manager_->sendConnect(config);
 
