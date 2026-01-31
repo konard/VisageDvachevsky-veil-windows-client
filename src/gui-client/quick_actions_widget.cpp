@@ -12,7 +12,7 @@
 namespace veil::gui {
 
 QuickActionsWidget::QuickActionsWidget(QWidget* parent)
-    : QWidget(parent) {
+    : QWidget(parent), connectionState_(ConnectionState::kDisconnected) {
   setupUi();
 
   // Load persisted panel state

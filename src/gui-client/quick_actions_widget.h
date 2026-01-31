@@ -101,7 +101,7 @@ class QuickActionsWidget : public QWidget {
   bool obfuscationEnabled_{true};
   QString ipAddress_;
   uint16_t port_{0};
-  ConnectionState connectionState_{ConnectionState::kDisconnected};
+  ConnectionState connectionState_;
 };
 
 }  // namespace veil::gui
