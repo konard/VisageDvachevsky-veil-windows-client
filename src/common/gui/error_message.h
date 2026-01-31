@@ -26,9 +26,9 @@ struct ErrorMessage {
       : category(ErrorCategory::kUnknown) {}
 
   ErrorMessage(ErrorCategory cat, std::string t, std::string desc,
-               std::string act, std::string details = "")
+               std::string act, const std::string& details = "")
       : category(cat), title(std::move(t)), description(std::move(desc)),
-        action(std::move(act)), technical_details(std::move(details)) {}
+        action(std::move(act)), technical_details(details) {}
 
   /// Get a user-friendly string representation
   std::string to_user_string() const {
