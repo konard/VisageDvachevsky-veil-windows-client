@@ -912,7 +912,7 @@ void SetupWizard::onTestConnection() {
   testResultLabel_->setVisible(true);
 
   // Cancel any previous in-flight test to avoid stale callbacks
-  if (activeTestSocket_) {
+  if (activeTestSocket_ != nullptr) {
     activeTestSocket_->abort();
     activeTestSocket_->deleteLater();
     activeTestSocket_ = nullptr;
@@ -934,7 +934,7 @@ void SetupWizard::onTestConnection() {
     testResultLabel_->setStyleSheet("color: #3fb950; font-size: 13px;");
     testConnectionButton_->setEnabled(true);
     testConnectionButton_->setText(tr("Test Connection"));
-    if (socketGuard) {
+    if (socketGuard != nullptr) {
       activeTestSocket_ = nullptr;
       socketGuard->deleteLater();
     }
@@ -942,7 +942,7 @@ void SetupWizard::onTestConnection() {
 
   connect(socket, &QTcpSocket::errorOccurred, this,
           [this, socketGuard](QAbstractSocket::SocketError) {
-    if (!socketGuard) return;
+    if (socketGuard == nullptr) return;
     testResultLabel_->setText(
         tr("Could not reach server: %1").arg(socketGuard->errorString()));
     testResultLabel_->setStyleSheet("color: #f85149; font-size: 13px;");
@@ -957,7 +957,7 @@ void SetupWizard::onTestConnection() {
   // Timeout after 5 seconds — socketGuard prevents use-after-free if the
   // socket was already cleaned up by connected/errorOccurred handlers.
   QTimer::singleShot(5000, this, [this, socketGuard]() {
-    if (!socketGuard) return;
+    if (socketGuard == nullptr) return;
     if (socketGuard->state() != QAbstractSocket::ConnectedState) {
       socketGuard->abort();
       testResultLabel_->setText(tr("Connection timed out"));
