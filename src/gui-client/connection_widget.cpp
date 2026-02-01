@@ -25,7 +25,7 @@ namespace veil::gui {
 class StatusRing : public QWidget {
  public:
   explicit StatusRing(QWidget* parent = nullptr) : QWidget(parent) {
-    setFixedSize(scaleDpi(160), scaleDpi(160));
+    setFixedSize(scaleDpi(130), scaleDpi(130));
     setAttribute(Qt::WA_TranslucentBackground);
   }
 
@@ -180,13 +180,13 @@ ConnectionWidget::ConnectionWidget(QWidget* parent) : QWidget(parent) {
 void ConnectionWidget::setupUi() {
   auto* mainLayout = new QVBoxLayout(this);
   mainLayout->setSpacing(0);
-  mainLayout->setContentsMargins(spacing::kPaddingXLarge(), spacing::kPaddingLarge(),
-                                  spacing::kPaddingXLarge(), spacing::kPaddingLarge());
+  mainLayout->setContentsMargins(spacing::kPaddingLarge(), spacing::kPaddingMedium(),
+                                  spacing::kPaddingLarge(), spacing::kPaddingMedium());
 
   // === Header with branding ===
   auto* headerWidget = new QWidget(this);
   auto* headerLayout = new QHBoxLayout(headerWidget);
-  headerLayout->setContentsMargins(0, 0, 0, spacing::kPaddingLarge());
+  headerLayout->setContentsMargins(0, 0, 0, spacing::kPaddingSmall());
 
   auto* logoContainer = new QWidget(headerWidget);
   auto* logoLayout = new QHBoxLayout(logoContainer);
@@ -247,7 +247,7 @@ void ConnectionWidget::setupUi() {
   )");
   auto* statusContainerLayout = new QVBoxLayout(statusContainer);
   statusContainerLayout->setAlignment(Qt::AlignCenter);
-  statusContainerLayout->setSpacing(20);
+  statusContainerLayout->setSpacing(12);
 
   // Status ring (custom painted widget)
   statusRing_ = new StatusRing(this);
@@ -350,11 +350,11 @@ void ConnectionWidget::setupUi() {
   connect(serverSelector_, &ServerSelectorWidget::serverChanged,
           this, &ConnectionWidget::loadServerSettings);
   mainLayout->addWidget(serverSelector_);
-  mainLayout->addSpacing(spacing::kPaddingMedium());
+  mainLayout->addSpacing(spacing::kPaddingSmall());
 
   // === Connect Button (Large, prominent) ===
   connectButton_ = new QPushButton("Connect", this);
-  connectButton_->setMinimumHeight(scaleDpi(64));
+  connectButton_->setMinimumHeight(scaleDpi(52));
   connectButton_->setCursor(Qt::PointingHandCursor);
   connectButton_->setToolTip("Connect to VPN (Ctrl+Enter)");
   connectButton_->setStyleSheet(R"(
@@ -380,7 +380,7 @@ void ConnectionWidget::setupUi() {
   connect(connectButton_, &QPushButton::clicked, this, &ConnectionWidget::onConnectClicked);
   mainLayout->addWidget(connectButton_);
 
-  mainLayout->addSpacing(spacing::kPaddingMedium());
+  mainLayout->addSpacing(spacing::kPaddingSmall());
 
   // === Quick Actions Panel ===
   quickActionsWidget_ = new QuickActionsWidget(this);
@@ -390,7 +390,7 @@ void ConnectionWidget::setupUi() {
           this, &ConnectionWidget::settingsRequested);
   mainLayout->addWidget(quickActionsWidget_);
 
-  mainLayout->addSpacing(spacing::kPaddingMedium());
+  mainLayout->addSpacing(spacing::kPaddingSmall());
 
   // === Session Info Card ===
   statusCard_ = new QWidget(this);
@@ -405,14 +405,14 @@ void ConnectionWidget::setupUi() {
 
   auto* cardLayout = new QVBoxLayout(statusCard_);
   cardLayout->setSpacing(0);
-  cardLayout->setContentsMargins(20, 16, 20, 16);
+  cardLayout->setContentsMargins(16, 10, 16, 10);
 
   // Helper function to create info rows
   auto createInfoRow = [this, cardLayout](const QString& icon, const QString& label,
                                            QLabel*& valueLabel, bool addSeparator = true) {
     auto* row = new QWidget(this);
     auto* rowLayout = new QHBoxLayout(row);
-    rowLayout->setContentsMargins(0, 12, 0, 12);
+    rowLayout->setContentsMargins(0, 8, 0, 8);
     rowLayout->setSpacing(12);
 
     // Icon
@@ -453,7 +453,7 @@ void ConnectionWidget::setupUi() {
   // Session ID row (separate, monospace)
   sessionInfoGroup_ = new QWidget(this);
   auto* sessionLayout = new QHBoxLayout(sessionInfoGroup_);
-  sessionLayout->setContentsMargins(20, 12, 20, 0);
+  sessionLayout->setContentsMargins(16, 8, 16, 0);
   sessionLayout->setSpacing(8);
 
   auto* sessionIcon = new QLabel("\U0001F511", this);  // Key
