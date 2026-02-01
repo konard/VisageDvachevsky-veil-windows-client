@@ -923,25 +923,25 @@ void SetupWizard::onTestConnection() {
     testResultLabel_->setStyleSheet("color: #3fb950; font-size: 13px;");
     testConnectionButton_->setEnabled(true);
     testConnectionButton_->setText(tr("Test Connection"));
-    if (socketGuard) socketGuard->deleteLater();
+    if (socketGuard != nullptr) socketGuard->deleteLater();
   });
 
   connect(socket, &QTcpSocket::errorOccurred, this,
           [this, socketGuard](QAbstractSocket::SocketError) {
-    QString errorStr = socketGuard ? socketGuard->errorString() : tr("Unknown error");
+    QString errorStr = socketGuard != nullptr ? socketGuard->errorString() : tr("Unknown error");
     testResultLabel_->setText(
         tr("Could not reach server: %1").arg(errorStr));
     testResultLabel_->setStyleSheet("color: #f85149; font-size: 13px;");
     testConnectionButton_->setEnabled(true);
     testConnectionButton_->setText(tr("Test Connection"));
-    if (socketGuard) socketGuard->deleteLater();
+    if (socketGuard != nullptr) socketGuard->deleteLater();
   });
 
   socket->connectToHost(address, static_cast<quint16>(port));
 
   // Timeout after 5 seconds
   QTimer::singleShot(5000, this, [this, socketGuard]() {
-    if (!socketGuard) return;
+    if (socketGuard == nullptr) return;
     if (socketGuard->state() != QAbstractSocket::ConnectedState) {
       socketGuard->abort();
       testResultLabel_->setText(tr("Connection timed out"));
