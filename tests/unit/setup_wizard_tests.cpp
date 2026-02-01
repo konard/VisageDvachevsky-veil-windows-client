@@ -645,6 +645,54 @@ TEST_F(SetupWizardTest, DpiModeComboHasFourOptions) {
   EXPECT_TRUE(found) << "DPI mode combo box with 4 options not found";
 }
 
+// ===================== Connection Test Safety Tests =====================
+
+TEST_F(SetupWizardTest, DestroyDuringConnectionTestDoesNotCrash) {
+  // Regression test for #197: wizard must not crash if destroyed while
+  // a connection test is pending (e.g. heartbeat timeout triggers UI teardown).
+  auto* wizard = new SetupWizard();
+
+  // Set a server address so the test actually starts a socket connection
+  auto lineEdits = wizard->findChildren<QLineEdit*>();
+  for (auto* edit : lineEdits) {
+    if (edit->placeholderText().contains("vpn.example.com")) {
+      edit->setText("192.0.2.1");  // TEST-NET address, won't connect
+      break;
+    }
+  }
+
+  // Start the connection test — this creates a QTcpSocket + 5s timeout
+  QMetaObject::invokeMethod(wizard, "onTestConnection", Qt::DirectConnection);
+
+  // Immediately destroy the wizard while socket + timer are still pending.
+  // Before the fix this would cause use-after-free when the timer fires.
+  delete wizard;
+
+  // Process pending events to trigger any deferred deletions / timers
+  QApplication::processEvents();
+
+  // If we reach here without crashing, the fix works.
+  SUCCEED();
+}
+
+TEST_F(SetupWizardTest, MultipleConnectionTestsCancelPrevious) {
+  SetupWizard wizard;
+
+  auto lineEdits = wizard.findChildren<QLineEdit*>();
+  for (auto* edit : lineEdits) {
+    if (edit->placeholderText().contains("vpn.example.com")) {
+      edit->setText("192.0.2.1");
+      break;
+    }
+  }
+
+  // Start two connection tests in quick succession.
+  // The second call should cancel the first without crashing.
+  QMetaObject::invokeMethod(&wizard, "onTestConnection", Qt::DirectConnection);
+  QMetaObject::invokeMethod(&wizard, "onTestConnection", Qt::DirectConnection);
+
+  QApplication::processEvents();
+  SUCCEED();
 // ===================== Embedded Key Config Import Tests =====================
 
 TEST_F(SetupWizardTest, ConfigWithEmbeddedKeysHasValidStructure) {
