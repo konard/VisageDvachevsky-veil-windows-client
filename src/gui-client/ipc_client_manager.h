@@ -92,7 +92,9 @@ class IpcClientManager : public QObject {
 
   // Heartbeat monitoring constants
   static constexpr int kHeartbeatIntervalSec = 10;   // Service sends heartbeat every 10 seconds
-  static constexpr int kHeartbeatTimeoutSec = 20;    // Consider service dead after 2x interval
+  static constexpr int kHeartbeatTimeoutSec = 45;    // Consider service dead after extended period
+                                                     // (increased from 20s to tolerate daemon being
+                                                     // busy during tunnel initialization/teardown)
   static constexpr int kHeartbeatCheckIntervalMs = 5000;  // Check heartbeat timeout every 5 seconds
 
  private slots:

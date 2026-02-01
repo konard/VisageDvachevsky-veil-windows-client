@@ -18,9 +18,14 @@ IpcClientManager::IpcClientManager(QObject* parent)
     handleMessage(msg);
   });
 
-  // Set up connection change handler
+  // Set up connection change handler.
+  // The callback may be invoked from a non-Qt thread (e.g., socket I/O thread),
+  // so we marshal it to the GUI thread via QMetaObject::invokeMethod to avoid
+  // "Timers cannot be stopped from another thread" warnings.
   client_->on_connection_change([this](bool connected) {
-    handleConnectionChange(connected);
+    QMetaObject::invokeMethod(this, [this, connected]() {
+      handleConnectionChange(connected);
+    }, Qt::QueuedConnection);
   });
 
   // Set up polling timer to check for incoming messages
@@ -156,6 +161,13 @@ bool IpcClientManager::sendConnect(const ipc::ConnectionConfig& config) {
 
   qDebug() << "[IpcClientManager] ConnectCommand sent successfully";
   qDebug() << "[IpcClientManager] Waiting for response from daemon...";
+
+  // Reset heartbeat timer to give the daemon extra time for tunnel initialization.
+  // The daemon blocks its main loop during tunnel setup, so heartbeats will be
+  // delayed. This prevents false "service unreachable" errors.
+  lastHeartbeat_ = std::chrono::steady_clock::now();
+  qDebug() << "[IpcClientManager] Reset heartbeat timer (grace period for tunnel initialization)";
+
   return true;
 }
 
@@ -194,6 +206,10 @@ bool IpcClientManager::sendDisconnect() {
   }
 
   qDebug() << "[IpcClientManager] DisconnectCommand sent successfully";
+
+  // Reset heartbeat timer — daemon may be busy tearing down the tunnel
+  lastHeartbeat_ = std::chrono::steady_clock::now();
+
   return true;
 }
 
@@ -242,6 +258,11 @@ void IpcClientManager::pollMessages() {
 
 void IpcClientManager::handleMessage(const ipc::Message& msg) {
   qDebug() << "[IpcClientManager] Received message from daemon, type:" << static_cast<int>(msg.type);
+
+  // Any message from the daemon proves it is alive — reset heartbeat timer.
+  // This prevents false heartbeat timeouts when the daemon is busy (e.g.,
+  // during VPN tunnel initialization) but still sending responses/events.
+  lastHeartbeat_ = std::chrono::steady_clock::now();
 
   // Handle events from daemon
   if (msg.type == ipc::MessageType::kEvent) {
@@ -354,6 +375,12 @@ void IpcClientManager::handleMessage(const ipc::Message& msg) {
 
 void IpcClientManager::handleConnectionChange(bool connected) {
   qDebug() << "[IpcClientManager] Connection state changed:" << (connected ? "CONNECTED" : "DISCONNECTED");
+
+  // Skip if state hasn't actually changed to avoid duplicate signals
+  if (daemonConnected_ == connected) {
+    qDebug() << "[IpcClientManager] Connection state unchanged, skipping duplicate notification";
+    return;
+  }
 
   daemonConnected_ = connected;
   emit daemonConnectionChanged(connected);
