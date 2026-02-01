@@ -79,7 +79,8 @@ void SettingsWidget::setupUi() {
   // Search/filter box
   searchEdit_ = new QLineEdit(this);
   searchEdit_->setPlaceholderText("🔍 Search settings...");
-  searchEdit_->setFixedWidth(250);
+  searchEdit_->setMinimumWidth(scaleDpi(200));
+  searchEdit_->setMaximumWidth(scaleDpi(300));
   searchEdit_->setStyleSheet(R"(
     QLineEdit {
       background-color: #161b22;
@@ -643,7 +644,7 @@ QWidget* SettingsWidget::createConnectionSection() {
   reconnectIntervalSpinBox_->setRange(1, 60);
   reconnectIntervalSpinBox_->setValue(5);
   reconnectIntervalSpinBox_->setSuffix(" sec");
-  reconnectIntervalSpinBox_->setFixedWidth(scaleDpi(100));
+  reconnectIntervalSpinBox_->setMinimumWidth(scaleDpi(100));
   intervalRow->addWidget(reconnectIntervalSpinBox_);
 
   layout->addLayout(intervalRow);
@@ -659,7 +660,7 @@ QWidget* SettingsWidget::createConnectionSection() {
   maxReconnectAttemptsSpinBox_->setRange(0, 100);
   maxReconnectAttemptsSpinBox_->setValue(5);
   maxReconnectAttemptsSpinBox_->setSpecialValueText("Unlimited");
-  maxReconnectAttemptsSpinBox_->setFixedWidth(scaleDpi(100));
+  maxReconnectAttemptsSpinBox_->setMinimumWidth(scaleDpi(120));
   attemptsRow->addWidget(maxReconnectAttemptsSpinBox_);
 
   layout->addLayout(attemptsRow);

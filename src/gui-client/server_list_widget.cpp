@@ -32,7 +32,7 @@ void ServerListItem::setupUi(const ServerConfig& server) {
 
   // Favorite star button
   favoriteButton_ = new QPushButton(server.isFavorite ? "★" : "☆", this);
-  favoriteButton_->setFixedSize(32, 32);
+  favoriteButton_->setFixedSize(scaleDpi(32), scaleDpi(32));
   favoriteButton_->setCursor(Qt::PointingHandCursor);
   favoriteButton_->setStyleSheet(QString(R"(
     QPushButton {
@@ -72,7 +72,7 @@ void ServerListItem::setupUi(const ServerConfig& server) {
 
   // Ping button
   pingButton_ = new QPushButton("Ping", this);
-  pingButton_->setFixedHeight(28);
+  pingButton_->setFixedHeight(scaleDpi(28));
   pingButton_->setCursor(Qt::PointingHandCursor);
   pingButton_->setStyleSheet(R"(
     QPushButton {
@@ -96,7 +96,7 @@ void ServerListItem::setupUi(const ServerConfig& server) {
 
   // Edit button
   editButton_ = new QPushButton("Edit", this);
-  editButton_->setFixedHeight(28);
+  editButton_->setFixedHeight(scaleDpi(28));
   editButton_->setCursor(Qt::PointingHandCursor);
   editButton_->setStyleSheet(R"(
     QPushButton {
@@ -120,7 +120,7 @@ void ServerListItem::setupUi(const ServerConfig& server) {
 
   // Delete button
   deleteButton_ = new QPushButton("×", this);
-  deleteButton_->setFixedSize(28, 28);
+  deleteButton_->setFixedSize(scaleDpi(28), scaleDpi(28));
   deleteButton_->setCursor(Qt::PointingHandCursor);
   deleteButton_->setStyleSheet(R"(
     QPushButton {
@@ -246,21 +246,21 @@ void ServerListWidget::setupUi() {
   // Search box
   searchEdit_ = new QLineEdit(this);
   searchEdit_->setPlaceholderText("Search servers...");
-  searchEdit_->setFixedHeight(36);
+  searchEdit_->setFixedHeight(scaleDpi(36));
   connect(searchEdit_, &QLineEdit::textChanged, this, &ServerListWidget::onSearchTextChanged);
   toolbarLayout->addWidget(searchEdit_, 1);
 
   // Sort dropdown
   sortCombo_ = new QComboBox(this);
   sortCombo_->addItems({"Sort: Name", "Sort: Latency", "Sort: Favorites", "Sort: Recent"});
-  sortCombo_->setFixedHeight(36);
+  sortCombo_->setFixedHeight(scaleDpi(36));
   connect(sortCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
           this, &ServerListWidget::onSortModeChanged);
   toolbarLayout->addWidget(sortCombo_);
 
   // Ping All button
   pingAllButton_ = new QPushButton("Ping All", this);
-  pingAllButton_->setFixedHeight(36);
+  pingAllButton_->setFixedHeight(scaleDpi(36));
   pingAllButton_->setCursor(Qt::PointingHandCursor);
   pingAllButton_->setStyleSheet(R"(
     QPushButton {
