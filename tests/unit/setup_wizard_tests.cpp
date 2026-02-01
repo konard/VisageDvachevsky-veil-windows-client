@@ -693,6 +693,7 @@ TEST_F(SetupWizardTest, MultipleConnectionTestsCancelPrevious) {
 
   QApplication::processEvents();
   SUCCEED();
+}
 // ===================== Embedded Key Config Import Tests =====================
 
 TEST_F(SetupWizardTest, ConfigWithEmbeddedKeysHasValidStructure) {

@@ -175,8 +175,9 @@ bool ShortcutManager::removeShortcut(Location location,
   }
 
   // Check if the shortcut exists
-  if (!std::filesystem::exists(shortcut_path)) {
-    // Not an error - shortcut doesn't exist
+  std::error_code exists_ec;
+  if (!std::filesystem::exists(shortcut_path, exists_ec) || exists_ec) {
+    // Not an error - shortcut doesn't exist (or path is inaccessible)
     return true;
   }
 
@@ -200,7 +201,8 @@ bool ShortcutManager::shortcutExists(Location location,
     return false;
   }
 
-  return std::filesystem::exists(shortcut_path);
+  std::error_code ec;
+  return std::filesystem::exists(shortcut_path, ec) && !ec;
 }
 
 std::string ShortcutManager::getLocationPath(Location location, std::string& error) {

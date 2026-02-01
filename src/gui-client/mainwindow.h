@@ -104,6 +104,9 @@ class MainWindow : public QMainWindow {
   void onWizardFinished();
   void loadThemePreference();
 
+  /// Deferred daemon connection initialization (called after window is shown)
+  void initDaemonConnection();
+
 #ifdef _WIN32
   /// Ensure the Windows service is running, starting it if necessary
   bool ensureServiceRunning();

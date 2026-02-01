@@ -21,8 +21,8 @@ UsageBarChart::UsageBarChart(QWidget* parent) : QWidget(parent) {
   setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 }
 
-void UsageBarChart::setData(const std::vector<BarData>& data) {
-  data_ = data;
+void UsageBarChart::setData(const std::vector<BarData>& barData) {
+  data_ = barData;
   update();
 }
 
@@ -97,7 +97,7 @@ void UsageBarChart::paintEvent(QPaintEvent* /*event*/) {
     }
   }
   // Add 10% headroom
-  maxVal = static_cast<uint64_t>(maxVal * 1.1);
+  maxVal = maxVal + maxVal / 10;  // Add ~10% headroom
 
   const int barCount = static_cast<int>(data_.size());
   const double barWidth = static_cast<double>(cw) / barCount;

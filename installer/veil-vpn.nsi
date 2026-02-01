@@ -280,9 +280,14 @@ Section "VEIL VPN Client (required)" SecMain
   SetOutPath "$INSTDIR\config"
   File /nonfatal "config\client.json.example"
 
-  ; Translations
+  ; Application translations (veil_ru.qm, veil_zh.qm, etc.)
   SetOutPath "$INSTDIR\translations"
   File /nonfatal "translations\veil_*.qm"
+  ; Also try bin/translations/ as fallback (windeployqt may place them there)
+  File /nonfatal "bin\translations\veil_*.qm"
+  ; Qt base translations for standard dialogs (File/Edit/OK/Cancel in other languages)
+  File /nonfatal "bin\translations\qt_*.qm"
+  File /nonfatal "bin\translations\qtbase_*.qm"
 
   ; Write installation directory to registry
   WriteRegStr HKLM "${PRODUCT_DIR_REGKEY}" "" "$INSTDIR\veil-vpn.exe"

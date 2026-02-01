@@ -12,6 +12,7 @@
 #include <QApplication>
 #include <QParallelAnimationGroup>
 #include <QDebug>
+#include <QPointer>
 #include <QTcpSocket>
 #include <QTimer>
 #include <QStandardPaths>

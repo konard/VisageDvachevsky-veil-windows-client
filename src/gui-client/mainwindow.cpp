@@ -119,121 +119,86 @@ void AnimatedStackedWidget::setCurrentWidgetAnimated(int index) {
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent),
-      stackedWidget_(new AnimatedStackedWidget(this)),
-      connectionWidget_(new ConnectionWidget(this)),
-      settingsWidget_(new SettingsWidget(this)),
-      diagnosticsWidget_(new DiagnosticsWidget(this)),
-      setupWizard_(new SetupWizard(this)),
-      statisticsWidget_(new StatisticsWidget(this)),
-      serverListWidget_(new ServerListWidget(this)),
+      stackedWidget_(nullptr),
+      connectionWidget_(nullptr),
+      settingsWidget_(nullptr),
+      diagnosticsWidget_(nullptr),
+      setupWizard_(nullptr),
+      statisticsWidget_(nullptr),
+      serverListWidget_(nullptr),
       dataUsageWidget_(nullptr),
-      usageTracker_(new UsageTracker(this)),
-      ipcManager_(std::make_unique<IpcClientManager>(this)),
+      usageTracker_(nullptr),
+      ipcManager_(nullptr),
       trayIcon_(nullptr),
       trayMenu_(nullptr),
       trayConnectAction_(nullptr),
       trayDisconnectAction_(nullptr),
-      updateChecker_(std::make_unique<UpdateChecker>(this)) {
+      updateChecker_(nullptr) {
+  qDebug().noquote() << "MainWindow: Creating widgets...";
+
+  qDebug().noquote() << "MainWindow: Creating AnimatedStackedWidget...";
+  stackedWidget_ = new AnimatedStackedWidget(this);
+
+  qDebug().noquote() << "MainWindow: Creating ConnectionWidget...";
+  connectionWidget_ = new ConnectionWidget(this);
+
+  qDebug().noquote() << "MainWindow: Creating SettingsWidget...";
+  settingsWidget_ = new SettingsWidget(this);
+
+  qDebug().noquote() << "MainWindow: Creating DiagnosticsWidget...";
+  diagnosticsWidget_ = new DiagnosticsWidget(this);
+
+  qDebug().noquote() << "MainWindow: Creating SetupWizard...";
+  setupWizard_ = new SetupWizard(this);
+
+  qDebug().noquote() << "MainWindow: Creating StatisticsWidget...";
+  statisticsWidget_ = new StatisticsWidget(this);
+
+  qDebug().noquote() << "MainWindow: Creating ServerListWidget...";
+  serverListWidget_ = new ServerListWidget(this);
+
+  qDebug().noquote() << "MainWindow: Creating UsageTracker...";
+  usageTracker_ = new UsageTracker(this);
+
   // Load persistent usage data
+  qDebug().noquote() << "MainWindow: Loading usage data...";
   usageTracker_->load();
+
+  qDebug().noquote() << "MainWindow: Creating DataUsageWidget...";
   dataUsageWidget_ = new DataUsageWidget(usageTracker_, this);
 
-  qDebug() << "MainWindow: Initializing GUI components...";
+  qDebug().noquote() << "MainWindow: Creating IpcClientManager...";
+  ipcManager_ = std::make_unique<IpcClientManager>(this);
+
+  qDebug().noquote() << "MainWindow: Creating UpdateChecker...";
+  updateChecker_ = std::make_unique<UpdateChecker>(this);
+
+  qDebug() << "MainWindow: All widgets created, initializing GUI components...";
+
+  qDebug().noquote() << "MainWindow: setupUi()...";
   setupUi();
+  qDebug().noquote() << "MainWindow: setupIpcConnections()...";
   setupIpcConnections();
+  qDebug().noquote() << "MainWindow: setupMenuBar()...";
   setupMenuBar();
+  qDebug().noquote() << "MainWindow: setupStatusBar()...";
   setupStatusBar();
+  qDebug().noquote() << "MainWindow: setupSystemTray()...";
   setupSystemTray();
+  qDebug().noquote() << "MainWindow: setupUpdateChecker()...";
   setupUpdateChecker();
+  qDebug().noquote() << "MainWindow: loadThemePreference()...";
   loadThemePreference();
 
   // Load notification preferences on startup
+  qDebug().noquote() << "MainWindow: Loading notification preferences...";
   NotificationPreferences::instance().load();
 
   qDebug() << "MainWindow: GUI components initialized";
 
-  // Attempt to connect to daemon
-  // With SERVICE_AUTO_START, the service should already be running on Windows.
-  // If not yet ready (e.g., delayed auto-start), retry after a brief delay.
-  qDebug() << "MainWindow: Attempting to connect to VEIL daemon...";
-
-  // Create progress dialog for initial connection
-  auto* connectionProgress = new QProgressDialog(
-      tr("Connecting to VEIL daemon..."),
-      nullptr,  // No cancel button
-      0, 0,     // Indeterminate progress (0-0 range)
-      this);
-  connectionProgress->setWindowModality(Qt::WindowModal);
-  connectionProgress->setMinimumDuration(500);  // Show after 500ms if still connecting
-  connectionProgress->setValue(0);
-
-  if (!ipcManager_->connectToDaemon()) {
-    qWarning() << "MainWindow: Failed to connect to daemon on first attempt";
-#ifdef _WIN32
-    // Service uses delayed auto-start, so it may still be starting.
-    // Retry connection after a short delay before falling back to manual start.
-    qDebug() << "MainWindow: Service may still be starting (delayed auto-start), retrying soon...";
-    connectionProgress->setLabelText(tr("Waiting for VEIL service to start..."));
-    statusBar()->showMessage(tr("Waiting for VEIL service to start..."));
-    QTimer::singleShot(3000, this, [this, connectionProgress]() {
-      qDebug() << "MainWindow: Retrying daemon connection...";
-      if (!ipcManager_->connectToDaemon()) {
-        qWarning() << "MainWindow: Retry failed, attempting to ensure service is running...";
-        connectionProgress->setLabelText(tr("Starting VEIL service..."));
-        if (ensureServiceRunning()) {
-          qDebug() << "MainWindow: Service startup succeeded, waiting for IPC server to be ready...";
-          // Wait for the service's IPC Named Pipe to be available before connecting (async)
-          connectionProgress->setLabelText(tr("Waiting for service to be ready..."));
-          waitForServiceReadyAsync(5000, [this, connectionProgress](bool ready) {
-            if (ready) {
-              qDebug() << "MainWindow: Service IPC is ready, connecting...";
-              connectionProgress->setLabelText(tr("Connecting to daemon..."));
-              if (!ipcManager_->connectToDaemon()) {
-                qWarning() << "MainWindow: Failed to connect to daemon after service ready";
-                statusBar()->showMessage(tr("Failed to connect to daemon after service start"), 5000);
-              } else {
-                qDebug() << "MainWindow: Successfully connected to daemon after service start";
-              }
-            } else {
-              qWarning() << "MainWindow: Timed out waiting for service IPC, attempting connection anyway...";
-              if (!ipcManager_->connectToDaemon()) {
-                qWarning() << "MainWindow: Failed to connect to daemon after timeout";
-                statusBar()->showMessage(tr("Failed to connect to daemon after service start"), 5000);
-              } else {
-                qDebug() << "MainWindow: Successfully connected to daemon despite timeout";
-              }
-            }
-            // Close the progress dialog after async operation completes
-            connectionProgress->close();
-            connectionProgress->deleteLater();
-          });
-          // Return early - the callback will handle completion
-          return;
-        } else {
-          qWarning() << "MainWindow: Failed to ensure service is running";
-          statusBar()->showMessage(tr("Failed to start VEIL service - run as administrator"), 5000);
-          // Close the progress dialog
-          connectionProgress->close();
-          connectionProgress->deleteLater();
-        }
-      } else {
-        qDebug() << "MainWindow: Successfully connected to daemon on retry";
-        statusBar()->showMessage(tr("Connected to daemon"), 3000);
-        // Close the progress dialog
-        connectionProgress->close();
-        connectionProgress->deleteLater();
-      }
-    });
-#else
-    statusBar()->showMessage(tr("Daemon not running - start veil-client first"), 5000);
-    connectionProgress->close();
-    connectionProgress->deleteLater();
-#endif
-  } else {
-    qDebug() << "MainWindow: Successfully connected to daemon";
-    connectionProgress->close();
-    connectionProgress->deleteLater();
-  }
+  // Defer daemon connection to after the window is shown.
+  // This ensures the UI appears immediately and doesn't block on IPC/service startup.
+  QTimer::singleShot(0, this, &MainWindow::initDaemonConnection);
 
   // Check for updates on startup (delayed)
   QTimer::singleShot(3000, this, &MainWindow::checkForUpdates);
@@ -1587,6 +1552,65 @@ void MainWindow::onUpdateCheckFailed(const QString& error) {
   statusBar()->showMessage(tr("Update check failed: %1").arg(error), 5000);
 }
 
+void MainWindow::initDaemonConnection() {
+  // Attempt to connect to daemon.
+  // With SERVICE_AUTO_START, the service should already be running on Windows.
+  // If not yet ready (e.g., delayed auto-start), retry after a brief delay.
+  qDebug() << "MainWindow: Attempting to connect to VEIL daemon...";
+
+  statusBar()->showMessage(tr("Connecting to VEIL daemon..."));
+
+  if (!ipcManager_->connectToDaemon()) {
+    qWarning() << "MainWindow: Failed to connect to daemon on first attempt";
+#ifdef _WIN32
+    // Service uses delayed auto-start, so it may still be starting.
+    // Retry connection after a short delay before falling back to manual start.
+    qDebug() << "MainWindow: Service may still be starting (delayed auto-start), retrying soon...";
+    statusBar()->showMessage(tr("Waiting for VEIL service to start..."));
+    QTimer::singleShot(3000, this, [this]() {
+      qDebug() << "MainWindow: Retrying daemon connection...";
+      if (!ipcManager_->connectToDaemon()) {
+        qWarning() << "MainWindow: Retry failed, attempting to ensure service is running...";
+        if (ensureServiceRunning()) {
+          qDebug() << "MainWindow: Service startup succeeded, waiting for IPC server to be ready...";
+          statusBar()->showMessage(tr("Waiting for service to be ready..."));
+          waitForServiceReadyAsync(5000, [this](bool ready) {
+            if (ready) {
+              qDebug() << "MainWindow: Service IPC is ready, connecting...";
+              if (!ipcManager_->connectToDaemon()) {
+                qWarning() << "MainWindow: Failed to connect to daemon after service ready";
+                statusBar()->showMessage(tr("Failed to connect to daemon after service start"), 5000);
+              } else {
+                qDebug() << "MainWindow: Successfully connected to daemon after service start";
+              }
+            } else {
+              qWarning() << "MainWindow: Timed out waiting for service IPC, attempting connection anyway...";
+              if (!ipcManager_->connectToDaemon()) {
+                qWarning() << "MainWindow: Failed to connect to daemon after timeout";
+                statusBar()->showMessage(tr("Failed to connect to daemon after service start"), 5000);
+              } else {
+                qDebug() << "MainWindow: Successfully connected to daemon despite timeout";
+              }
+            }
+          });
+        } else {
+          qWarning() << "MainWindow: Failed to ensure service is running";
+          statusBar()->showMessage(tr("Failed to start VEIL service - run as administrator"), 5000);
+        }
+      } else {
+        qDebug() << "MainWindow: Successfully connected to daemon on retry";
+        statusBar()->showMessage(tr("Connected to daemon"), 3000);
+      }
+    });
+#else
+    statusBar()->showMessage(tr("Daemon not running - start veil-client first"), 5000);
+#endif
+  } else {
+    qDebug() << "MainWindow: Successfully connected to daemon";
+    statusBar()->showMessage(tr("Connected to daemon"), 3000);
+  }
+}
+
 #ifdef _WIN32
 bool MainWindow::ensureServiceRunning() {
   using namespace veil::windows;
@@ -1657,11 +1681,11 @@ bool MainWindow::ensureServiceRunning() {
               progress->setLabelText(tr("Starting VEIL service..."));
               QApplication::processEvents();  // Update UI
 
-              // Try to start the service and wait for it to be ready
+              // Initiate service start (non-blocking) - the caller will wait for IPC readiness
               std::string error;
-              if (ServiceManager::start_and_wait(error)) {
-                qDebug() << "ensureServiceRunning: Service started and is now running";
-                statusBar()->showMessage(tr("VEIL service started successfully"), 3000);
+              if (ServiceManager::start(error)) {
+                qDebug() << "ensureServiceRunning: Service start initiated successfully";
+                statusBar()->showMessage(tr("VEIL service starting..."), 3000);
                 progress->close();
                 progress->deleteLater();
                 return true;
@@ -1728,10 +1752,10 @@ bool MainWindow::ensureServiceRunning() {
           progress->setLabelText(tr("Starting VEIL service..."));
           QApplication::processEvents();  // Update UI
 
-          // Try to start the service and wait for it to be ready
-          if (ServiceManager::start_and_wait(error)) {
-            qDebug() << "ensureServiceRunning: Service started and is now running";
-            statusBar()->showMessage(tr("VEIL service started successfully"), 3000);
+          // Initiate service start (non-blocking) - the caller will wait for IPC readiness
+          if (ServiceManager::start(error)) {
+            qDebug() << "ensureServiceRunning: Service start initiated successfully";
+            statusBar()->showMessage(tr("VEIL service starting..."), 3000);
             progress->close();
             progress->deleteLater();
             return true;
@@ -1764,35 +1788,18 @@ bool MainWindow::ensureServiceRunning() {
     }
   }
 
-  // Service is installed but not running - try to start it and wait for it to be ready
+  // Service is installed but not running - initiate start (non-blocking)
+  // The caller (initDaemonConnection) will use waitForServiceReadyAsync()
+  // to asynchronously poll for the service's IPC pipe to become available.
   qDebug() << "ensureServiceRunning: Service is installed but not running, attempting to start...";
-
-  // Create progress dialog for service start
-  auto* progress = new QProgressDialog(
-      tr("Starting VEIL service..."),
-      nullptr,  // No cancel button
-      0, 0,     // Indeterminate progress
-      this);
-  progress->setWindowModality(Qt::WindowModal);
-  progress->setMinimumDuration(0);  // Show immediately
-  progress->setValue(0);
 
   statusBar()->showMessage(tr("Starting VEIL service..."));
 
   std::string error;
-  // Use start_and_wait() to ensure the service is fully running before returning
-  // This prevents race conditions where the GUI tries to connect before the
-  // service has created the IPC Named Pipe
-  if (ServiceManager::start_and_wait(error)) {
-    qDebug() << "ensureServiceRunning: Service started and is now running";
-    statusBar()->showMessage(tr("VEIL service started successfully"), 3000);
-    progress->close();
-    progress->deleteLater();
+  if (ServiceManager::start(error)) {
+    qDebug() << "ensureServiceRunning: Service start initiated successfully";
     return true;
   }
-
-  progress->close();
-  progress->deleteLater();
 
   qWarning() << "ensureServiceRunning: Failed to start service:" << QString::fromStdString(error);
 
@@ -1800,7 +1807,6 @@ bool MainWindow::ensureServiceRunning() {
   if (error.find("Access is denied") != std::string::npos ||
       error.find("5") != std::string::npos) {  // ERROR_ACCESS_DENIED = 5
     qWarning() << "ensureServiceRunning: Access denied error, need administrator privileges";
-    // Need admin rights to start service - inform user
     QMessageBox::warning(
         this,
         tr("Administrator Rights Required"),

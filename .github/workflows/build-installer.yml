@@ -45,9 +45,16 @@ jobs:
           New-Item -ItemType Directory -Force -Path docs
           New-Item -ItemType Directory -Force -Path bin
           New-Item -ItemType Directory -Force -Path driver
+          New-Item -ItemType Directory -Force -Path translations
 
           # Copy documentation
           Copy-Item ../README.md docs/ -ErrorAction SilentlyContinue
+
+          # Copy translation files from bin/translations/ to translations/
+          if (Test-Path "bin/translations") {
+            Copy-Item bin/translations/*.qm translations/ -ErrorAction SilentlyContinue
+            Write-Host "Translation files copied to installer/translations/"
+          }
 
       - name: Update version in NSIS script
         if: inputs.version != ''

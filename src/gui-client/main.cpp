@@ -6,23 +6,102 @@
 #include <QSettings>
 #include <QLibraryInfo>
 
+#include <cstdio>
+#include <cstdlib>
+#include <exception>
+
 #ifdef QT_NETWORK_LIB
 #include <QSslSocket>
 #endif
 
 #include "mainwindow.h"
+#include "common/version.h"
 
 #ifdef _WIN32
+#include <windows.h>
 #include "windows/service_manager.h"
 #endif
 
+namespace {
+
+/// Log file handle for persistent crash diagnostics.
+/// Output is written to both stderr and a log file so diagnostics survive
+/// even when the console window closes on crash.
+FILE* g_logFile = nullptr;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
+/// Custom message handler that flushes output after every Qt debug/warning message.
+/// Writes to both stderr (console) and a log file in the app directory.
+/// This ensures log output is visible even if the application crashes immediately after.
+void flushingMessageHandler(QtMsgType type, const QMessageLogContext& context, const QString& msg) {
+  QByteArray localMsg = msg.toLocal8Bit();
+  const char* msgStr = localMsg.constData();
+
+  const char* prefix = "";
+  switch (type) {
+    case QtDebugMsg:    prefix = "";          break;
+    case QtInfoMsg:     prefix = "Info: ";    break;
+    case QtWarningMsg:  prefix = "Warning: "; break;
+    case QtCriticalMsg: prefix = "Critical: "; break;
+    case QtFatalMsg:    prefix = "Fatal: ";   break;
+  }
+
+  fprintf(stderr, "%s%s\n", prefix, msgStr);
+  fflush(stderr);
+
+  if (g_logFile != nullptr) {
+    fprintf(g_logFile, "%s%s\n", prefix, msgStr);
+    fflush(g_logFile);
+  }
+
+  // Suppress unused parameter warning
+  (void)context;
+}
+
+/// Open log file next to the executable for persistent crash diagnostics.
+void openLogFile() {
+#ifdef _WIN32
+  char path[MAX_PATH];
+  GetModuleFileNameA(nullptr, path, MAX_PATH);
+  std::string logPath(path);
+  auto pos = logPath.find_last_of('\\');
+  if (pos != std::string::npos) {
+    logPath = logPath.substr(0, pos + 1);
+  }
+  logPath += "veil-client-gui.log";
+  g_logFile = fopen(logPath.c_str(), "w");  // NOLINT(cppcoreguidelines-owning-memory)
+  if (g_logFile != nullptr) {
+    fprintf(stderr, "Log file: %s\n", logPath.c_str());
+    fflush(stderr);
+  }
+#endif
+}
+
+}  // namespace
+
 int main(int argc, char* argv[]) {
+  // Open log file and install flushing message handler for crash diagnostics.
+  // The log file is written next to the executable so output survives console closing.
+  openLogFile();
+  qInstallMessageHandler(flushingMessageHandler);
+
+  // Install terminate handler to log crashes that bypass try-catch
+  std::set_terminate([]() {
+    const char* msg = "FATAL: std::terminate() called — likely an uncaught exception or abort\n";
+    fprintf(stderr, "%s", msg);
+    fflush(stderr);
+    if (g_logFile != nullptr) {
+      fprintf(g_logFile, "%s", msg);
+      fflush(g_logFile);
+    }
+    std::abort();
+  });
+
   QApplication app(argc, argv);
 
   // Log Qt and SSL information for debugging
   qDebug() << "=== VEIL VPN Client Startup ===";
   qDebug() << "Qt Version:" << qVersion();
-  qDebug() << "Application Version: 0.1.0";
+  qDebug() << "Application Version:" << veil::kVersionString;
 
 #ifdef QT_NETWORK_LIB
   // Check and log SSL/TLS backend support
@@ -55,7 +134,7 @@ int main(int argc, char* argv[]) {
   app.setOrganizationName("VEIL");
   app.setOrganizationDomain("veil.local");
   app.setApplicationName("VEIL Client");
-  app.setApplicationVersion("0.1.0");
+  app.setApplicationVersion(veil::kVersionString);
 
   // Load translations
   QSettings settings("VEIL", "VPN Client");
@@ -79,40 +158,51 @@ int main(int argc, char* argv[]) {
 
   qDebug() << "Loading translations for language:" << languageCode;
 
-  // Load Qt's built-in translations (for standard dialogs)
+  // English is the source language — no translation files are needed.
+  // Only load translations for non-English languages.
   QTranslator qtTranslator;
-  if (qtTranslator.load("qt_" + languageCode, QLibraryInfo::path(QLibraryInfo::TranslationsPath))) {
-    app.installTranslator(&qtTranslator);
-    qDebug() << "Loaded Qt base translations for" << languageCode;
-  } else {
-    qDebug() << "Failed to load Qt base translations for" << languageCode;
-  }
-
-  // Load application translations
   QTranslator appTranslator;
-  QString translationsPath = QCoreApplication::applicationDirPath() + "/translations";
-  QString translationFile = "veil_" + languageCode;
 
-  qDebug() << "Looking for translation file:" << translationFile << "in" << translationsPath;
-
-  if (appTranslator.load(translationFile, translationsPath)) {
-    app.installTranslator(&appTranslator);
-    qDebug() << "Successfully loaded application translations:" << translationFile;
-  } else {
-    // Try to load from resource path (for bundled translations)
-    if (appTranslator.load(":/translations/" + translationFile)) {
-      app.installTranslator(&appTranslator);
-      qDebug() << "Successfully loaded application translations from resources:" << translationFile;
+  if (languageCode != "en") {
+    // Load Qt's built-in translations (for standard dialogs)
+    if (qtTranslator.load("qt_" + languageCode, QLibraryInfo::path(QLibraryInfo::TranslationsPath))) {
+      app.installTranslator(&qtTranslator);
+      qDebug() << "Loaded Qt base translations for" << languageCode;
     } else {
-      qDebug() << "Warning: Failed to load application translations for" << languageCode;
-      qDebug() << "Tried paths:" << translationsPath << "and :/translations/";
+      qDebug() << "Qt base translations not found for" << languageCode
+               << "(standard dialogs will appear in English)";
     }
+
+    // Load application translations
+    QString translationsPath = QCoreApplication::applicationDirPath() + "/translations";
+    QString translationFile = "veil_" + languageCode;
+
+    qDebug() << "Looking for translation file:" << translationFile << "in" << translationsPath;
+
+    if (appTranslator.load(translationFile, translationsPath)) {
+      app.installTranslator(&appTranslator);
+      qDebug() << "Successfully loaded application translations:" << translationFile;
+    } else {
+      // Try to load from resource path (for bundled translations)
+      if (appTranslator.load(":/translations/" + translationFile)) {
+        app.installTranslator(&appTranslator);
+        qDebug() << "Successfully loaded application translations from resources:" << translationFile;
+      } else {
+        qWarning() << "Failed to load application translations for" << languageCode;
+        qWarning() << "Tried paths:" << translationsPath << "and :/translations/";
+        qWarning() << "UI will fall back to English";
+      }
+    }
+  } else {
+    qDebug() << "English is the source language, no translation files needed";
   }
 
 #ifdef _WIN32
   // On Windows, check if we have admin rights. If not, request elevation.
   // Admin rights are needed to start/manage the VPN service.
+  qDebug() << "Checking administrator privileges...";
   if (!veil::windows::elevation::is_elevated()) {
+    qDebug() << "Not running as administrator, requesting elevation...";
     // Not elevated - request elevation and restart
     QMessageBox::information(
         nullptr,
@@ -124,10 +214,12 @@ int main(int argc, char* argv[]) {
     // Request elevation - this will restart the app as admin
     if (veil::windows::elevation::request_elevation("")) {
       // Elevated process was started, exit this instance
+      qDebug() << "Elevated process launched, exiting non-elevated instance";
       return 0;
     }
 
     // User declined or elevation failed
+    qWarning() << "Elevation request failed or was declined by user";
     QMessageBox::critical(
         nullptr,
         QObject::tr("Elevation Failed"),
@@ -135,23 +227,49 @@ int main(int argc, char* argv[]) {
                     "Please run the application as Administrator."));
     return 1;
   }
+  qDebug() << "Running with administrator privileges";
 #endif
+
+  qDebug() << "Creating main window...";
 
   // Check for command-line arguments
   QStringList args = app.arguments();
   bool startMinimized = args.contains("--minimized") || args.contains("-m");
 
-  // Create main window
-  veil::gui::MainWindow window;
+  try {
+    // Create main window
+    veil::gui::MainWindow window;
 
-  // Show window unless minimized flag is set
-  if (!startMinimized) {
-    window.show();
-  } else {
-    qDebug() << "Starting minimized due to --minimized flag";
-    // Window will be hidden by the startMinimized logic in MainWindow constructor
-    window.show();  // Still call show() first, then hide() in constructor
+    qDebug() << "Main window created successfully";
+
+    // Show window unless minimized flag is set
+    if (!startMinimized) {
+      window.show();
+      qDebug() << "Main window shown";
+    } else {
+      qDebug() << "Starting minimized due to --minimized flag";
+      // Window will be hidden by the startMinimized logic in MainWindow constructor
+      window.show();  // Still call show() first, then hide() in constructor
+    }
+
+    qDebug() << "Entering application event loop";
+    return app.exec();
+  } catch (const std::exception& e) {
+    qCritical() << "FATAL: Unhandled exception during startup:" << e.what();
+#ifdef _WIN32
+    // Keep console open so the user can read the error
+    fprintf(stderr, "\nPress Enter to exit...\n");
+    fflush(stderr);
+    getchar();
+#endif
+    return 1;
+  } catch (...) {
+    qCritical() << "FATAL: Unknown exception during startup";
+#ifdef _WIN32
+    fprintf(stderr, "\nPress Enter to exit...\n");
+    fflush(stderr);
+    getchar();
+#endif
+    return 1;
   }
-
-  return app.exec();
 }

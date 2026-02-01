@@ -172,19 +172,26 @@ std::vector<InstalledApp> AppEnumerator::GetRunningProcesses() {
 bool AppEnumerator::IsValidExecutable(const std::string& path) {
   if (path.empty()) return false;
 
-  std::filesystem::path p(path);
+  try {
+    std::filesystem::path p(path);
+    std::error_code ec;
 
-  // Check if file exists
-  if (!std::filesystem::exists(p)) return false;
+    // Check if file exists (use error_code overload to avoid throwing on
+    // unavailable drives, network paths, etc.)
+    if (!std::filesystem::exists(p, ec) || ec) return false;
 
-  // Check if it's a file (not a directory)
-  if (!std::filesystem::is_regular_file(p)) return false;
+    // Check if it's a file (not a directory)
+    if (!std::filesystem::is_regular_file(p, ec) || ec) return false;
 
-  // Check extension
-  std::string ext = p.extension().string();
-  std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    // Check extension
+    std::string ext = p.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
 
-  return ext == ".exe" || ext == ".com" || ext == ".bat" || ext == ".cmd";
+    return ext == ".exe" || ext == ".com" || ext == ".bat" || ext == ".cmd";
+  } catch (...) {
+    // Guard against any unexpected filesystem exceptions (e.g., device not ready)
+    return false;
+  }
 }
 
 std::optional<std::string> AppEnumerator::ExtractIcon(const std::string& exePath) {
@@ -242,15 +249,24 @@ std::vector<InstalledApp> AppEnumerator::EnumerateFromRegistry(void* hKeyVoid, c
 
       // If no executable found from DisplayIcon, try InstallLocation
       if (app.executable.empty() && !app.installLocation.empty()) {
-        std::filesystem::path installPath(app.installLocation);
-        // Look for .exe files in install location
-        if (std::filesystem::exists(installPath) && std::filesystem::is_directory(installPath)) {
-          for (const auto& entry : std::filesystem::directory_iterator(installPath)) {
-            if (entry.is_regular_file() && entry.path().extension() == ".exe") {
-              app.executable = entry.path().string();
-              break;
+        try {
+          std::filesystem::path installPath(app.installLocation);
+          std::error_code ec;
+          // Use error_code overloads to avoid throwing on unavailable drives
+          if (std::filesystem::exists(installPath, ec) && !ec &&
+              std::filesystem::is_directory(installPath, ec) && !ec) {
+            for (const auto& entry : std::filesystem::directory_iterator(installPath, ec)) {
+              if (ec) break;
+              std::error_code ec2;
+              if (entry.is_regular_file(ec2) && !ec2 &&
+                  entry.path().extension() == ".exe") {
+                app.executable = entry.path().string();
+                break;
+              }
             }
           }
+        } catch (...) {
+          // Skip this install location if filesystem access fails
         }
       }
 
