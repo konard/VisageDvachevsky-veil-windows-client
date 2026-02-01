@@ -229,9 +229,9 @@ inline QString getDarkThemeStylesheet() {
                                   stop:0 #238636, stop:1 #2ea043);
       border: none;
       border-radius: 12px;
-      padding: 16px 32px;
+      padding: 10px 24px;
       color: white;
-      font-size: 16px;
+      font-size: 15px;
       font-weight: 600;
       letter-spacing: 0.3px;
     }
@@ -301,8 +301,8 @@ inline QString getDarkThemeStylesheet() {
       background-color: rgba(255, 255, 255, 0.02);
       border: 1px solid rgba(255, 255, 255, 0.06);
       border-radius: 16px;
-      margin-top: 20px;
-      padding: 24px 20px 20px 20px;
+      margin-top: 16px;
+      padding: 18px 16px 14px 16px;
       font-size: 15px;
       font-weight: 500;
     }
@@ -324,7 +324,7 @@ inline QString getDarkThemeStylesheet() {
       background-color: #161b22;
       border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 10px;
-      padding: 12px 16px;
+      padding: 8px 12px;
       color: #f0f6fc;
       font-size: 14px;
       selection-background-color: #58a6ff;
@@ -614,9 +614,9 @@ inline QString getLightThemeStylesheet() {
                                   stop:0 #0d6efd, stop:1 #20c997);
       border: none;
       border-radius: 12px;
-      padding: 16px 32px;
+      padding: 10px 24px;
       color: white;
-      font-size: 16px;
+      font-size: 15px;
       font-weight: 600;
     }
 

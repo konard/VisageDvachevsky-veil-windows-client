@@ -280,8 +280,8 @@ MainWindow::~MainWindow() = default;
 
 void MainWindow::setupUi() {
   setWindowTitle("VEIL VPN Client");
-  setMinimumSize(scaleDpi(480), scaleDpi(720));
-  resize(scaleDpi(480), scaleDpi(720));
+  setMinimumSize(scaleDpi(520), scaleDpi(780));
+  resize(scaleDpi(560), scaleDpi(840));
 
   // Set window icon from embedded resources
   setWindowIcon(QIcon(":/icons/icon_disconnected.svg"));

@@ -213,8 +213,8 @@ StatisticsWidget::StatisticsWidget(QWidget* parent) : QWidget(parent) {
 void StatisticsWidget::setupUi() {
   auto* mainLayout = new QVBoxLayout(this);
   mainLayout->setSpacing(0);
-  mainLayout->setContentsMargins(spacing::kPaddingXLarge(), spacing::kPaddingLarge(),
-                                  spacing::kPaddingXLarge(), spacing::kPaddingLarge());
+  mainLayout->setContentsMargins(spacing::kPaddingLarge(), spacing::kPaddingMedium(),
+                                  spacing::kPaddingLarge(), spacing::kPaddingMedium());
 
   // === Header ===
   auto* headerWidget = new QWidget(this);

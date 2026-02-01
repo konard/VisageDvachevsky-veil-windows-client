@@ -205,8 +205,8 @@ ServerListWidget::ServerListWidget(QWidget* parent)
 void ServerListWidget::setupUi() {
   auto* mainLayout = new QVBoxLayout(this);
   mainLayout->setSpacing(20);
-  mainLayout->setContentsMargins(spacing::kPaddingXLarge(), spacing::kPaddingMedium(),
-                                  spacing::kPaddingXLarge(), spacing::kPaddingMedium());
+  mainLayout->setContentsMargins(spacing::kPaddingLarge(), spacing::kPaddingMedium(),
+                                  spacing::kPaddingLarge(), spacing::kPaddingMedium());
 
   // === Header ===
   auto* headerLayout = new QHBoxLayout();
