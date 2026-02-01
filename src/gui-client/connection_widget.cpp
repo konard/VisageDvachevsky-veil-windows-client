@@ -305,7 +305,7 @@ void ConnectionWidget::setupUi() {
   // Copy error button
   copyErrorButton_ = new QPushButton("Copy Error Details", this);
   copyErrorButton_->setCursor(Qt::PointingHandCursor);
-  copyErrorButton_->setFixedHeight(32);
+  copyErrorButton_->setFixedHeight(scaleDpi(32));
   copyErrorButton_->setStyleSheet(QString(R"(
     QPushButton {
       background: rgba(248, 81, 73, 0.15);
@@ -417,7 +417,7 @@ void ConnectionWidget::setupUi() {
 
     // Icon
     auto* iconLabel = new QLabel(icon, this);
-    iconLabel->setFixedWidth(24);
+    iconLabel->setFixedWidth(scaleDpi(24));
     iconLabel->setStyleSheet("font-size: 16px; color: #6e7681;");
     rowLayout->addWidget(iconLabel);
 

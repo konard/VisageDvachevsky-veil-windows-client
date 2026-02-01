@@ -42,7 +42,7 @@ void QuickActionsWidget::setupUi() {
   toggleButton_ = new QPushButton(this);
   toggleButton_->setCursor(Qt::PointingHandCursor);
   toggleButton_->setToolTip("Quick Actions (Ctrl+Q)");
-  toggleButton_->setFixedHeight(36);
+  toggleButton_->setFixedHeight(scaleDpi(36));
   toggleButton_->setStyleSheet(R"(
     QPushButton {
       background: rgba(255, 255, 255, 0.03);
@@ -85,7 +85,7 @@ void QuickActionsWidget::setupUi() {
     auto* btn = new QPushButton(QString("%1  %2").arg(icon, label), this);
     btn->setCursor(Qt::PointingHandCursor);
     btn->setToolTip(tooltip);
-    btn->setFixedHeight(40);
+    btn->setFixedHeight(scaleDpi(40));
     btn->setStyleSheet(R"(
       QPushButton {
         background: transparent;
@@ -288,7 +288,7 @@ void QuickActionsWidget::updateActionStates() {
   QString ksState = killSwitchEnabled_ ? "ON" : "OFF";
   QString ksColor = killSwitchEnabled_ ? "#3fb950" : "#8b949e";
   killSwitchButton_->setText(
-      QString("\u26A1  Kill Switch                              [%1]").arg(ksState));
+      QString("\u26A1  Kill Switch  [%1]").arg(ksState));
   killSwitchButton_->setStyleSheet(QString(R"(
     QPushButton {
       background: transparent;
@@ -313,7 +313,7 @@ void QuickActionsWidget::updateActionStates() {
   QString obState = obfuscationEnabled_ ? "ON" : "OFF";
   QString obColor = obfuscationEnabled_ ? "#3fb950" : "#8b949e";
   obfuscationButton_->setText(
-      QString("\U0001F512  Obfuscation                            [%1]").arg(obState));
+      QString("\U0001F512  Obfuscation  [%1]").arg(obState));
   obfuscationButton_->setStyleSheet(QString(R"(
     QPushButton {
       background: transparent;
