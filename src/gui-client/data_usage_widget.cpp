@@ -203,8 +203,8 @@ DataUsageWidget::DataUsageWidget(UsageTracker* tracker, QWidget* parent)
 void DataUsageWidget::setupUi() {
   auto* mainLayout = new QVBoxLayout(this);
   mainLayout->setSpacing(0);
-  mainLayout->setContentsMargins(spacing::kPaddingXLarge(), spacing::kPaddingLarge(),
-                                  spacing::kPaddingXLarge(), spacing::kPaddingLarge());
+  mainLayout->setContentsMargins(spacing::kPaddingLarge(), spacing::kPaddingMedium(),
+                                  spacing::kPaddingLarge(), spacing::kPaddingMedium());
 
   // === Header ===
   auto* headerWidget = new QWidget(this);
@@ -212,7 +212,7 @@ void DataUsageWidget::setupUi() {
   headerLayout->setContentsMargins(0, 0, 0, spacing::kPaddingMedium());
 
   auto* backButton = new QPushButton("\u2190", this);
-  backButton->setFixedSize(40, 40);
+  backButton->setFixedSize(scaleDpi(40), scaleDpi(40));
   backButton->setCursor(Qt::PointingHandCursor);
   backButton->setToolTip("Back (Escape)");
   backButton->setStyleSheet(R"(
@@ -243,7 +243,7 @@ void DataUsageWidget::setupUi() {
 
   // Export button
   exportButton_ = new QPushButton("Export", this);
-  exportButton_->setFixedHeight(36);
+  exportButton_->setFixedHeight(scaleDpi(36));
   exportButton_->setCursor(Qt::PointingHandCursor);
   exportButton_->setToolTip("Export usage data to CSV or JSON");
   exportButton_->setStyleSheet(R"(
@@ -467,7 +467,7 @@ void DataUsageWidget::createChartSection(QWidget* parent) {
   periodCombo_->addItem("Last 30 Days");
   periodCombo_->addItem("Last 6 Months");
   periodCombo_->addItem("Last 12 Months");
-  periodCombo_->setFixedHeight(28);
+  periodCombo_->setFixedHeight(scaleDpi(28));
   periodCombo_->setStyleSheet(R"(
     QComboBox {
       background: rgba(255, 255, 255, 0.04);
@@ -500,7 +500,7 @@ void DataUsageWidget::createChartSection(QWidget* parent) {
 
   // Clear history button
   clearButton_ = new QPushButton("Clear", card);
-  clearButton_->setFixedHeight(28);
+  clearButton_->setFixedHeight(scaleDpi(28));
   clearButton_->setCursor(Qt::PointingHandCursor);
   clearButton_->setStyleSheet(R"(
     QPushButton {
@@ -572,7 +572,7 @@ void DataUsageWidget::createAlertSection(QWidget* parent) {
   warningThresholdSpin_ = new QSpinBox(card);
   warningThresholdSpin_->setRange(0, 99999);
   warningThresholdSpin_->setValue(0);
-  warningThresholdSpin_->setFixedWidth(80);
+  warningThresholdSpin_->setFixedWidth(scaleDpi(80));
   warningThresholdSpin_->setStyleSheet(R"(
     QSpinBox { background: #161b22; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; padding: 4px 8px; color: #f0f6fc; font-size: 12px; }
   )");
@@ -584,7 +584,7 @@ void DataUsageWidget::createAlertSection(QWidget* parent) {
   warningUnitCombo_->addItem("MB");
   warningUnitCombo_->addItem("GB");
   warningUnitCombo_->setCurrentIndex(1);
-  warningUnitCombo_->setFixedWidth(60);
+  warningUnitCombo_->setFixedWidth(scaleDpi(60));
   warningUnitCombo_->setStyleSheet(R"(
     QComboBox { background: #161b22; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; padding: 4px 8px; color: #f0f6fc; font-size: 12px; }
     QComboBox::drop-down { border: none; width: 16px; }
@@ -606,7 +606,7 @@ void DataUsageWidget::createAlertSection(QWidget* parent) {
   limitThresholdSpin_ = new QSpinBox(card);
   limitThresholdSpin_->setRange(0, 99999);
   limitThresholdSpin_->setValue(0);
-  limitThresholdSpin_->setFixedWidth(80);
+  limitThresholdSpin_->setFixedWidth(scaleDpi(80));
   limitThresholdSpin_->setStyleSheet(R"(
     QSpinBox { background: #161b22; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; padding: 4px 8px; color: #f0f6fc; font-size: 12px; }
   )");
@@ -618,7 +618,7 @@ void DataUsageWidget::createAlertSection(QWidget* parent) {
   limitUnitCombo_->addItem("MB");
   limitUnitCombo_->addItem("GB");
   limitUnitCombo_->setCurrentIndex(1);
-  limitUnitCombo_->setFixedWidth(60);
+  limitUnitCombo_->setFixedWidth(scaleDpi(60));
   limitUnitCombo_->setStyleSheet(R"(
     QComboBox { background: #161b22; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; padding: 4px 8px; color: #f0f6fc; font-size: 12px; }
     QComboBox::drop-down { border: none; width: 16px; }

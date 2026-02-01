@@ -37,7 +37,7 @@ void ServerSelectorWidget::setupUi() {
 
   // Server dropdown
   serverCombo_ = new QComboBox(this);
-  serverCombo_->setFixedHeight(36);
+  serverCombo_->setFixedHeight(scaleDpi(36));
   serverCombo_->setStyleSheet(R"(
     QComboBox {
       background: rgba(255, 255, 255, 0.05);
@@ -83,7 +83,7 @@ void ServerSelectorWidget::setupUi() {
 
   // Latency display
   latencyLabel_ = new QLabel(this);
-  latencyLabel_->setFixedWidth(60);
+  latencyLabel_->setMinimumWidth(scaleDpi(60));
   latencyLabel_->setAlignment(Qt::AlignCenter);
   latencyLabel_->setTextFormat(Qt::RichText);
   latencyLabel_->setStyleSheet(R"(
@@ -98,7 +98,7 @@ void ServerSelectorWidget::setupUi() {
 
   // Refresh button
   refreshButton_ = new QPushButton("\u21BB", this);
-  refreshButton_->setFixedSize(36, 36);
+  refreshButton_->setFixedSize(scaleDpi(36), scaleDpi(36));
   refreshButton_->setCursor(Qt::PointingHandCursor);
   refreshButton_->setToolTip("Refresh latency");
   refreshButton_->setStyleSheet(R"(
@@ -120,7 +120,7 @@ void ServerSelectorWidget::setupUi() {
 
   // Manage servers button
   manageButton_ = new QPushButton("Manage", this);
-  manageButton_->setFixedHeight(36);
+  manageButton_->setFixedHeight(scaleDpi(36));
   manageButton_->setCursor(Qt::PointingHandCursor);
   manageButton_->setStyleSheet(R"(
     QPushButton {

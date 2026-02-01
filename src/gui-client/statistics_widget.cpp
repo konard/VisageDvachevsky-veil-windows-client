@@ -213,8 +213,8 @@ StatisticsWidget::StatisticsWidget(QWidget* parent) : QWidget(parent) {
 void StatisticsWidget::setupUi() {
   auto* mainLayout = new QVBoxLayout(this);
   mainLayout->setSpacing(0);
-  mainLayout->setContentsMargins(spacing::kPaddingXLarge(), spacing::kPaddingLarge(),
-                                  spacing::kPaddingXLarge(), spacing::kPaddingLarge());
+  mainLayout->setContentsMargins(spacing::kPaddingLarge(), spacing::kPaddingMedium(),
+                                  spacing::kPaddingLarge(), spacing::kPaddingMedium());
 
   // === Header ===
   auto* headerWidget = new QWidget(this);
@@ -222,7 +222,7 @@ void StatisticsWidget::setupUi() {
   headerLayout->setContentsMargins(0, 0, 0, spacing::kPaddingMedium());
 
   auto* backButton = new QPushButton("\u2190", this);  // Left arrow
-  backButton->setFixedSize(40, 40);
+  backButton->setFixedSize(scaleDpi(40), scaleDpi(40));
   backButton->setCursor(Qt::PointingHandCursor);
   backButton->setToolTip("Back (Escape)");
   backButton->setStyleSheet(R"(
@@ -253,7 +253,7 @@ void StatisticsWidget::setupUi() {
 
   // Export button
   exportButton_ = new QPushButton("Export", this);
-  exportButton_->setFixedHeight(36);
+  exportButton_->setFixedHeight(scaleDpi(36));
   exportButton_->setCursor(Qt::PointingHandCursor);
   exportButton_->setToolTip("Export statistics to JSON");
   exportButton_->setStyleSheet(R"(
@@ -349,7 +349,7 @@ void StatisticsWidget::createConnectionHistorySection(QWidget* parent) {
   sectionHeaderLayout->addStretch();
 
   clearButton_ = new QPushButton("Clear", sectionCard);
-  clearButton_->setFixedHeight(28);
+  clearButton_->setFixedHeight(scaleDpi(28));
   clearButton_->setCursor(Qt::PointingHandCursor);
   clearButton_->setStyleSheet(R"(
     QPushButton {

@@ -11,6 +11,9 @@
 #include <QSettings>
 #include <QPropertyAnimation>
 #include <QGraphicsOpacityEffect>
+#include <QPointer>
+
+class QTcpSocket;
 
 namespace veil::gui {
 
@@ -112,6 +115,9 @@ class SetupWizard : public QWidget {
   QLabel* configSummaryLabel_;
   QCheckBox* createDesktopShortcutCheck_;
   QCheckBox* createStartMenuShortcutCheck_;
+
+  // Active connection test socket (guarded to prevent use-after-free)
+  QPointer<QTcpSocket> activeTestSocket_;
 
   // Animation state
   bool isAnimating_{false};

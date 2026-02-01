@@ -245,8 +245,8 @@ MainWindow::~MainWindow() = default;
 
 void MainWindow::setupUi() {
   setWindowTitle("VEIL VPN Client");
-  setMinimumSize(scaleDpi(480), scaleDpi(720));
-  resize(scaleDpi(480), scaleDpi(720));
+  setMinimumSize(scaleDpi(520), scaleDpi(780));
+  resize(scaleDpi(560), scaleDpi(840));
 
   // Set window icon from embedded resources
   setWindowIcon(QIcon(":/icons/icon_disconnected.svg"));
@@ -1409,21 +1409,24 @@ void MainWindow::checkForUpdates() {
     progress->deleteLater();
   });
 
-  // Connect to update checker signals to close progress dialog
+  // Connect to update checker signals to close progress dialog.
+  // Note: Qt::UniqueConnection is not used here because it only works with
+  // pointer-to-member-function connections, not with lambdas.
+  // The progress dialog (context object) ensures cleanup when it's destroyed.
   connect(updateChecker_.get(), &UpdateChecker::updateAvailable, progress, [progress](const UpdateInfo&) {
     progress->close();
     progress->deleteLater();
-  }, Qt::UniqueConnection);
+  });
 
   connect(updateChecker_.get(), &UpdateChecker::noUpdateAvailable, progress, [progress]() {
     progress->close();
     progress->deleteLater();
-  }, Qt::UniqueConnection);
+  });
 
   connect(updateChecker_.get(), &UpdateChecker::checkFailed, progress, [progress](const QString&) {
     progress->close();
     progress->deleteLater();
-  }, Qt::UniqueConnection);
+  });
 
   updateChecker_->checkForUpdates();
 }
