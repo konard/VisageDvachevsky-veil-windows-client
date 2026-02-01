@@ -28,6 +28,12 @@ IpcClientManager::IpcClientManager(QObject* parent)
     }, Qt::QueuedConnection);
   });
 
+  // Set up deserialization error handler — the daemon sent data we couldn't parse.
+  // This is important for detecting daemon/client version mismatches.
+  client_->on_deserialization_error([this](const std::string& raw_json) {
+    handleDeserializationError(raw_json);
+  });
+
   // Set up polling timer to check for incoming messages
   // This is necessary because the IPC client uses non-blocking I/O
   connect(pollTimer_, &QTimer::timeout, this, &IpcClientManager::pollMessages);
@@ -79,6 +85,8 @@ bool IpcClientManager::connectToDaemon() {
   qDebug() << "[IpcClientManager] Successfully connected to daemon via IPC";
   stopReconnectTimer();
   daemonConnected_ = true;
+  deserializationErrors_ = 0;
+  versionMismatchWarned_ = false;
   pollTimer_->start();
   qDebug() << "[IpcClientManager] Started message polling timer";
 
@@ -264,6 +272,9 @@ void IpcClientManager::handleMessage(const ipc::Message& msg) {
   // during VPN tunnel initialization) but still sending responses/events.
   lastHeartbeat_ = std::chrono::steady_clock::now();
 
+  // Reset consecutive deserialization error counter on successful message
+  deserializationErrors_ = 0;
+
   // Handle events from daemon
   if (msg.type == ipc::MessageType::kEvent) {
     qDebug() << "[IpcClientManager] Message is an Event";
@@ -398,6 +409,31 @@ void IpcClientManager::handleConnectionChange(bool connected) {
     // Start heartbeat monitoring
     lastHeartbeat_ = std::chrono::steady_clock::now();
     heartbeatTimer_->start();
+  }
+}
+
+void IpcClientManager::handleDeserializationError(const std::string& raw_json) {
+  // The daemon sent a message that could not be deserialized.
+  // This still proves the daemon is alive, so reset heartbeat.
+  lastHeartbeat_ = std::chrono::steady_clock::now();
+
+  deserializationErrors_++;
+
+  qWarning() << "[IpcClientManager] Failed to deserialize daemon message ("
+             << deserializationErrors_ << "consecutive errors)";
+  qWarning() << "[IpcClientManager] Raw JSON:" << QString::fromStdString(raw_json);
+
+  // After several consecutive failures, warn about possible daemon version mismatch.
+  // The most common cause is the daemon binary not being rebuilt after a client update.
+  if (deserializationErrors_ >= 3 && !versionMismatchWarned_) {
+    versionMismatchWarned_ = true;
+    qWarning() << "[IpcClientManager] Possible daemon/client version mismatch detected!";
+    qWarning() << "[IpcClientManager] The daemon may need to be rebuilt with the latest code.";
+    emit errorOccurred(
+        tr("Daemon version mismatch"),
+        tr("The VEIL daemon is responding but the client cannot understand its messages. "
+           "This usually means the daemon service needs to be reinstalled or rebuilt "
+           "to match this client version."));
   }
 }
 

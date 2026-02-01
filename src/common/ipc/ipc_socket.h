@@ -105,6 +105,9 @@ class IpcClient {
  public:
   using MessageHandler = std::function<void(const Message& msg)>;
   using ConnectionHandler = std::function<void(bool connected)>;
+  // Called when raw data was received but deserialization failed.
+  // The raw JSON string is provided for diagnostics.
+  using DeserializationErrorHandler = std::function<void(const std::string& raw_json)>;
 
   explicit IpcClient(std::string socket_path = kDefaultClientSocketPath);
   ~IpcClient();
@@ -131,6 +134,9 @@ class IpcClient {
   // Set handler for connection status changes
   void on_connection_change(ConnectionHandler handler);
 
+  // Set handler for deserialization errors (daemon sent data that could not be parsed)
+  void on_deserialization_error(DeserializationErrorHandler handler);
+
   // Process pending messages (non-blocking)
   // Call this regularly from GUI event loop or in a separate thread
   void poll(std::error_code& ec);
@@ -148,6 +154,7 @@ class IpcClient {
   bool connected_{false};
   MessageHandler message_handler_;
   ConnectionHandler connection_handler_;
+  DeserializationErrorHandler deserialization_error_handler_;
   std::string receive_buffer_;
 
 #ifdef _WIN32
