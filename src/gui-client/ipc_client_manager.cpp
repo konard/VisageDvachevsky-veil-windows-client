@@ -87,6 +87,7 @@ bool IpcClientManager::connectToDaemon() {
   daemonConnected_ = true;
   deserializationErrors_ = 0;
   versionMismatchWarned_ = false;
+  versionVerified_ = false;
   pollTimer_->start();
   qDebug() << "[IpcClientManager] Started message polling timer";
 
@@ -94,6 +95,9 @@ bool IpcClientManager::connectToDaemon() {
   lastHeartbeat_ = std::chrono::steady_clock::now();
   heartbeatTimer_->start();
   qDebug() << "[IpcClientManager] Started heartbeat monitoring";
+
+  // Request daemon protocol version to verify compatibility
+  requestDaemonVersion();
 
   emit daemonConnectionChanged(true);
   return true;
@@ -370,6 +374,26 @@ void IpcClientManager::handleMessage(const ipc::Message& msg) {
           QString::fromStdString(errorResp->error_message),
           QString::fromStdString(errorResp->details));
     }
+    else if (const auto* versionResp = std::get_if<ipc::VersionResponse>(response)) {
+      qDebug() << "[IpcClientManager] Received VersionResponse";
+      qDebug() << "[IpcClientManager]   Daemon protocol version:" << versionResp->protocol_version;
+      qDebug() << "[IpcClientManager]   Daemon version:" << QString::fromStdString(versionResp->daemon_version);
+      qDebug() << "[IpcClientManager]   Client protocol version:" << ipc::kProtocolVersion;
+
+      versionVerified_ = true;
+
+      if (versionResp->protocol_version != ipc::kProtocolVersion) {
+        qWarning() << "[IpcClientManager] Protocol version mismatch! Daemon:" << versionResp->protocol_version
+                   << "Client:" << ipc::kProtocolVersion;
+        emit errorOccurred(
+            tr("Protocol version mismatch"),
+            tr("The daemon protocol version (%1) does not match the client (%2). "
+               "Please rebuild and reinstall both the daemon service and GUI client "
+               "from the same codebase version.")
+                .arg(versionResp->protocol_version)
+                .arg(ipc::kProtocolVersion));
+      }
+    }
     else {
       qWarning() << "[IpcClientManager] Received unknown response type";
     }
@@ -412,6 +436,19 @@ void IpcClientManager::handleConnectionChange(bool connected) {
   }
 }
 
+void IpcClientManager::requestDaemonVersion() {
+  if (!isConnected()) {
+    return;
+  }
+
+  qDebug() << "[IpcClientManager] Requesting daemon protocol version...";
+  ipc::GetVersionCommand cmd;
+  std::error_code ec;
+  if (!client_->send_command(ipc::Command{cmd}, ec)) {
+    qWarning() << "[IpcClientManager] Failed to send GetVersionCommand:" << QString::fromStdString(ec.message());
+  }
+}
+
 void IpcClientManager::handleDeserializationError(const std::string& raw_json) {
   // The daemon sent a message that could not be deserialized.
   // This still proves the daemon is alive, so reset heartbeat.
@@ -429,11 +466,27 @@ void IpcClientManager::handleDeserializationError(const std::string& raw_json) {
     versionMismatchWarned_ = true;
     qWarning() << "[IpcClientManager] Possible daemon/client version mismatch detected!";
     qWarning() << "[IpcClientManager] The daemon may need to be rebuilt with the latest code.";
-    emit errorOccurred(
-        tr("Daemon version mismatch"),
-        tr("The VEIL daemon is responding but the client cannot understand its messages. "
-           "This usually means the daemon service needs to be reinstalled or rebuilt "
-           "to match this client version."));
+    qWarning() << "[IpcClientManager] Client protocol version:" << ipc::kProtocolVersion;
+
+    // Provide more specific guidance based on what we know
+    QString details;
+    if (!versionVerified_) {
+      details = tr("The VEIL daemon is responding with empty payloads (missing 'response_type' field). "
+                   "This indicates the daemon binary does not include the IPC serialization fix. "
+                   "To resolve this:\n"
+                   "1. Stop the VEIL VPN Service (sc stop VeilVPN)\n"
+                   "2. Replace veil-service.exe with a freshly built binary\n"
+                   "3. Start the service (sc start VeilVPN)\n"
+                   "4. Verify the service binary was actually replaced (check file timestamp)\n\n"
+                   "Client protocol version: %1")
+                    .arg(ipc::kProtocolVersion);
+    } else {
+      details = tr("The VEIL daemon is responding but the client cannot understand its messages. "
+                   "Please rebuild and reinstall both the daemon service and GUI client "
+                   "from the same codebase version.");
+    }
+
+    emit errorOccurred(tr("Daemon version mismatch"), details);
   }
 }
 
@@ -455,12 +508,18 @@ void IpcClientManager::attemptReconnect() {
     qDebug() << "[IpcClientManager] Reconnection successful!";
     stopReconnectTimer();
     daemonConnected_ = true;
+    deserializationErrors_ = 0;
+    versionMismatchWarned_ = false;
+    versionVerified_ = false;
     pollTimer_->start();
 
     // Restart heartbeat monitoring
     lastHeartbeat_ = std::chrono::steady_clock::now();
     heartbeatTimer_->start();
     qDebug() << "[IpcClientManager] Restarted heartbeat monitoring after reconnection";
+
+    // Request daemon protocol version to verify compatibility
+    requestDaemonVersion();
 
     emit daemonConnectionChanged(true);
   } else {

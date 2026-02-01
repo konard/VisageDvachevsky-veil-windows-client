@@ -389,6 +389,9 @@ json serialize_command(const Command& cmd) {
     else if constexpr (std::is_same_v<T, GetClientListCommand>) {
       payload["command_type"] = "get_client_list";
     }
+    else if constexpr (std::is_same_v<T, GetVersionCommand>) {
+      payload["command_type"] = "get_version";
+    }
   }, cmd);
 
   return payload;
@@ -517,6 +520,14 @@ json serialize_response(const Response& resp) {
       payload["error_message"] = r.error_message;
       payload["details"] = r.details;
     }
+    else if constexpr (std::is_same_v<T, VersionResponse>) {
+      #ifdef VEIL_IPC_DEBUG
+      std::cerr << "[IPC Debug] Serializing VersionResponse: protocol_version=" << r.protocol_version << std::endl;
+      #endif
+      payload["response_type"] = "version";
+      payload["protocol_version"] = r.protocol_version;
+      payload["daemon_version"] = r.daemon_version;
+    }
   }, resp);
 
   #ifdef VEIL_IPC_DEBUG
@@ -568,6 +579,9 @@ std::optional<Command> deserialize_command(const json& payload) {
   }
   else if (cmd_type == "get_client_list") {
     return GetClientListCommand{};
+  }
+  else if (cmd_type == "get_version") {
+    return GetVersionCommand{};
   }
 
   return std::nullopt;
@@ -724,6 +738,16 @@ std::optional<Response> deserialize_response(const json& payload) {
     }
     if (payload.contains("details")) {
       payload.at("details").get_to(resp.details);
+    }
+    return resp;
+  }
+  else if (resp_type == "version") {
+    VersionResponse resp;
+    if (payload.contains("protocol_version")) {
+      payload.at("protocol_version").get_to(resp.protocol_version);
+    }
+    if (payload.contains("daemon_version")) {
+      payload.at("daemon_version").get_to(resp.daemon_version);
     }
     return resp;
   }

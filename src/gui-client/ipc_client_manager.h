@@ -78,6 +78,7 @@ class IpcClientManager : public QObject {
   void handleDeserializationError(const std::string& raw_json);
   void startReconnectTimer();
   void stopReconnectTimer();
+  void requestDaemonVersion();
 
   std::unique_ptr<ipc::IpcClient> client_;
   QTimer* pollTimer_;
@@ -88,6 +89,7 @@ class IpcClientManager : public QObject {
   std::chrono::steady_clock::time_point lastHeartbeat_;
   int deserializationErrors_{0};           // Consecutive deserialization failure count
   bool versionMismatchWarned_{false};      // Whether we already warned about daemon version mismatch
+  bool versionVerified_{false};            // Whether daemon protocol version has been verified
 
   // Reconnection constants
   static constexpr int kReconnectIntervalMs = 5000;  // 5 seconds
