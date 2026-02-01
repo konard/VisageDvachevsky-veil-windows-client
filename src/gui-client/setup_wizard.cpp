@@ -911,38 +911,61 @@ void SetupWizard::onTestConnection() {
   testResultLabel_->setStyleSheet("color: #d29922; font-size: 13px;");
   testResultLabel_->setVisible(true);
 
+  // Cancel any previous in-flight test to avoid stale callbacks
+  if (activeTestSocket_) {
+    activeTestSocket_->abort();
+    activeTestSocket_->deleteLater();
+    activeTestSocket_ = nullptr;
+  }
+
   // Perform a basic connectivity test using QTcpSocket
   // This is a simple reachability check — actual VPN authentication
   // happens through the daemon.
   auto* socket = new QTcpSocket(this);
-  connect(socket, &QTcpSocket::connected, this, [this, socket]() {
+  activeTestSocket_ = socket;
+
+  // Use QPointer to guard against use-after-free in the timeout lambda.
+  // The socket may be deleted by the connected/errorOccurred handler before
+  // the timeout fires.
+  QPointer<QTcpSocket> socketGuard(socket);
+
+  connect(socket, &QTcpSocket::connected, this, [this, socketGuard]() {
     testResultLabel_->setText(tr("Server is reachable!"));
     testResultLabel_->setStyleSheet("color: #3fb950; font-size: 13px;");
     testConnectionButton_->setEnabled(true);
     testConnectionButton_->setText(tr("Test Connection"));
-    socket->deleteLater();
+    if (socketGuard) {
+      activeTestSocket_ = nullptr;
+      socketGuard->deleteLater();
+    }
   });
 
   connect(socket, &QTcpSocket::errorOccurred, this,
-          [this, socket](QAbstractSocket::SocketError) {
+          [this, socketGuard](QAbstractSocket::SocketError) {
+    if (!socketGuard) return;
     testResultLabel_->setText(
-        tr("Could not reach server: %1").arg(socket->errorString()));
+        tr("Could not reach server: %1").arg(socketGuard->errorString()));
     testResultLabel_->setStyleSheet("color: #f85149; font-size: 13px;");
     testConnectionButton_->setEnabled(true);
     testConnectionButton_->setText(tr("Test Connection"));
-    socket->deleteLater();
+    activeTestSocket_ = nullptr;
+    socketGuard->deleteLater();
   });
 
   socket->connectToHost(address, static_cast<quint16>(port));
 
-  // Timeout after 5 seconds
-  QTimer::singleShot(5000, this, [this, socket]() {
-    if (socket->state() != QAbstractSocket::ConnectedState) {
-      socket->abort();
+  // Timeout after 5 seconds — socketGuard prevents use-after-free if the
+  // socket was already cleaned up by connected/errorOccurred handlers.
+  QTimer::singleShot(5000, this, [this, socketGuard]() {
+    if (!socketGuard) return;
+    if (socketGuard->state() != QAbstractSocket::ConnectedState) {
+      socketGuard->abort();
       testResultLabel_->setText(tr("Connection timed out"));
       testResultLabel_->setStyleSheet("color: #f85149; font-size: 13px;");
       testConnectionButton_->setEnabled(true);
       testConnectionButton_->setText(tr("Test Connection"));
+      activeTestSocket_ = nullptr;
+      socketGuard->deleteLater();
     }
   });
 }
