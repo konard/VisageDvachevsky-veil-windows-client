@@ -7,6 +7,7 @@
 #include <QMessageBox>
 #include <QSettings>
 #include <QScrollArea>
+#include <QDebug>
 #include <algorithm>
 #include <utility>
 
@@ -237,12 +238,21 @@ void AppSplitTunnelWidget::onRefreshInstalledApps() {
   loadingProgress_->show();
   statusLabel_->setText("Loading installed applications...");
 
-  // In a real implementation, this should be done in a background thread
-  installedApps_ = veil::windows::AppEnumerator::GetInstalledApplications();
+  try {
+    // In a real implementation, this should be done in a background thread
+    installedApps_ = veil::windows::AppEnumerator::GetInstalledApplications();
 
-  populateInstalledApps();
+    populateInstalledApps();
 
-  statusLabel_->setText(QString("Found %1 applications").arg(installedApps_.size()));
+    statusLabel_->setText(QString("Found %1 applications").arg(installedApps_.size()));
+  } catch (const std::exception& e) {
+    statusLabel_->setText(QString("Error loading applications: %1").arg(e.what()));
+    qWarning() << "[AppSplitTunnelWidget] Failed to enumerate installed apps:" << e.what();
+  } catch (...) {
+    statusLabel_->setText("Error loading applications");
+    qWarning() << "[AppSplitTunnelWidget] Unknown error enumerating installed apps";
+  }
+
   loadingProgress_->hide();
   isLoading_ = false;
 #else
@@ -256,11 +266,20 @@ void AppSplitTunnelWidget::onRefreshRunningApps() {
   loadingProgress_->show();
   statusLabel_->setText("Loading running processes...");
 
-  runningApps_ = veil::windows::AppEnumerator::GetRunningProcesses();
+  try {
+    runningApps_ = veil::windows::AppEnumerator::GetRunningProcesses();
 
-  populateRunningApps();
+    populateRunningApps();
 
-  statusLabel_->setText(QString("Found %1 running processes").arg(runningApps_.size()));
+    statusLabel_->setText(QString("Found %1 running processes").arg(runningApps_.size()));
+  } catch (const std::exception& e) {
+    statusLabel_->setText(QString("Error loading processes: %1").arg(e.what()));
+    qWarning() << "[AppSplitTunnelWidget] Failed to enumerate running processes:" << e.what();
+  } catch (...) {
+    statusLabel_->setText("Error loading processes");
+    qWarning() << "[AppSplitTunnelWidget] Unknown error enumerating running processes";
+  }
+
   loadingProgress_->hide();
   isLoading_ = false;
 #else
