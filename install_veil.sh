@@ -24,6 +24,8 @@
 #   --force                Force update, immediately terminate connections (use with --update)
 #   --drain-timeout=N      Connection drain timeout in seconds (default: 300)
 #   --yes                  Skip confirmation prompts (use with --update)
+#   --export-config        Generate .veil client config from existing server
+#   --export-config=PATH   Generate .veil config to a custom file path
 #   --help                 Show this help message
 #
 # Examples:
@@ -76,6 +78,10 @@ WITH_GUI="${WITH_GUI:-false}"             # Install Qt6 GUI
 CREATE_SERVICE="${CREATE_SERVICE:-true}"  # Create systemd service
 DRY_RUN="${DRY_RUN:-false}"               # Dry run mode
 VERBOSE="${VERBOSE:-false}"               # Verbose output
+
+# Config export options
+EXPORT_CONFIG="${EXPORT_CONFIG:-false}"   # Export .veil client config only
+EXPORT_CONFIG_PATH=""                    # Custom output path for .veil config
 
 # Update-related options
 UPDATE_MODE="${UPDATE_MODE:-false}"       # Update existing installation
@@ -927,6 +933,10 @@ INSTALLATION OPTIONS:
     --verbose           Enable verbose output
     --help              Show this help message
 
+CONFIG EXPORT OPTIONS:
+    --export-config         Generate .veil client config from existing server (no build)
+    --export-config=PATH    Generate .veil config to a custom file path
+
 UPDATE OPTIONS:
     --update            Update existing VEIL installation to latest version
     --graceful          Graceful update: drain connections before update (default timeout: 300s)
@@ -956,6 +966,13 @@ INSTALLATION EXAMPLES:
 
     # Preview what would be installed
     curl -sSL https://...install_veil.sh | sudo bash -s -- --dry-run --with-gui
+
+CONFIG EXPORT EXAMPLES:
+    # Generate .veil client config from existing server installation
+    sudo ./install_veil.sh --export-config
+
+    # Generate to a custom path (e.g., for easy transfer)
+    sudo ./install_veil.sh --export-config=/tmp/my-vpn.veil
 
 UPDATE EXAMPLES:
     # Update to latest version (will prompt for confirmation if connections active)
@@ -1039,6 +1056,13 @@ parse_args() {
                     log_error "Invalid drain timeout: $DRAIN_TIMEOUT (must be a number)"
                     exit 1
                 fi
+                ;;
+            --export-config)
+                EXPORT_CONFIG="true"
+                ;;
+            --export-config=*)
+                EXPORT_CONFIG="true"
+                EXPORT_CONFIG_PATH="${1#*=}"
                 ;;
             --yes|-y)
                 SKIP_CONFIRM="true"
@@ -1665,6 +1689,95 @@ start_service() {
     fi
 }
 
+# Generate .veil client config file with embedded keys
+# This file can be imported directly into the Windows GUI client
+generate_client_veil_config() {
+    log_step "Generating client .veil config file..."
+
+    local output_path="${1:-$CONFIG_DIR/client-config.veil}"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "[DRY-RUN] Would generate .veil config at ${output_path}"
+        return
+    fi
+
+    # Get server public IP
+    local public_ip
+    public_ip=$(curl -s ifconfig.me 2>/dev/null || echo "<YOUR_SERVER_IP>")
+
+    # Get server port from config
+    local server_port="4433"
+    if [[ -f "$CONFIG_DIR/server.conf" ]]; then
+        server_port=$(grep -E '^\s*listen_port\s*=' "$CONFIG_DIR/server.conf" | grep -v '^#' | sed 's/.*=\s*//' | tr -d ' ')
+        server_port="${server_port:-4433}"
+    fi
+
+    # Read and base64-encode the pre-shared key
+    local psk_base64=""
+    if [[ -f "$CONFIG_DIR/server.key" ]]; then
+        psk_base64=$(base64 -w 0 "$CONFIG_DIR/server.key")
+    else
+        log_error "Pre-shared key not found at $CONFIG_DIR/server.key"
+        log_error "Cannot generate client config without PSK"
+        return 1
+    fi
+
+    # Read and base64-encode the obfuscation seed
+    local seed_base64=""
+    if [[ -f "$CONFIG_DIR/obfuscation.seed" ]]; then
+        seed_base64=$(base64 -w 0 "$CONFIG_DIR/obfuscation.seed")
+    else
+        log_error "Obfuscation seed not found at $CONFIG_DIR/obfuscation.seed"
+        log_error "Cannot generate client config without seed"
+        return 1
+    fi
+
+    # Generate the .veil JSON config file
+    cat > "$output_path" <<VEILEOF
+{
+  "server": {
+    "address": "${public_ip}",
+    "port": ${server_port}
+  },
+  "crypto": {
+    "presharedKey": "${psk_base64}",
+    "obfuscationSeed": "${seed_base64}"
+  },
+  "advanced": {
+    "obfuscation": true
+  },
+  "dpi": {
+    "mode": 1
+  },
+  "routing": {
+    "routeAllTraffic": true
+  },
+  "connection": {
+    "autoReconnect": true
+  }
+}
+VEILEOF
+
+    chmod 600 "$output_path"
+    log_success "Client config generated: ${output_path}"
+    echo ""
+    echo -e "${CYAN}╔════════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║              Client .veil Config File Generated                        ║${NC}"
+    echo -e "${CYAN}╚════════════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${BOLD}File:${NC} ${output_path}"
+    echo ""
+    echo "Transfer this file to your Windows client and import it in the"
+    echo "VEIL VPN setup wizard using 'Import Configuration File...' button."
+    echo ""
+    echo -e "${YELLOW}⚠ This file contains cryptographic keys — transfer it securely!${NC}"
+    echo -e "${YELLOW}  Use SCP, SFTP, or a USB drive. NEVER send via email or chat.${NC}"
+    echo ""
+    echo -e "${CYAN}Example secure transfer:${NC}"
+    echo "  scp ${output_path} user@windows-machine:~/Desktop/"
+    echo ""
+}
+
 # Display summary and next steps
 display_summary() {
     local public_ip
@@ -1843,6 +1956,21 @@ main() {
     # Check root first
     check_root
 
+    # Handle export-config mode (no build needed, just generate .veil from existing server)
+    if [[ "$EXPORT_CONFIG" == "true" ]]; then
+        if [[ ! -f "$CONFIG_DIR/server.key" || ! -f "$CONFIG_DIR/obfuscation.seed" ]]; then
+            log_error "VEIL server keys not found in $CONFIG_DIR"
+            log_error "Run the server installer first, or ensure server.key and obfuscation.seed exist"
+            exit 1
+        fi
+        if [[ -n "$EXPORT_CONFIG_PATH" ]]; then
+            generate_client_veil_config "$EXPORT_CONFIG_PATH"
+        else
+            generate_client_veil_config
+        fi
+        exit 0
+    fi
+
     # Handle update mode
     if [[ "$UPDATE_MODE" == "true" ]]; then
         perform_update
@@ -1893,6 +2021,11 @@ main() {
     # Service setup (common)
     create_systemd_service
     start_service
+
+    # Generate .veil client config for server installations
+    if [[ "$INSTALL_MODE" == "server" ]]; then
+        generate_client_veil_config
+    fi
 
     # Display summary
     display_summary
