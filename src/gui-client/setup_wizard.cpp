@@ -14,6 +14,7 @@
 #include <QDebug>
 #include <QTcpSocket>
 #include <QTimer>
+#include <QStandardPaths>
 
 #include "common/gui/theme.h"
 #include "common/version.h"
@@ -73,7 +74,7 @@ void SetupWizard::setupUi() {
 
   // --- Step indicator bar ---
   stepIndicatorContainer_ = new QWidget(this);
-  stepIndicatorContainer_->setFixedHeight(60);
+  stepIndicatorContainer_->setFixedHeight(scaleDpi(60));
   stepIndicatorContainer_->setStyleSheet(
       "background-color: rgba(255, 255, 255, 0.02);"
       "border-bottom: 1px solid rgba(255, 255, 255, 0.06);");
@@ -86,7 +87,7 @@ void SetupWizard::setupUi() {
   for (int i = 0; i < kPageCount; ++i) {
     // Dot indicator
     auto* dot = new QWidget(stepIndicatorContainer_);
-    dot->setFixedSize(10, 10);
+    dot->setFixedSize(scaleDpi(10), scaleDpi(10));
     dot->setStyleSheet(
         i == 0 ? "background-color: #58a6ff; border-radius: 5px;"
                : "background-color: #30363d; border-radius: 5px;");
@@ -108,7 +109,7 @@ void SetupWizard::setupUi() {
     // Connector line between steps
     if (i < kPageCount - 1) {
       auto* connector = new QWidget(stepIndicatorContainer_);
-      connector->setFixedSize(24, 1);
+      connector->setFixedSize(scaleDpi(24), scaleDpi(1));
       connector->setStyleSheet("background-color: #30363d;");
       stepLayout->addWidget(connector);
     }
@@ -127,7 +128,7 @@ void SetupWizard::setupUi() {
 
   // --- Navigation button bar ---
   auto* navBar = new QWidget(this);
-  navBar->setFixedHeight(72);
+  navBar->setFixedHeight(scaleDpi(72));
   navBar->setStyleSheet(
       "background-color: rgba(255, 255, 255, 0.02);"
       "border-top: 1px solid rgba(255, 255, 255, 0.06);");
@@ -137,20 +138,20 @@ void SetupWizard::setupUi() {
 
   skipButton_ = new QPushButton(tr("Skip Setup"), navBar);
   skipButton_->setProperty("buttonStyle", "ghost");
-  skipButton_->setFixedHeight(40);
+  skipButton_->setFixedHeight(scaleDpi(40));
   skipButton_->setCursor(Qt::PointingHandCursor);
   connect(skipButton_, &QPushButton::clicked, this, &SetupWizard::onSkipClicked);
 
   backButton_ = new QPushButton(tr("Back"), navBar);
   backButton_->setProperty("buttonStyle", "secondary");
-  backButton_->setFixedHeight(40);
-  backButton_->setFixedWidth(100);
+  backButton_->setFixedHeight(scaleDpi(40));
+  backButton_->setMinimumWidth(scaleDpi(100));
   backButton_->setCursor(Qt::PointingHandCursor);
   connect(backButton_, &QPushButton::clicked, this, &SetupWizard::onBackClicked);
 
   nextButton_ = new QPushButton(tr("Next"), navBar);
-  nextButton_->setFixedHeight(40);
-  nextButton_->setFixedWidth(120);
+  nextButton_->setFixedHeight(scaleDpi(40));
+  nextButton_->setMinimumWidth(scaleDpi(120));
   nextButton_->setCursor(Qt::PointingHandCursor);
   connect(nextButton_, &QPushButton::clicked, this, &SetupWizard::onNextClicked);
 
@@ -175,7 +176,7 @@ QWidget* SetupWizard::createWelcomePage() {
 
   // Logo
   auto* logoWidget = new QWidget(page);
-  logoWidget->setFixedSize(80, 80);
+  logoWidget->setFixedSize(scaleDpi(80), scaleDpi(80));
   logoWidget->setStyleSheet(
       "background: qlineargradient(x1:0, y1:0, x2:1, y2:1,"
       "  stop:0 #238636, stop:1 #3fb950);"
@@ -220,8 +221,8 @@ QWidget* SetupWizard::createWelcomePage() {
   // Import config button
   auto* importButton = new QPushButton(tr("Import Configuration File..."), page);
   importButton->setProperty("buttonStyle", "secondary");
-  importButton->setFixedHeight(44);
-  importButton->setFixedWidth(280);
+  importButton->setFixedHeight(scaleDpi(44));
+  importButton->setMinimumWidth(scaleDpi(280));
   importButton->setCursor(Qt::PointingHandCursor);
   connect(importButton, &QPushButton::clicked, this, &SetupWizard::onImportConfig);
   layout->addWidget(importButton, 0, Qt::AlignCenter);
@@ -336,8 +337,8 @@ QWidget* SetupWizard::createKeyFilePage() {
 
   browseKeyFileButton_ = new QPushButton(tr("Browse"), keyGroup);
   browseKeyFileButton_->setProperty("buttonStyle", "secondary");
-  browseKeyFileButton_->setFixedWidth(90);
-  browseKeyFileButton_->setFixedHeight(40);
+  browseKeyFileButton_->setMinimumWidth(scaleDpi(90));
+  browseKeyFileButton_->setFixedHeight(scaleDpi(40));
   browseKeyFileButton_->setCursor(Qt::PointingHandCursor);
   connect(browseKeyFileButton_, &QPushButton::clicked,
           this, &SetupWizard::onBrowseKeyFile);
@@ -484,8 +485,8 @@ QWidget* SetupWizard::createFinishPage() {
 
   // Test connection
   testConnectionButton_ = new QPushButton(tr("Test Connection"), page);
-  testConnectionButton_->setFixedHeight(48);
-  testConnectionButton_->setFixedWidth(220);
+  testConnectionButton_->setFixedHeight(scaleDpi(48));
+  testConnectionButton_->setMinimumWidth(scaleDpi(220));
   testConnectionButton_->setCursor(Qt::PointingHandCursor);
   connect(testConnectionButton_, &QPushButton::clicked,
           this, &SetupWizard::onTestConnection);
@@ -823,8 +824,57 @@ bool SetupWizard::importConfigFromFile(const QString& filePath) {
   // Import crypto settings
   if (root.contains("crypto")) {
     QJsonObject crypto = root["crypto"].toObject();
-    if (crypto.contains("keyFile")) {
+
+    // Determine directory for extracted key files
+    QString keyDir;
+#ifdef _WIN32
+    keyDir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+#else
+    keyDir = "/etc/veil";
+#endif
+    QDir().mkpath(keyDir);
+
+    // Support embedded base64 pre-shared key (generated by server installer)
+    if (crypto.contains("presharedKey")) {
+      QByteArray keyData = QByteArray::fromBase64(
+          crypto["presharedKey"].toString().toLatin1());
+      if (keyData.size() == 32) {
+        QString keyPath = keyDir + "/client.key";
+        QFile keyFile(keyPath);
+        if (keyFile.open(QIODevice::WriteOnly)) {
+          keyFile.write(keyData);
+          keyFile.close();
+          keyFileEdit_->setText(keyPath);
+          qDebug() << "[SetupWizard] Extracted embedded PSK to:" << keyPath;
+        } else {
+          qWarning() << "[SetupWizard] Failed to write key file:" << keyPath;
+        }
+      } else {
+        qWarning() << "[SetupWizard] Invalid embedded PSK size:"
+                    << keyData.size() << "(expected 32)";
+      }
+    } else if (crypto.contains("keyFile")) {
       keyFileEdit_->setText(crypto["keyFile"].toString());
+    }
+
+    // Support embedded base64 obfuscation seed (generated by server installer)
+    if (crypto.contains("obfuscationSeed")) {
+      QByteArray seedData = QByteArray::fromBase64(
+          crypto["obfuscationSeed"].toString().toLatin1());
+      if (seedData.size() == 32) {
+        QString seedPath = keyDir + "/obfuscation.seed";
+        QFile seedFile(seedPath);
+        if (seedFile.open(QIODevice::WriteOnly)) {
+          seedFile.write(seedData);
+          seedFile.close();
+          qDebug() << "[SetupWizard] Extracted embedded seed to:" << seedPath;
+        } else {
+          qWarning() << "[SetupWizard] Failed to write seed file:" << seedPath;
+        }
+      } else {
+        qWarning() << "[SetupWizard] Invalid embedded seed size:"
+                    << seedData.size() << "(expected 32)";
+      }
     }
   }
 
