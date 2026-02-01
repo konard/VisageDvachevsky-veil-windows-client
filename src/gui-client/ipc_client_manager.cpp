@@ -448,6 +448,10 @@ void IpcClientManager::checkHeartbeatTimeout() {
     daemonConnected_ = false;
     pollTimer_->stop();
 
+    // Disconnect the underlying client so is_connected() returns false
+    // and reconnection can properly re-establish the connection
+    client_->disconnect();
+
     // Emit error and connection change
     emit errorOccurred(
         tr("Service unreachable"),

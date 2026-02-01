@@ -12,6 +12,7 @@
 #include <QApplication>
 #include <QParallelAnimationGroup>
 #include <QDebug>
+#include <QPointer>
 #include <QTcpSocket>
 #include <QTimer>
 
@@ -915,30 +916,34 @@ void SetupWizard::onTestConnection() {
   // This is a simple reachability check — actual VPN authentication
   // happens through the daemon.
   auto* socket = new QTcpSocket(this);
-  connect(socket, &QTcpSocket::connected, this, [this, socket]() {
+  QPointer<QTcpSocket> socketGuard(socket);
+
+  connect(socket, &QTcpSocket::connected, this, [this, socketGuard]() {
     testResultLabel_->setText(tr("Server is reachable!"));
     testResultLabel_->setStyleSheet("color: #3fb950; font-size: 13px;");
     testConnectionButton_->setEnabled(true);
     testConnectionButton_->setText(tr("Test Connection"));
-    socket->deleteLater();
+    if (socketGuard) socketGuard->deleteLater();
   });
 
   connect(socket, &QTcpSocket::errorOccurred, this,
-          [this, socket](QAbstractSocket::SocketError) {
+          [this, socketGuard](QAbstractSocket::SocketError) {
+    QString errorStr = socketGuard ? socketGuard->errorString() : tr("Unknown error");
     testResultLabel_->setText(
-        tr("Could not reach server: %1").arg(socket->errorString()));
+        tr("Could not reach server: %1").arg(errorStr));
     testResultLabel_->setStyleSheet("color: #f85149; font-size: 13px;");
     testConnectionButton_->setEnabled(true);
     testConnectionButton_->setText(tr("Test Connection"));
-    socket->deleteLater();
+    if (socketGuard) socketGuard->deleteLater();
   });
 
   socket->connectToHost(address, static_cast<quint16>(port));
 
   // Timeout after 5 seconds
-  QTimer::singleShot(5000, this, [this, socket]() {
-    if (socket->state() != QAbstractSocket::ConnectedState) {
-      socket->abort();
+  QTimer::singleShot(5000, this, [this, socketGuard]() {
+    if (!socketGuard) return;
+    if (socketGuard->state() != QAbstractSocket::ConnectedState) {
+      socketGuard->abort();
       testResultLabel_->setText(tr("Connection timed out"));
       testResultLabel_->setStyleSheet("color: #f85149; font-size: 13px;");
       testConnectionButton_->setEnabled(true);
