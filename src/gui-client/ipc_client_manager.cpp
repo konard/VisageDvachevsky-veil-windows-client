@@ -18,9 +18,20 @@ IpcClientManager::IpcClientManager(QObject* parent)
     handleMessage(msg);
   });
 
-  // Set up connection change handler
+  // Set up connection change handler.
+  // The callback may be invoked from a non-Qt thread (e.g., socket I/O thread),
+  // so we marshal it to the GUI thread via QMetaObject::invokeMethod to avoid
+  // "Timers cannot be stopped from another thread" warnings.
   client_->on_connection_change([this](bool connected) {
-    handleConnectionChange(connected);
+    QMetaObject::invokeMethod(this, [this, connected]() {
+      handleConnectionChange(connected);
+    }, Qt::QueuedConnection);
+  });
+
+  // Set up deserialization error handler — the daemon sent data we couldn't parse.
+  // This is important for detecting daemon/client version mismatches.
+  client_->on_deserialization_error([this](const std::string& raw_json) {
+    handleDeserializationError(raw_json);
   });
 
   // Set up polling timer to check for incoming messages
@@ -74,6 +85,9 @@ bool IpcClientManager::connectToDaemon() {
   qDebug() << "[IpcClientManager] Successfully connected to daemon via IPC";
   stopReconnectTimer();
   daemonConnected_ = true;
+  deserializationErrors_ = 0;
+  versionMismatchWarned_ = false;
+  versionVerified_ = false;
   pollTimer_->start();
   qDebug() << "[IpcClientManager] Started message polling timer";
 
@@ -81,6 +95,9 @@ bool IpcClientManager::connectToDaemon() {
   lastHeartbeat_ = std::chrono::steady_clock::now();
   heartbeatTimer_->start();
   qDebug() << "[IpcClientManager] Started heartbeat monitoring";
+
+  // Request daemon protocol version to verify compatibility
+  requestDaemonVersion();
 
   emit daemonConnectionChanged(true);
   return true;
@@ -156,6 +173,13 @@ bool IpcClientManager::sendConnect(const ipc::ConnectionConfig& config) {
 
   qDebug() << "[IpcClientManager] ConnectCommand sent successfully";
   qDebug() << "[IpcClientManager] Waiting for response from daemon...";
+
+  // Reset heartbeat timer to give the daemon extra time for tunnel initialization.
+  // The daemon blocks its main loop during tunnel setup, so heartbeats will be
+  // delayed. This prevents false "service unreachable" errors.
+  lastHeartbeat_ = std::chrono::steady_clock::now();
+  qDebug() << "[IpcClientManager] Reset heartbeat timer (grace period for tunnel initialization)";
+
   return true;
 }
 
@@ -194,6 +218,10 @@ bool IpcClientManager::sendDisconnect() {
   }
 
   qDebug() << "[IpcClientManager] DisconnectCommand sent successfully";
+
+  // Reset heartbeat timer — daemon may be busy tearing down the tunnel
+  lastHeartbeat_ = std::chrono::steady_clock::now();
+
   return true;
 }
 
@@ -242,6 +270,14 @@ void IpcClientManager::pollMessages() {
 
 void IpcClientManager::handleMessage(const ipc::Message& msg) {
   qDebug() << "[IpcClientManager] Received message from daemon, type:" << static_cast<int>(msg.type);
+
+  // Any message from the daemon proves it is alive — reset heartbeat timer.
+  // This prevents false heartbeat timeouts when the daemon is busy (e.g.,
+  // during VPN tunnel initialization) but still sending responses/events.
+  lastHeartbeat_ = std::chrono::steady_clock::now();
+
+  // Reset consecutive deserialization error counter on successful message
+  deserializationErrors_ = 0;
 
   // Handle events from daemon
   if (msg.type == ipc::MessageType::kEvent) {
@@ -338,6 +374,26 @@ void IpcClientManager::handleMessage(const ipc::Message& msg) {
           QString::fromStdString(errorResp->error_message),
           QString::fromStdString(errorResp->details));
     }
+    else if (const auto* versionResp = std::get_if<ipc::VersionResponse>(response)) {
+      qDebug() << "[IpcClientManager] Received VersionResponse";
+      qDebug() << "[IpcClientManager]   Daemon protocol version:" << versionResp->protocol_version;
+      qDebug() << "[IpcClientManager]   Daemon version:" << QString::fromStdString(versionResp->daemon_version);
+      qDebug() << "[IpcClientManager]   Client protocol version:" << ipc::kProtocolVersion;
+
+      versionVerified_ = true;
+
+      if (versionResp->protocol_version != ipc::kProtocolVersion) {
+        qWarning() << "[IpcClientManager] Protocol version mismatch! Daemon:" << versionResp->protocol_version
+                   << "Client:" << ipc::kProtocolVersion;
+        emit errorOccurred(
+            tr("Protocol version mismatch"),
+            tr("The daemon protocol version (%1) does not match the client (%2). "
+               "Please rebuild and reinstall both the daemon service and GUI client "
+               "from the same codebase version.")
+                .arg(versionResp->protocol_version)
+                .arg(ipc::kProtocolVersion));
+      }
+    }
     else {
       qWarning() << "[IpcClientManager] Received unknown response type";
     }
@@ -355,6 +411,12 @@ void IpcClientManager::handleMessage(const ipc::Message& msg) {
 void IpcClientManager::handleConnectionChange(bool connected) {
   qDebug() << "[IpcClientManager] Connection state changed:" << (connected ? "CONNECTED" : "DISCONNECTED");
 
+  // Skip if state hasn't actually changed to avoid duplicate signals
+  if (daemonConnected_ == connected) {
+    qDebug() << "[IpcClientManager] Connection state unchanged, skipping duplicate notification";
+    return;
+  }
+
   daemonConnected_ = connected;
   emit daemonConnectionChanged(connected);
 
@@ -371,6 +433,60 @@ void IpcClientManager::handleConnectionChange(bool connected) {
     // Start heartbeat monitoring
     lastHeartbeat_ = std::chrono::steady_clock::now();
     heartbeatTimer_->start();
+  }
+}
+
+void IpcClientManager::requestDaemonVersion() {
+  if (!isConnected()) {
+    return;
+  }
+
+  qDebug() << "[IpcClientManager] Requesting daemon protocol version...";
+  ipc::GetVersionCommand cmd;
+  std::error_code ec;
+  if (!client_->send_command(ipc::Command{cmd}, ec)) {
+    qWarning() << "[IpcClientManager] Failed to send GetVersionCommand:" << QString::fromStdString(ec.message());
+  }
+}
+
+void IpcClientManager::handleDeserializationError(const std::string& raw_json) {
+  // The daemon sent a message that could not be deserialized.
+  // This still proves the daemon is alive, so reset heartbeat.
+  lastHeartbeat_ = std::chrono::steady_clock::now();
+
+  deserializationErrors_++;
+
+  qWarning() << "[IpcClientManager] Failed to deserialize daemon message ("
+             << deserializationErrors_ << "consecutive errors)";
+  qWarning() << "[IpcClientManager] Raw JSON:" << QString::fromStdString(raw_json);
+
+  // After several consecutive failures, warn about possible daemon version mismatch.
+  // The most common cause is the daemon binary not being rebuilt after a client update.
+  if (deserializationErrors_ >= 3 && !versionMismatchWarned_) {
+    versionMismatchWarned_ = true;
+    qWarning() << "[IpcClientManager] Possible daemon/client version mismatch detected!";
+    qWarning() << "[IpcClientManager] The daemon may need to be rebuilt with the latest code.";
+    qWarning() << "[IpcClientManager] Client protocol version:" << ipc::kProtocolVersion;
+
+    // Provide more specific guidance based on what we know
+    QString details;
+    if (!versionVerified_) {
+      details = tr("The VEIL daemon is responding with empty payloads (missing 'response_type' field). "
+                   "This indicates the daemon binary does not include the IPC serialization fix. "
+                   "To resolve this:\n"
+                   "1. Stop the VEIL VPN Service (sc stop VeilVPN)\n"
+                   "2. Replace veil-service.exe with a freshly built binary\n"
+                   "3. Start the service (sc start VeilVPN)\n"
+                   "4. Verify the service binary was actually replaced (check file timestamp)\n\n"
+                   "Client protocol version: %1")
+                    .arg(ipc::kProtocolVersion);
+    } else {
+      details = tr("The VEIL daemon is responding but the client cannot understand its messages. "
+                   "Please rebuild and reinstall both the daemon service and GUI client "
+                   "from the same codebase version.");
+    }
+
+    emit errorOccurred(tr("Daemon version mismatch"), details);
   }
 }
 
@@ -392,12 +508,18 @@ void IpcClientManager::attemptReconnect() {
     qDebug() << "[IpcClientManager] Reconnection successful!";
     stopReconnectTimer();
     daemonConnected_ = true;
+    deserializationErrors_ = 0;
+    versionMismatchWarned_ = false;
+    versionVerified_ = false;
     pollTimer_->start();
 
     // Restart heartbeat monitoring
     lastHeartbeat_ = std::chrono::steady_clock::now();
     heartbeatTimer_->start();
     qDebug() << "[IpcClientManager] Restarted heartbeat monitoring after reconnection";
+
+    // Request daemon protocol version to verify compatibility
+    requestDaemonVersion();
 
     emit daemonConnectionChanged(true);
   } else {

@@ -329,6 +329,10 @@ void IpcClient::on_connection_change(ConnectionHandler handler) {
   connection_handler_ = std::move(handler);
 }
 
+void IpcClient::on_deserialization_error(DeserializationErrorHandler handler) {
+  deserialization_error_handler_ = std::move(handler);
+}
+
 void IpcClient::poll(std::error_code& ec) {
   if (!connected_) {
     ec = std::make_error_code(std::errc::not_connected);
@@ -392,6 +396,8 @@ void IpcClient::handle_incoming_data(std::error_code& ec) {
     auto msg = deserialize_message(message_str);
     if (msg && message_handler_) {
       message_handler_(*msg);
+    } else if (!msg && deserialization_error_handler_) {
+      deserialization_error_handler_(message_str);
     }
   }
 }

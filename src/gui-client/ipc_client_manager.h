@@ -75,8 +75,10 @@ class IpcClientManager : public QObject {
  private:
   void handleMessage(const ipc::Message& msg);
   void handleConnectionChange(bool connected);
+  void handleDeserializationError(const std::string& raw_json);
   void startReconnectTimer();
   void stopReconnectTimer();
+  void requestDaemonVersion();
 
   std::unique_ptr<ipc::IpcClient> client_;
   QTimer* pollTimer_;
@@ -85,6 +87,9 @@ class IpcClientManager : public QObject {
   bool daemonConnected_{false};
   int reconnectAttempts_{0};
   std::chrono::steady_clock::time_point lastHeartbeat_;
+  int deserializationErrors_{0};           // Consecutive deserialization failure count
+  bool versionMismatchWarned_{false};      // Whether we already warned about daemon version mismatch
+  bool versionVerified_{false};            // Whether daemon protocol version has been verified
 
   // Reconnection constants
   static constexpr int kReconnectIntervalMs = 5000;  // 5 seconds
@@ -92,7 +97,9 @@ class IpcClientManager : public QObject {
 
   // Heartbeat monitoring constants
   static constexpr int kHeartbeatIntervalSec = 10;   // Service sends heartbeat every 10 seconds
-  static constexpr int kHeartbeatTimeoutSec = 20;    // Consider service dead after 2x interval
+  static constexpr int kHeartbeatTimeoutSec = 45;    // Consider service dead after extended period
+                                                     // (increased from 20s to tolerate daemon being
+                                                     // busy during tunnel initialization/teardown)
   static constexpr int kHeartbeatCheckIntervalMs = 5000;  // Check heartbeat timeout every 5 seconds
 
  private slots:

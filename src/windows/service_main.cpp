@@ -951,6 +951,14 @@ void handle_ipc_message(const ipc::Message& msg, int client_fd) {
           ipc::ClientListResponse list_resp;
           // Empty client list - we're not a server
           response = list_resp;
+        } else if constexpr (std::is_same_v<T, ipc::GetVersionCommand>) {
+#ifndef NDEBUG
+          LOG_DEBUG("Received GetVersionCommand");
+#endif
+          ipc::VersionResponse ver_resp;
+          ver_resp.protocol_version = ipc::kProtocolVersion;
+          ver_resp.daemon_version = "1.0.0";
+          response = ver_resp;
         } else {
           LOG_WARN("Unknown command type received");
           response = ipc::ErrorResponse{"Unknown command", ""};
@@ -960,6 +968,15 @@ void handle_ipc_message(const ipc::Message& msg, int client_fd) {
         response_msg.payload = response;
       },
       cmd);
+
+  // Always-on validation: ensure the response payload was actually set.
+  // If the payload still holds Command (the default variant type), the response
+  // assignment inside the visitor failed silently. Log at ERROR level so this
+  // is visible in Release builds and can be diagnosed from service logs.
+  if (!std::holds_alternative<ipc::Response>(response_msg.payload)) {
+    LOG_ERROR("BUG: Response payload is not a Response variant! Payload index: {}",
+              response_msg.payload.index());
+  }
 
   // Log response details before sending
 #ifndef NDEBUG
@@ -972,10 +989,7 @@ void handle_ipc_message(const ipc::Message& msg, int client_fd) {
   }
 
   // Log which response type we're sending by checking response_msg.payload
-  if (!std::holds_alternative<ipc::Response>(response_msg.payload)) {
-    LOG_ERROR("Response payload is not a Response variant!");
-    LOG_ERROR("Payload index: {}", response_msg.payload.index());
-  } else {
+  if (std::holds_alternative<ipc::Response>(response_msg.payload)) {
     const auto& response = std::get<ipc::Response>(response_msg.payload);
     if (std::holds_alternative<ipc::SuccessResponse>(response)) {
       const auto& sr = std::get<ipc::SuccessResponse>(response);
@@ -996,11 +1010,24 @@ void handle_ipc_message(const ipc::Message& msg, int client_fd) {
       LOG_DEBUG("Response type: DiagnosticsResponse");
     } else if (std::holds_alternative<ipc::ClientListResponse>(response)) {
       LOG_DEBUG("Response type: ClientListResponse");
+    } else if (std::holds_alternative<ipc::VersionResponse>(response)) {
+      const auto& vr = std::get<ipc::VersionResponse>(response);
+      LOG_DEBUG("Response type: VersionResponse");
+      LOG_DEBUG("  Protocol version: {}", vr.protocol_version);
+      LOG_DEBUG("  Daemon version: {}", vr.daemon_version);
     } else {
       LOG_WARN("Response type: UNKNOWN!");
     }
   }
 #endif
+
+  // Serialize and validate the response before sending.
+  // This always-on check ensures we never send empty payloads to the client.
+  std::string serialized = ipc::serialize_message(response_msg);
+  if (serialized.find("\"response_type\"") == std::string::npos) {
+    LOG_ERROR("BUG: Serialized response is missing 'response_type' field!");
+    LOG_ERROR("Serialized message: {}", serialized);
+  }
 
   std::error_code ec;
   {

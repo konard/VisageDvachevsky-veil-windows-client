@@ -25,6 +25,10 @@ namespace veil::ipc {
 //   "payload": { ... type-specific data ... }
 // }
 
+// Protocol version — increment when the message format changes.
+// Used by the GUI client to verify that the daemon speaks the same protocol.
+constexpr int kProtocolVersion = 2;
+
 // Connection states (matches client_ui_design.md specification)
 enum class ConnectionState {
   kDisconnected,
@@ -202,6 +206,9 @@ struct ExportDiagnosticsCommand {
 // Server-specific: Get list of active clients
 struct GetClientListCommand {};
 
+// Request daemon protocol version (used for compatibility checking)
+struct GetVersionCommand {};
+
 // Command variant
 using Command = std::variant<
   ConnectCommand,
@@ -211,7 +218,8 @@ using Command = std::variant<
   GetDiagnosticsCommand,
   UpdateConfigCommand,
   ExportDiagnosticsCommand,
-  GetClientListCommand
+  GetClientListCommand,
+  GetVersionCommand
 >;
 
 // ============================================================================
@@ -297,6 +305,11 @@ struct ErrorResponse {
   std::string details;
 };
 
+struct VersionResponse {
+  int protocol_version{0};
+  std::string daemon_version;
+};
+
 // Response variant
 using Response = std::variant<
   StatusResponse,
@@ -304,7 +317,8 @@ using Response = std::variant<
   DiagnosticsResponse,
   ClientListResponse,
   SuccessResponse,
-  ErrorResponse
+  ErrorResponse,
+  VersionResponse
 >;
 
 // ============================================================================
