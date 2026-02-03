@@ -97,8 +97,9 @@ void QuickActionsWidget::setupUi() {
   )");
 
   contentLayout_ = new QVBoxLayout(contentContainer_);
-  contentLayout_->setSpacing(4);
-  contentLayout_->setContentsMargins(12, 12, 12, 12);
+  contentLayout_->setSpacing(spacing::kSpacingXs());
+  contentLayout_->setContentsMargins(spacing::kSpacingMd(), spacing::kSpacingMd(),
+                                      spacing::kSpacingMd(), spacing::kSpacingMd());
 
   // Helper to create an action row with SVG icon and label
   auto createActionButton = [this](const QString& iconPath, const QString& label,

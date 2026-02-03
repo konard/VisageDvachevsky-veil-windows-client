@@ -49,6 +49,7 @@ jobs:
             nlohmann-json3-dev \
             libgtest-dev \
             qt6-base-dev \
+            libqt6svg6-dev \
             libgl1-mesa-dev
 
       - name: Configure CMake (Release)

@@ -132,7 +132,10 @@ constexpr int kDurationFast = 150;
 constexpr int kDurationNormal = 250;
 constexpr int kDurationSlow = 350;
 constexpr int kDurationPulse = 2000;
-constexpr int kDurationGlow = 3000;
+// Note: Reduced from 3000ms to 2000ms for snappier feedback (issue #212 item 10)
+constexpr int kDurationGlow = 2000;
+// View transition animation duration (used for slide + fade effects)
+constexpr int kDurationViewTransition = 200;
 }  // namespace animations
 
 /// Spacing and sizing

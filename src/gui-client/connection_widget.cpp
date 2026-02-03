@@ -211,7 +211,7 @@ void ConnectionWidget::setupUi() {
   auto* logoContainer = new QWidget(headerWidget);
   auto* logoLayout = new QHBoxLayout(logoContainer);
   logoLayout->setContentsMargins(0, 0, 0, 0);
-  logoLayout->setSpacing(12);
+  logoLayout->setSpacing(spacing::kSpacingMd());
 
   // Logo icon placeholder
   auto* logoIcon = new QLabel(this);
@@ -269,7 +269,7 @@ void ConnectionWidget::setupUi() {
   )");
   auto* statusContainerLayout = new QVBoxLayout(statusContainer);
   statusContainerLayout->setAlignment(Qt::AlignCenter);
-  statusContainerLayout->setSpacing(12);
+  statusContainerLayout->setSpacing(spacing::kSpacingMd());
 
   // Status ring (custom painted widget)
   statusRing_ = new StatusRing(this);
@@ -308,8 +308,9 @@ void ConnectionWidget::setupUi() {
   errorWidget_->hide();
 
   auto* errorLayout = new QVBoxLayout(errorWidget_);
-  errorLayout->setContentsMargins(16, 12, 16, 12);
-  errorLayout->setSpacing(10);
+  errorLayout->setContentsMargins(spacing::kSpacingLg(), spacing::kSpacingMd(),
+                                   spacing::kSpacingLg(), spacing::kSpacingMd());
+  errorLayout->setSpacing(spacing::kSpacingMd() - 2);  // 10px for slightly tighter error display
 
   // Error text label
   errorLabel_ = new QLabel(this);
@@ -427,15 +428,16 @@ void ConnectionWidget::setupUi() {
 
   auto* cardLayout = new QVBoxLayout(statusCard_);
   cardLayout->setSpacing(0);
-  cardLayout->setContentsMargins(16, 10, 16, 10);
+  cardLayout->setContentsMargins(spacing::kSpacingLg(), spacing::kSpacingMd() - 2,
+                                  spacing::kSpacingLg(), spacing::kSpacingMd() - 2);
 
   // Helper function to create info rows with SVG icons
   auto createInfoRow = [this, cardLayout](const QString& iconPath, const QString& label,
                                            QLabel*& valueLabel, bool addSeparator = true) {
     auto* row = new QWidget(this);
     auto* rowLayout = new QHBoxLayout(row);
-    rowLayout->setContentsMargins(0, 8, 0, 8);
-    rowLayout->setSpacing(12);
+    rowLayout->setContentsMargins(0, spacing::kSpacingSm(), 0, spacing::kSpacingSm());
+    rowLayout->setSpacing(spacing::kSpacingMd());
 
     // Icon - using SVG icon instead of emoji
     auto* iconLabel = new QLabel(this);
@@ -477,8 +479,9 @@ void ConnectionWidget::setupUi() {
   // Session ID row (separate, monospace)
   sessionInfoGroup_ = new QWidget(this);
   auto* sessionLayout = new QHBoxLayout(sessionInfoGroup_);
-  sessionLayout->setContentsMargins(16, 8, 16, 0);
-  sessionLayout->setSpacing(8);
+  sessionLayout->setContentsMargins(spacing::kSpacingLg(), spacing::kSpacingSm(),
+                                     spacing::kSpacingLg(), 0);
+  sessionLayout->setSpacing(spacing::kSpacingSm());
 
   // Session icon - using SVG icon instead of emoji
   auto* sessionIcon = new QLabel(this);
@@ -513,8 +516,9 @@ void ConnectionWidget::setupUi() {
 
 void ConnectionWidget::setupAnimations() {
   // Setup pulse animation timer for connecting state
+  // Using 16ms (~60fps) for smoother rotation animation
   pulseTimer_ = new QTimer(this);
-  pulseTimer_->setInterval(50);  // Smooth animation at ~20fps
+  pulseTimer_->setInterval(16);  // Smooth animation at ~60fps
   connect(pulseTimer_, &QTimer::timeout, this, &ConnectionWidget::onPulseAnimation);
 
   // Setup uptime timer
@@ -800,7 +804,9 @@ void ConnectionWidget::setError(const ErrorMessage& error) {
 }
 
 void ConnectionWidget::onPulseAnimation() {
-  animationPhase_ += 0.03;
+  // Smoother animation: ~1 full rotation per 1.5 seconds at 60fps
+  // 0.011 * 60fps = 0.66 phase/sec = ~1.5 sec per full rotation
+  animationPhase_ += 0.011;
   if (animationPhase_ > 1.0) {
     animationPhase_ -= 1.0;
   }
