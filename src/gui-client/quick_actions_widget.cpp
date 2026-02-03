@@ -5,9 +5,30 @@
 #include <QHBoxLayout>
 #include <QSettings>
 #include <QToolTip>
+#include <QIcon>
+#include <QPainter>
+#include <QSvgRenderer>
 
 #include "common/gui/theme.h"
 #include "connection_widget.h"
+
+namespace {
+// Helper function to load and render an SVG icon as a QPixmap with specified color
+QPixmap loadSvgIconForAction(const QString& path, int size, const QColor& color) {
+  QSvgRenderer renderer(path);
+  QPixmap pixmap(size, size);
+  pixmap.fill(Qt::transparent);
+  QPainter painter(&pixmap);
+  renderer.render(&painter);
+
+  // Apply color tint
+  painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
+  painter.fillRect(pixmap.rect(), color);
+  painter.end();
+
+  return pixmap;
+}
+}  // namespace
 
 namespace veil::gui {
 
@@ -79,13 +100,17 @@ void QuickActionsWidget::setupUi() {
   contentLayout_->setSpacing(4);
   contentLayout_->setContentsMargins(12, 12, 12, 12);
 
-  // Helper to create an action row with icon and label
-  auto createActionButton = [this](const QString& icon, const QString& label,
+  // Helper to create an action row with SVG icon and label
+  auto createActionButton = [this](const QString& iconPath, const QString& label,
                                     const QString& tooltip) -> QPushButton* {
-    auto* btn = new QPushButton(QString("%1  %2").arg(icon, label), this);
+    auto* btn = new QPushButton(label, this);
     btn->setCursor(Qt::PointingHandCursor);
     btn->setToolTip(tooltip);
     btn->setFixedHeight(scaleDpi(40));
+    // Set SVG icon
+    QPixmap iconPixmap = loadSvgIconForAction(iconPath, scaleDpi(16), QColor(colors::dark::kTextPrimary));
+    btn->setIcon(QIcon(iconPixmap));
+    btn->setIconSize(QSize(scaleDpi(16), scaleDpi(16)));
     btn->setStyleSheet(R"(
       QPushButton {
         background: transparent;
@@ -109,28 +134,29 @@ void QuickActionsWidget::setupUi() {
   };
 
   // === Primary Actions Row ===
-  auto* primaryLabel = new QLabel("QUICK TOGGLES", this);
-  primaryLabel->setStyleSheet(R"(
-    color: #6e7681;
+  // Using Title Case for section labels instead of UPPERCASE (P2 improvement)
+  auto* primaryLabel = new QLabel("Quick Toggles", this);
+  primaryLabel->setStyleSheet(QString(R"(
+    color: %1;
     font-size: 11px;
     font-weight: 600;
-    letter-spacing: 1.5px;
+    letter-spacing: 0.5px;
     padding: 4px 12px 4px 12px;
     background: transparent;
     border: none;
-  )");
+  )").arg(colors::dark::kTextTertiary));
   contentLayout_->addWidget(primaryLabel);
 
-  // Kill switch toggle
+  // Kill switch toggle - using SVG icon
   killSwitchButton_ = createActionButton(
-      "\u26A1", "Kill Switch", "Block all traffic if VPN disconnects");
+      ":/icons/icon_zap.svg", "Kill Switch", "Block all traffic if VPN disconnects");
   connect(killSwitchButton_, &QPushButton::clicked,
           this, &QuickActionsWidget::onKillSwitchClicked);
   contentLayout_->addWidget(killSwitchButton_);
 
-  // Obfuscation toggle
+  // Obfuscation toggle - using SVG icon
   obfuscationButton_ = createActionButton(
-      "\U0001F512", "Obfuscation", "Toggle traffic obfuscation");
+      ":/icons/icon_lock.svg", "Obfuscation", "Toggle traffic obfuscation");
   connect(obfuscationButton_, &QPushButton::clicked,
           this, &QuickActionsWidget::onObfuscationClicked);
   contentLayout_->addWidget(obfuscationButton_);
@@ -142,28 +168,29 @@ void QuickActionsWidget::setupUi() {
   contentLayout_->addWidget(sep1);
 
   // === Utility Actions ===
-  auto* utilityLabel = new QLabel("UTILITIES", this);
-  utilityLabel->setStyleSheet(R"(
-    color: #6e7681;
+  // Using Title Case for section labels
+  auto* utilityLabel = new QLabel("Utilities", this);
+  utilityLabel->setStyleSheet(QString(R"(
+    color: %1;
     font-size: 11px;
     font-weight: 600;
-    letter-spacing: 1.5px;
+    letter-spacing: 0.5px;
     padding: 4px 12px 4px 12px;
     background: transparent;
     border: none;
-  )");
+  )").arg(colors::dark::kTextTertiary));
   contentLayout_->addWidget(utilityLabel);
 
-  // Copy IP address
+  // Copy IP address - using SVG icon
   copyIpButton_ = createActionButton(
-      "\U0001F4CB", "Copy IP Address", "Copy current server IP to clipboard");
+      ":/icons/icon_clipboard.svg", "Copy IP Address", "Copy current server IP to clipboard");
   connect(copyIpButton_, &QPushButton::clicked,
           this, &QuickActionsWidget::onCopyIpClicked);
   contentLayout_->addWidget(copyIpButton_);
 
-  // Share connection status
+  // Share connection status - using SVG icon
   shareStatusButton_ = createActionButton(
-      "\U0001F4E4", "Share Status", "Copy connection status to clipboard");
+      ":/icons/icon_share.svg", "Share Status", "Copy connection status to clipboard");
   connect(shareStatusButton_, &QPushButton::clicked,
           this, &QuickActionsWidget::onShareStatusClicked);
   contentLayout_->addWidget(shareStatusButton_);
@@ -175,28 +202,29 @@ void QuickActionsWidget::setupUi() {
   contentLayout_->addWidget(sep2);
 
   // === Debug Actions ===
-  auto* debugLabel = new QLabel("DEBUG", this);
-  debugLabel->setStyleSheet(R"(
-    color: #6e7681;
+  // Using Title Case for section labels
+  auto* debugLabel = new QLabel("Debug", this);
+  debugLabel->setStyleSheet(QString(R"(
+    color: %1;
     font-size: 11px;
     font-weight: 600;
-    letter-spacing: 1.5px;
+    letter-spacing: 0.5px;
     padding: 4px 12px 4px 12px;
     background: transparent;
     border: none;
-  )");
+  )").arg(colors::dark::kTextTertiary));
   contentLayout_->addWidget(debugLabel);
 
-  // Open diagnostics
+  // Open diagnostics - using SVG icon
   openDiagnosticsButton_ = createActionButton(
-      "\U0001F50D", "Open Diagnostics", "Open the diagnostics view");
+      ":/icons/icon_search.svg", "Open Diagnostics", "Open the diagnostics view");
   connect(openDiagnosticsButton_, &QPushButton::clicked,
           this, &QuickActionsWidget::onOpenDiagnosticsClicked);
   contentLayout_->addWidget(openDiagnosticsButton_);
 
-  // Copy debug info
+  // Copy debug info - using SVG icon
   copyDebugInfoButton_ = createActionButton(
-      "\U0001F41B", "Copy Debug Info", "Copy diagnostic info to clipboard");
+      ":/icons/icon_bug.svg", "Copy Debug Info", "Copy diagnostic info to clipboard");
   connect(copyDebugInfoButton_, &QPushButton::clicked,
           this, &QuickActionsWidget::onCopyDebugInfoClicked);
   contentLayout_->addWidget(copyDebugInfoButton_);
@@ -284,11 +312,12 @@ void QuickActionsWidget::setObfuscationEnabled(bool enabled) {
 void QuickActionsWidget::updateActionStates() {
   bool isConnected = (connectionState_ == ConnectionState::kConnected);
 
-  // Update kill switch button text with state indicator
+  // Update kill switch button text with state indicator (using SVG icon, text only)
   QString ksState = killSwitchEnabled_ ? "ON" : "OFF";
-  QString ksColor = killSwitchEnabled_ ? "#3fb950" : "#8b949e";
-  killSwitchButton_->setText(
-      QString("\u26A1  Kill Switch  [%1]").arg(ksState));
+  QString ksColor = killSwitchEnabled_ ? colors::dark::kAccentSuccess : colors::dark::kTextSecondary;
+  QColor iconColor = killSwitchEnabled_ ? QColor(colors::dark::kAccentSuccess) : QColor(colors::dark::kTextSecondary);
+  killSwitchButton_->setText(QString("Kill Switch  [%1]").arg(ksState));
+  killSwitchButton_->setIcon(QIcon(loadSvgIconForAction(":/icons/icon_zap.svg", scaleDpi(16), iconColor)));
   killSwitchButton_->setStyleSheet(QString(R"(
     QPushButton {
       background: transparent;
@@ -309,11 +338,12 @@ void QuickActionsWidget::updateActionStates() {
     }
   )").arg(ksColor));
 
-  // Update obfuscation button text with state indicator
+  // Update obfuscation button text with state indicator (using SVG icon, text only)
   QString obState = obfuscationEnabled_ ? "ON" : "OFF";
-  QString obColor = obfuscationEnabled_ ? "#3fb950" : "#8b949e";
-  obfuscationButton_->setText(
-      QString("\U0001F512  Obfuscation  [%1]").arg(obState));
+  QString obColor = obfuscationEnabled_ ? colors::dark::kAccentSuccess : colors::dark::kTextSecondary;
+  QColor obIconColor = obfuscationEnabled_ ? QColor(colors::dark::kAccentSuccess) : QColor(colors::dark::kTextSecondary);
+  obfuscationButton_->setText(QString("Obfuscation  [%1]").arg(obState));
+  obfuscationButton_->setIcon(QIcon(loadSvgIconForAction(":/icons/icon_lock.svg", scaleDpi(16), obIconColor)));
   obfuscationButton_->setStyleSheet(QString(R"(
     QPushButton {
       background: transparent;

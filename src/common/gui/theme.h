@@ -45,7 +45,9 @@ constexpr const char* kBackgroundCard = "rgba(255, 255, 255, 0.03)";
 // Text colors
 constexpr const char* kTextPrimary = "#f0f6fc";
 constexpr const char* kTextSecondary = "#8b949e";
-constexpr const char* kTextTertiary = "#6e7681";
+// Note: kTextTertiary updated from #6e7681 to #848d97 for WCAG AA compliance
+// Previous value had 3.9:1 contrast on kBackgroundPrimary, new value has ~4.6:1
+constexpr const char* kTextTertiary = "#848d97";
 
 // Accent colors - vibrant cyan/teal palette
 constexpr const char* kAccentPrimary = "#58a6ff";
@@ -65,6 +67,17 @@ constexpr const char* kShadowLight = "rgba(0, 0, 0, 0.2)";
 constexpr const char* kGlowSuccess = "rgba(63, 185, 80, 0.4)";
 constexpr const char* kGlowPrimary = "rgba(88, 166, 255, 0.4)";
 constexpr const char* kGlowError = "rgba(248, 81, 73, 0.4)";
+
+// Status ring colors (for StatusRing widget in connection_widget.cpp)
+// These are used for the circular connection status indicator
+constexpr const char* kStatusConnected = "#3fb950";       // Green - connected
+constexpr const char* kStatusConnecting = "#d29922";      // Yellow/amber - connecting
+constexpr const char* kStatusError = "#f85149";           // Red - error
+constexpr const char* kStatusDisconnected = "#484f58";    // Gray - disconnected
+
+// Disabled state colors (WCAG AA compliant)
+// Note: Updated from #484f58 to #6e7681 for better contrast on #21262d backgrounds
+constexpr const char* kTextDisabled = "#6e7681";
 }  // namespace dark
 
 namespace light {
@@ -124,7 +137,22 @@ constexpr int kDurationGlow = 3000;
 
 /// Spacing and sizing
 namespace spacing {
-// Base spacing values (at 96 DPI)
+// Standardized spacing scale (at 96 DPI)
+// Usage guidelines:
+//   xs (4px)  - Minimal spacing, tight elements
+//   sm (8px)  - Small gaps, inline elements
+//   md (12px) - Default element spacing
+//   lg (16px) - Section padding, card margins
+//   xl (24px) - Large gaps, section separators
+//   xxl (32px) - Major section breaks, hero areas
+constexpr int kSpacingXsBase = 4;
+constexpr int kSpacingSmBase = 8;
+constexpr int kSpacingMdBase = 12;
+constexpr int kSpacingLgBase = 16;
+constexpr int kSpacingXlBase = 24;
+constexpr int kSpacingXxlBase = 32;
+
+// Legacy padding values (for backward compatibility)
 constexpr int kPaddingTinyBase = 4;
 constexpr int kPaddingSmallBase = 8;
 constexpr int kPaddingMediumBase = 16;
@@ -144,7 +172,15 @@ constexpr int kIconSizeBase = 24;
 constexpr int kIconSizeLargeBase = 32;
 constexpr int kStatusIndicatorSizeBase = 120;
 
-// DPI-aware spacing functions
+// DPI-aware standardized spacing functions
+inline int kSpacingXs() { return scaleDpi(kSpacingXsBase); }
+inline int kSpacingSm() { return scaleDpi(kSpacingSmBase); }
+inline int kSpacingMd() { return scaleDpi(kSpacingMdBase); }
+inline int kSpacingLg() { return scaleDpi(kSpacingLgBase); }
+inline int kSpacingXl() { return scaleDpi(kSpacingXlBase); }
+inline int kSpacingXxl() { return scaleDpi(kSpacingXxlBase); }
+
+// DPI-aware spacing functions (legacy naming for backward compatibility)
 inline int kPaddingTiny() { return scaleDpi(kPaddingTinyBase); }
 inline int kPaddingSmall() { return scaleDpi(kPaddingSmallBase); }
 inline int kPaddingMedium() { return scaleDpi(kPaddingMediumBase); }

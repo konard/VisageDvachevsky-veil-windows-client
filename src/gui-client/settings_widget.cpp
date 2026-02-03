@@ -12,6 +12,9 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QApplication>
+#include <QIcon>
+#include <QPainter>
+#include <QSvgRenderer>
 
 #include "common/gui/theme.h"
 #include "notification_preferences.h"
@@ -20,6 +23,24 @@
 #ifdef _WIN32
 #include "windows/shortcut_manager.h"
 #endif
+
+namespace {
+// Helper function to load and render an SVG icon as a QPixmap with specified color
+QPixmap loadSvgIconForSettings(const QString& path, int size, const QColor& color) {
+  QSvgRenderer renderer(path);
+  QPixmap pixmap(size, size);
+  pixmap.fill(Qt::transparent);
+  QPainter painter(&pixmap);
+  renderer.render(&painter);
+
+  // Apply color tint
+  painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
+  painter.fillRect(pixmap.rect(), color);
+  painter.end();
+
+  return pixmap;
+}
+}  // namespace
 
 namespace veil::gui {
 
@@ -76,24 +97,24 @@ void SettingsWidget::setupUi() {
 
   titleRow->addStretch();
 
-  // Search/filter box
+  // Search/filter box - removed emoji from placeholder per P1 recommendations
   searchEdit_ = new QLineEdit(this);
-  searchEdit_->setPlaceholderText("🔍 Search settings...");
+  searchEdit_->setPlaceholderText("Search settings...");
   searchEdit_->setMinimumWidth(scaleDpi(200));
   searchEdit_->setMaximumWidth(scaleDpi(300));
-  searchEdit_->setStyleSheet(R"(
+  searchEdit_->setStyleSheet(QString(R"(
     QLineEdit {
-      background-color: #161b22;
+      background-color: %1;
       border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 10px;
       padding: 10px 16px;
-      color: #f0f6fc;
+      color: %2;
       font-size: 14px;
     }
     QLineEdit:focus {
-      border-color: #58a6ff;
+      border-color: %3;
     }
-  )");
+  )").arg(colors::dark::kBackgroundSecondary, colors::dark::kTextPrimary, colors::dark::kAccentPrimary));
   connect(searchEdit_, &QLineEdit::textChanged, [this](const QString& text) {
     QString lowerText = text.toLower();
     // Filter sections based on search text
@@ -339,16 +360,18 @@ QWidget* SettingsWidget::createCryptoSection() {
   keyFileValidationIndicator_->setStyleSheet("font-size: 18px;");
   keyFileRow->addWidget(keyFileValidationIndicator_);
 
-  browseKeyFileButton_ = new QPushButton("\U0001F4C2", group);  // Folder icon
+  // Browse button with SVG folder icon instead of emoji
+  browseKeyFileButton_ = new QPushButton(group);
   browseKeyFileButton_->setFixedSize(scaleDpi(40), scaleDpi(40));
   browseKeyFileButton_->setCursor(Qt::PointingHandCursor);
   browseKeyFileButton_->setToolTip("Browse for key file");
+  browseKeyFileButton_->setIcon(QIcon(loadSvgIconForSettings(":/icons/icon_folder.svg", scaleDpi(18), QColor(colors::dark::kTextSecondary))));
+  browseKeyFileButton_->setIconSize(QSize(scaleDpi(18), scaleDpi(18)));
   browseKeyFileButton_->setStyleSheet(R"(
     QPushButton {
       background: rgba(255, 255, 255, 0.04);
       border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 8px;
-      font-size: 16px;
     }
     QPushButton:hover {
       background: rgba(255, 255, 255, 0.08);
@@ -384,16 +407,18 @@ QWidget* SettingsWidget::createCryptoSection() {
   obfuscationSeedValidationIndicator_->setStyleSheet("font-size: 18px;");
   obfuscationRow->addWidget(obfuscationSeedValidationIndicator_);
 
-  browseObfuscationSeedButton_ = new QPushButton("\U0001F4C2", group);  // Folder icon
+  // Browse button with SVG folder icon instead of emoji
+  browseObfuscationSeedButton_ = new QPushButton(group);
   browseObfuscationSeedButton_->setFixedSize(scaleDpi(40), scaleDpi(40));
   browseObfuscationSeedButton_->setCursor(Qt::PointingHandCursor);
   browseObfuscationSeedButton_->setToolTip("Browse for obfuscation seed file");
+  browseObfuscationSeedButton_->setIcon(QIcon(loadSvgIconForSettings(":/icons/icon_folder.svg", scaleDpi(18), QColor(colors::dark::kTextSecondary))));
+  browseObfuscationSeedButton_->setIconSize(QSize(scaleDpi(18), scaleDpi(18)));
   browseObfuscationSeedButton_->setStyleSheet(R"(
     QPushButton {
       background: rgba(255, 255, 255, 0.04);
       border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 8px;
-      font-size: 16px;
     }
     QPushButton:hover {
       background: rgba(255, 255, 255, 0.08);
@@ -607,9 +632,9 @@ QWidget* SettingsWidget::createRoutingSection() {
     hasUnsavedChanges_ = true;
   });
 
-  // Add informational label about experimental status
+  // Add informational label about experimental status (removed emoji per P1)
   auto* infoLabel = new QLabel(
-    "\U0001F6A7 <b>Experimental Feature:</b> Per-application routing UI is available for preview. "
+    "<b>Experimental Feature:</b> Per-application routing UI is available for preview. "
     "Full routing functionality requires daemon integration and will be implemented in Phase 2.",
     group);
   infoLabel->setProperty("textStyle", "secondary");

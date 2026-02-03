@@ -1,9 +1,25 @@
 <!DOCTYPE RCC>
 <RCC version="1.0">
     <qresource prefix="/icons">
+        <!-- Status icons -->
         <file>icon_disconnected.svg</file>
         <file>icon_connecting.svg</file>
         <file>icon_connected.svg</file>
         <file>icon_error.svg</file>
+        <!-- UI icons (replacing emoji) -->
+        <file>icon_settings.svg</file>
+        <file>icon_globe.svg</file>
+        <file>icon_clock.svg</file>
+        <file>icon_timer.svg</file>
+        <file>icon_transfer.svg</file>
+        <file>icon_key.svg</file>
+        <file>icon_zap.svg</file>
+        <file>icon_lock.svg</file>
+        <file>icon_clipboard.svg</file>
+        <file>icon_share.svg</file>
+        <file>icon_search.svg</file>
+        <file>icon_bug.svg</file>
+        <file>icon_folder.svg</file>
+        <file>icon_refresh.svg</file>
     </qresource>
 </RCC>
