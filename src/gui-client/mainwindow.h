@@ -51,7 +51,7 @@ class AnimatedStackedWidget : public QStackedWidget {
   void setAnimationDuration(int duration) { animationDuration_ = duration; }
 
  private:
-  int animationDuration_{250};
+  int animationDuration_{animations::kDurationViewTransition};
   bool isAnimating_{false};
 };
 

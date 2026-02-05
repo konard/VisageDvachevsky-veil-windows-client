@@ -14,10 +14,30 @@
 #include <QApplication>
 #include <QToolTip>
 #include <QShortcut>
+#include <QIcon>
+#include <QSvgRenderer>
 
 #include "common/gui/theme.h"
 #include "quick_actions_widget.h"
 #include "server_selector_widget.h"
+
+namespace {
+// Helper function to load and render an SVG icon as a QPixmap with specified color
+QPixmap loadSvgIcon(const QString& path, int size, const QColor& color = QColor("#848d97")) {
+  QSvgRenderer renderer(path);
+  QPixmap pixmap(size, size);
+  pixmap.fill(Qt::transparent);
+  QPainter painter(&pixmap);
+  renderer.render(&painter);
+
+  // Apply color tint
+  painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
+  painter.fillRect(pixmap.rect(), color);
+  painter.end();
+
+  return pixmap;
+}
+}  // namespace
 
 namespace veil::gui {
 
@@ -50,24 +70,24 @@ class StatusRing : public QWidget {
     const int ringWidth = 6;
     const int radius = (size - ringWidth) / 2 - 16;
 
-    // Determine colors based on state
+    // Determine colors based on state - using theme constants from theme.h
     QColor baseColor, glowColor;
     switch (state_) {
       case ConnectionState::kConnected:
-        baseColor = QColor("#3fb950");
+        baseColor = QColor(colors::dark::kStatusConnected);
         glowColor = QColor(63, 185, 80, static_cast<int>(100 + 60 * pulsePhase_));
         break;
       case ConnectionState::kConnecting:
       case ConnectionState::kReconnecting:
-        baseColor = QColor("#d29922");
+        baseColor = QColor(colors::dark::kStatusConnecting);
         glowColor = QColor(210, 153, 34, static_cast<int>(80 + 80 * pulsePhase_));
         break;
       case ConnectionState::kError:
-        baseColor = QColor("#f85149");
+        baseColor = QColor(colors::dark::kStatusError);
         glowColor = QColor(248, 81, 73, static_cast<int>(80 + 60 * pulsePhase_));
         break;
       default:
-        baseColor = QColor("#484f58");
+        baseColor = QColor(colors::dark::kStatusDisconnected);
         glowColor = QColor(72, 79, 88, 40);
         break;
     }
@@ -191,7 +211,7 @@ void ConnectionWidget::setupUi() {
   auto* logoContainer = new QWidget(headerWidget);
   auto* logoLayout = new QHBoxLayout(logoContainer);
   logoLayout->setContentsMargins(0, 0, 0, 0);
-  logoLayout->setSpacing(12);
+  logoLayout->setSpacing(spacing::kSpacingMd());
 
   // Logo icon placeholder
   auto* logoIcon = new QLabel(this);
@@ -215,7 +235,7 @@ void ConnectionWidget::setupUi() {
   headerLayout->addWidget(logoContainer);
   headerLayout->addStretch();
 
-  // Settings button with icon-style
+  // Settings button with SVG icon
   settingsButton_ = new QPushButton(this);
   settingsButton_->setFixedSize(scaleDpi(40), scaleDpi(40));
   settingsButton_->setCursor(Qt::PointingHandCursor);
@@ -225,14 +245,16 @@ void ConnectionWidget::setupUi() {
       background: rgba(255, 255, 255, 0.04);
       border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: 10px;
-      font-size: 18px;
     }
     QPushButton:hover {
       background: rgba(255, 255, 255, 0.08);
       border-color: rgba(255, 255, 255, 0.15);
     }
   )");
-  settingsButton_->setText("\u2699");  // Gear icon
+  // Use SVG icon instead of emoji
+  QIcon settingsIcon(loadSvgIcon(":/icons/icon_settings.svg", scaleDpi(20), QColor(colors::dark::kTextSecondary)));
+  settingsButton_->setIcon(settingsIcon);
+  settingsButton_->setIconSize(QSize(scaleDpi(20), scaleDpi(20)));
   connect(settingsButton_, &QPushButton::clicked, this, &ConnectionWidget::settingsRequested);
   headerLayout->addWidget(settingsButton_);
 
@@ -247,7 +269,7 @@ void ConnectionWidget::setupUi() {
   )");
   auto* statusContainerLayout = new QVBoxLayout(statusContainer);
   statusContainerLayout->setAlignment(Qt::AlignCenter);
-  statusContainerLayout->setSpacing(12);
+  statusContainerLayout->setSpacing(spacing::kSpacingMd());
 
   // Status ring (custom painted widget)
   statusRing_ = new StatusRing(this);
@@ -286,8 +308,9 @@ void ConnectionWidget::setupUi() {
   errorWidget_->hide();
 
   auto* errorLayout = new QVBoxLayout(errorWidget_);
-  errorLayout->setContentsMargins(16, 12, 16, 12);
-  errorLayout->setSpacing(10);
+  errorLayout->setContentsMargins(spacing::kSpacingLg(), spacing::kSpacingMd(),
+                                   spacing::kSpacingLg(), spacing::kSpacingMd());
+  errorLayout->setSpacing(spacing::kSpacingMd() - 2);  // 10px for slightly tighter error display
 
   // Error text label
   errorLabel_ = new QLabel(this);
@@ -405,32 +428,35 @@ void ConnectionWidget::setupUi() {
 
   auto* cardLayout = new QVBoxLayout(statusCard_);
   cardLayout->setSpacing(0);
-  cardLayout->setContentsMargins(16, 10, 16, 10);
+  cardLayout->setContentsMargins(spacing::kSpacingLg(), spacing::kSpacingMd() - 2,
+                                  spacing::kSpacingLg(), spacing::kSpacingMd() - 2);
 
-  // Helper function to create info rows
-  auto createInfoRow = [this, cardLayout](const QString& icon, const QString& label,
+  // Helper function to create info rows with SVG icons
+  auto createInfoRow = [this, cardLayout](const QString& iconPath, const QString& label,
                                            QLabel*& valueLabel, bool addSeparator = true) {
     auto* row = new QWidget(this);
     auto* rowLayout = new QHBoxLayout(row);
-    rowLayout->setContentsMargins(0, 8, 0, 8);
-    rowLayout->setSpacing(12);
+    rowLayout->setContentsMargins(0, spacing::kSpacingSm(), 0, spacing::kSpacingSm());
+    rowLayout->setSpacing(spacing::kSpacingMd());
 
-    // Icon
-    auto* iconLabel = new QLabel(icon, this);
-    iconLabel->setFixedWidth(scaleDpi(24));
-    iconLabel->setStyleSheet("font-size: 16px; color: #6e7681;");
+    // Icon - using SVG icon instead of emoji
+    auto* iconLabel = new QLabel(this);
+    iconLabel->setFixedSize(scaleDpi(20), scaleDpi(20));
+    QPixmap iconPixmap = loadSvgIcon(iconPath, scaleDpi(20), QColor(colors::dark::kTextTertiary));
+    iconLabel->setPixmap(iconPixmap);
+    iconLabel->setScaledContents(true);
     rowLayout->addWidget(iconLabel);
 
     // Label
     auto* textLabel = new QLabel(label, this);
-    textLabel->setStyleSheet("color: #8b949e; font-size: 14px;");
+    textLabel->setStyleSheet(QString("color: %1; font-size: 14px;").arg(colors::dark::kTextSecondary));
     rowLayout->addWidget(textLabel);
 
     rowLayout->addStretch();
 
     // Value
     valueLabel = new QLabel("\u2014", this);
-    valueLabel->setStyleSheet("color: #f0f6fc; font-size: 14px; font-weight: 500;");
+    valueLabel->setStyleSheet(QString("color: %1; font-size: 14px; font-weight: 500;").arg(colors::dark::kTextPrimary));
     rowLayout->addWidget(valueLabel);
 
     cardLayout->addWidget(row);
@@ -443,21 +469,26 @@ void ConnectionWidget::setupUi() {
     }
   };
 
-  createInfoRow("\U0001F310", "Server", serverLabel_);  // Globe
-  createInfoRow("\u23F1", "Latency", latencyLabel_);  // Stopwatch
-  createInfoRow("\u2191\u2193", "TX / RX", throughputLabel_);  // Up/Down arrows
-  createInfoRow("\u23F0", "Uptime", uptimeLabel_, false);  // Clock
+  createInfoRow(":/icons/icon_globe.svg", "Server", serverLabel_);
+  createInfoRow(":/icons/icon_timer.svg", "Latency", latencyLabel_);
+  createInfoRow(":/icons/icon_transfer.svg", "TX / RX", throughputLabel_);
+  createInfoRow(":/icons/icon_clock.svg", "Uptime", uptimeLabel_, false);
 
   mainLayout->addWidget(statusCard_);
 
   // Session ID row (separate, monospace)
   sessionInfoGroup_ = new QWidget(this);
   auto* sessionLayout = new QHBoxLayout(sessionInfoGroup_);
-  sessionLayout->setContentsMargins(16, 8, 16, 0);
-  sessionLayout->setSpacing(8);
+  sessionLayout->setContentsMargins(spacing::kSpacingLg(), spacing::kSpacingSm(),
+                                     spacing::kSpacingLg(), 0);
+  sessionLayout->setSpacing(spacing::kSpacingSm());
 
-  auto* sessionIcon = new QLabel("\U0001F511", this);  // Key
-  sessionIcon->setStyleSheet("font-size: 14px; color: #6e7681;");
+  // Session icon - using SVG icon instead of emoji
+  auto* sessionIcon = new QLabel(this);
+  sessionIcon->setFixedSize(scaleDpi(16), scaleDpi(16));
+  QPixmap keyPixmap = loadSvgIcon(":/icons/icon_key.svg", scaleDpi(16), QColor(colors::dark::kTextTertiary));
+  sessionIcon->setPixmap(keyPixmap);
+  sessionIcon->setScaledContents(true);
   sessionLayout->addWidget(sessionIcon);
 
   auto* sessionTitle = new QLabel("Session", this);
@@ -485,8 +516,9 @@ void ConnectionWidget::setupUi() {
 
 void ConnectionWidget::setupAnimations() {
   // Setup pulse animation timer for connecting state
+  // Using 16ms (~60fps) for smoother rotation animation
   pulseTimer_ = new QTimer(this);
-  pulseTimer_->setInterval(50);  // Smooth animation at ~20fps
+  pulseTimer_->setInterval(16);  // Smooth animation at ~60fps
   connect(pulseTimer_, &QTimer::timeout, this, &ConnectionWidget::onPulseAnimation);
 
   // Setup uptime timer
@@ -772,7 +804,9 @@ void ConnectionWidget::setError(const ErrorMessage& error) {
 }
 
 void ConnectionWidget::onPulseAnimation() {
-  animationPhase_ += 0.03;
+  // Smoother animation: ~1 full rotation per 1.5 seconds at 60fps
+  // 0.011 * 60fps = 0.66 phase/sec = ~1.5 sec per full rotation
+  animationPhase_ += 0.011;
   if (animationPhase_ > 1.0) {
     animationPhase_ -= 1.0;
   }

@@ -52,7 +52,8 @@ namespace veil::gui {
 // ===================== AnimatedStackedWidget Implementation =====================
 
 AnimatedStackedWidget::AnimatedStackedWidget(QWidget* parent)
-    : QStackedWidget(parent) {
+    : QStackedWidget(parent),
+      animationDuration_(animations::kDurationViewTransition) {
 }
 
 void AnimatedStackedWidget::setCurrentWidgetAnimated(int index) {
@@ -61,6 +62,7 @@ void AnimatedStackedWidget::setCurrentWidgetAnimated(int index) {
   }
 
   isAnimating_ = true;
+  int previousIndex = currentIndex();
 
   QWidget* currentW = currentWidget();
   QWidget* nextW = widget(index);
@@ -71,8 +73,13 @@ void AnimatedStackedWidget::setCurrentWidgetAnimated(int index) {
     return;
   }
 
-  // Prepare the next widget
-  nextW->setGeometry(0, 0, width(), height());
+  // Determine slide direction: forward (right to left) or backward (left to right)
+  bool isForward = index > previousIndex;
+  int slideOffset = scaleDpi(30);  // Subtle horizontal movement
+
+  // Prepare the next widget - position it off-screen in the direction we're sliding from
+  int startX = isForward ? slideOffset : -slideOffset;
+  nextW->setGeometry(startX, 0, width(), height());
   nextW->show();
   nextW->raise();
 
@@ -81,6 +88,7 @@ void AnimatedStackedWidget::setCurrentWidgetAnimated(int index) {
   auto* nextEffect = new QGraphicsOpacityEffect(nextW);
   currentW->setGraphicsEffect(currentEffect);
   nextW->setGraphicsEffect(nextEffect);
+  nextEffect->setOpacity(0.0);
 
   // Animation group for parallel execution
   auto* group = new QParallelAnimationGroup(this);
@@ -93,19 +101,39 @@ void AnimatedStackedWidget::setCurrentWidgetAnimated(int index) {
   fadeOut->setEasingCurve(QEasingCurve::OutCubic);
   group->addAnimation(fadeOut);
 
+  // Slide out current widget (opposite direction)
+  auto* slideOut = new QPropertyAnimation(currentW, "geometry", this);
+  slideOut->setDuration(animationDuration_);
+  slideOut->setStartValue(QRect(0, 0, width(), height()));
+  slideOut->setEndValue(QRect(isForward ? -slideOffset : slideOffset, 0, width(), height()));
+  slideOut->setEasingCurve(QEasingCurve::OutCubic);
+  group->addAnimation(slideOut);
+
   // Fade in next widget
   auto* fadeIn = new QPropertyAnimation(nextEffect, "opacity", this);
   fadeIn->setDuration(animationDuration_);
   fadeIn->setStartValue(0.0);
   fadeIn->setEndValue(1.0);
-  fadeIn->setEasingCurve(QEasingCurve::InCubic);
+  fadeIn->setEasingCurve(QEasingCurve::OutCubic);
   group->addAnimation(fadeIn);
+
+  // Slide in next widget
+  auto* slideIn = new QPropertyAnimation(nextW, "geometry", this);
+  slideIn->setDuration(animationDuration_);
+  slideIn->setStartValue(QRect(startX, 0, width(), height()));
+  slideIn->setEndValue(QRect(0, 0, width(), height()));
+  slideIn->setEasingCurve(QEasingCurve::OutCubic);
+  group->addAnimation(slideIn);
 
   // Connect completion handler
   connect(group, &QParallelAnimationGroup::finished, this, [this, currentW, nextW, index]() {
     // Clean up effects
     currentW->setGraphicsEffect(nullptr);
     nextW->setGraphicsEffect(nullptr);
+
+    // Reset geometry in case of any residual offset
+    nextW->setGeometry(0, 0, width(), height());
+    currentW->setGeometry(0, 0, width(), height());
 
     // Actually switch to the new widget
     setCurrentIndex(index);
