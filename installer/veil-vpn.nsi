@@ -264,6 +264,8 @@ Section "VEIL VPN Client (required)" SecMain
   File /nonfatal "bin\Qt6Gui.dll"
   File /nonfatal "bin\Qt6Widgets.dll"
   File /nonfatal "bin\Qt6Network.dll"
+  File /nonfatal "bin\Qt6Svg.dll"
+  File /nonfatal "bin\Qt6SvgWidgets.dll"
 
   ; Qt plugins
   SetOutPath "$INSTDIR\platforms"
@@ -271,6 +273,9 @@ Section "VEIL VPN Client (required)" SecMain
 
   SetOutPath "$INSTDIR\styles"
   File /nonfatal "bin\styles\qwindowsvistastyle.dll"
+
+  SetOutPath "$INSTDIR\imageformats"
+  File /nonfatal "bin\imageformats\qsvg.dll"
 
   ; Other dependencies
   SetOutPath "$INSTDIR"
@@ -477,6 +482,8 @@ Section "Uninstall"
   Delete "$INSTDIR\Qt6Gui.dll"
   Delete "$INSTDIR\Qt6Widgets.dll"
   Delete "$INSTDIR\Qt6Network.dll"
+  Delete "$INSTDIR\Qt6Svg.dll"
+  Delete "$INSTDIR\Qt6SvgWidgets.dll"
   Delete "$INSTDIR\libsodium.dll"
   Delete "$INSTDIR\spdlog.dll"
   Delete "$INSTDIR\fmt.dll"
@@ -488,6 +495,7 @@ Section "Uninstall"
   ; Remove directories
   RMDir /r "$INSTDIR\platforms"
   RMDir /r "$INSTDIR\styles"
+  RMDir /r "$INSTDIR\imageformats"
   RMDir /r "$INSTDIR\tls"
   RMDir /r "$INSTDIR\docs"
   RMDir /r "$INSTDIR\config"
