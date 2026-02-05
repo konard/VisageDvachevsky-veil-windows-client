@@ -228,6 +228,22 @@ Section "VEIL VPN Client (required)" SecMain
     nsExec::ExecToLog 'taskkill /F /IM veil-client-gui.exe'
   ${EndIf}
 
+  ; CRITICAL: Stop the Windows service BEFORE copying files
+  ; Windows locks executable files while services are running, so we must stop
+  ; the service first to ensure veil-service.exe can be replaced with the new version.
+  ; Without this, the installer may silently fail to update the service binary,
+  ; causing "daemon version mismatch" errors after installation.
+  DetailPrint "Stopping VEIL VPN Service (if running)..."
+  nsExec::ExecToLog 'sc stop VeilVPN'
+  ; Wait for service to fully stop - executable remains locked until service is STOPPED
+  ; The service typically stops within 1-2 seconds, but we wait longer to be safe
+  DetailPrint "Waiting for service to stop completely..."
+  Sleep 3000
+  ; Additional check - try to stop again in case it was still stopping
+  nsExec::ExecToLog 'sc stop VeilVPN'
+  Sleep 1000
+  DetailPrint "Service stop completed"
+
   SetOutPath "$INSTDIR"
   SetOverwrite on
 
@@ -342,11 +358,16 @@ Section "Windows Service" SecService
 
   ; Check if service executable exists
   ${If} ${FileExists} "$INSTDIR\veil-service.exe"
-    ; Stop any existing service first
-    DetailPrint "Stopping existing VEIL VPN Service (if running)..."
-    nsExec::ExecToLog '"$INSTDIR\veil-service.exe" --stop'
+    ; Note: Service was already stopped in SecMain section before files were copied.
+    ; This ensures the new veil-service.exe binary was properly installed.
 
-    ; Install the Windows service
+    ; Install/reinstall the Windows service
+    ; First try to uninstall any existing service (handles service binary path updates)
+    DetailPrint "Removing any existing VEIL VPN Service registration..."
+    nsExec::ExecToLog '"$INSTDIR\veil-service.exe" --uninstall'
+    Sleep 500
+
+    ; Install the Windows service with the new binary
     DetailPrint "Installing VEIL VPN Service..."
     nsExec::ExecToLog '"$INSTDIR\veil-service.exe" --install'
     Pop $0
