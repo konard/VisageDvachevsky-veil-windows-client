@@ -26,6 +26,7 @@
 #   --yes                  Skip confirmation prompts (use with --update)
 #   --export-config        Generate .veil client config from existing server
 #   --export-config=PATH   Generate .veil config to a custom file path
+#   --show-keys            Display cryptographic keys in terminal (NOT RECOMMENDED)
 #   --help                 Show this help message
 #
 # Examples:
@@ -90,6 +91,9 @@ FORCE_UPDATE="${FORCE_UPDATE:-false}"     # Force update (kill connections)
 DRAIN_TIMEOUT="${DRAIN_TIMEOUT:-300}"     # Connection drain timeout in seconds
 SKIP_CONFIRM="${SKIP_CONFIRM:-false}"     # Skip confirmation prompts
 BACKUP_DIR="${BACKUP_DIR:-/etc/veil/backup}"  # Backup directory for updates
+
+# Security options
+SHOW_KEYS="${SHOW_KEYS:-false}"           # Display cryptographic keys in terminal output
 
 # Version tracking
 INSTALLED_VERSION=""
@@ -731,25 +735,74 @@ display_update_summary() {
         echo "  $server_port"
         echo ""
 
-        # Display Key in base64
-        if [[ -f "$CONFIG_DIR/server.key" ]]; then
-            echo -e "${BOLD}Pre-Shared Key (base64):${NC}"
-            base64 -w 0 "$CONFIG_DIR/server.key"
-            echo ""
-            echo ""
-        else
-            echo -e "${YELLOW}⚠ Warning: $CONFIG_DIR/server.key not found${NC}"
-            echo ""
-        fi
+        # Handle cryptographic key material securely
+        local creds_file="$CONFIG_DIR/credentials.txt"
 
-        # Display Seed in base64
-        if [[ -f "$CONFIG_DIR/obfuscation.seed" ]]; then
-            echo -e "${BOLD}Obfuscation Seed (base64):${NC}"
-            base64 -w 0 "$CONFIG_DIR/obfuscation.seed"
+        if [[ -f "$CONFIG_DIR/server.key" && -f "$CONFIG_DIR/obfuscation.seed" ]]; then
+            # Write credentials to a secure file with restricted permissions
+            {
+                echo "VEIL Server Credentials"
+                echo "======================="
+                echo "Generated on: $(date)"
+                echo ""
+                echo "Server IP: $public_ip"
+                echo "Server Port: $server_port"
+                echo ""
+                echo "Pre-Shared Key (base64):"
+                base64 -w 0 "$CONFIG_DIR/server.key"
+                echo ""
+                echo ""
+                echo "Obfuscation Seed (base64):"
+                base64 -w 0 "$CONFIG_DIR/obfuscation.seed"
+                echo ""
+                echo ""
+                echo "⚠ SECURITY WARNING:"
+                echo "These credentials grant access to your VPN server."
+                echo "Delete this file after securely transferring to clients."
+                echo "NEVER share these keys over email or insecure channels!"
+            } > "$creds_file"
+
+            # Set restrictive permissions (owner read/write only)
+            chmod 600 "$creds_file"
+
+            echo -e "${BOLD}Credentials saved to secure file:${NC}"
+            echo "  $creds_file"
             echo ""
+            echo -e "${YELLOW}⚠ WARNING: This file contains sensitive cryptographic material${NC}"
+            echo -e "${YELLOW}  • File permissions: 600 (owner read/write only)${NC}"
+            echo -e "${YELLOW}  • Delete after transferring to clients${NC}"
+            echo -e "${YELLOW}  • NEVER send over email or insecure channels${NC}"
             echo ""
+
+            # Optionally display keys in terminal if explicitly requested
+            if [[ "$SHOW_KEYS" == "true" ]]; then
+                echo -e "${RED}╔════════════════════════════════════════════════════════════════════════╗${NC}"
+                echo -e "${RED}║  ⚠  SENSITIVE INFORMATION BELOW — DO NOT SHARE OR LOG  ⚠             ║${NC}"
+                echo -e "${RED}╚════════════════════════════════════════════════════════════════════════╝${NC}"
+                echo ""
+                echo -e "${BOLD}Pre-Shared Key (base64):${NC}"
+                base64 -w 0 "$CONFIG_DIR/server.key"
+                echo ""
+                echo ""
+                echo -e "${BOLD}Obfuscation Seed (base64):${NC}"
+                base64 -w 0 "$CONFIG_DIR/obfuscation.seed"
+                echo ""
+                echo ""
+                echo -e "${RED}╔════════════════════════════════════════════════════════════════════════╗${NC}"
+                echo -e "${RED}║  ⚠  END OF SENSITIVE INFORMATION — CLEAR YOUR TERMINAL HISTORY  ⚠    ║${NC}"
+                echo -e "${RED}╚════════════════════════════════════════════════════════════════════════╝${NC}"
+                echo ""
+            else
+                echo -e "${CYAN}💡 To display keys in terminal (not recommended), use: --show-keys${NC}"
+                echo ""
+            fi
         else
-            echo -e "${YELLOW}⚠ Warning: $CONFIG_DIR/obfuscation.seed not found${NC}"
+            if [[ ! -f "$CONFIG_DIR/server.key" ]]; then
+                echo -e "${YELLOW}⚠ Warning: $CONFIG_DIR/server.key not found${NC}"
+            fi
+            if [[ ! -f "$CONFIG_DIR/obfuscation.seed" ]]; then
+                echo -e "${YELLOW}⚠ Warning: $CONFIG_DIR/obfuscation.seed not found${NC}"
+            fi
             echo ""
         fi
 
@@ -944,6 +997,10 @@ UPDATE OPTIONS:
     --drain-timeout=N   Custom drain timeout in seconds (use with --graceful)
     --yes               Skip confirmation prompts
 
+SECURITY OPTIONS:
+    --show-keys         Display cryptographic keys in terminal output (NOT RECOMMENDED)
+                        By default, keys are saved to a secure file instead
+
 ENVIRONMENT VARIABLES:
     VEIL_REPO           Git repository URL (default: https://github.com/VisageDvachevsky/veil-core.git)
     VEIL_BRANCH         Git branch to use (default: main)
@@ -1066,6 +1123,9 @@ parse_args() {
                 ;;
             --yes|-y)
                 SKIP_CONFIRM="true"
+                ;;
+            --show-keys)
+                SHOW_KEYS="true"
                 ;;
             --help|-h)
                 show_help
