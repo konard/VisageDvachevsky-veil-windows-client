@@ -300,7 +300,8 @@ std::optional<HandshakeSession> HandshakeInitiator::consume_response(
       build_hmac_payload(static_cast<std::uint8_t>(MessageType::kResponse), init_ts, resp_ts,
                          session_id, init_pub, responder_pub);
   const auto expected_mac = crypto::hmac_sha256(psk_, hmac_payload);
-  if (!std::equal(expected_mac.begin(), expected_mac.end(), provided_mac.begin())) {
+  // SECURITY: Use constant-time comparison to prevent timing side-channel attacks (CWE-208)
+  if (sodium_memcmp(expected_mac.data(), provided_mac.data(), expected_mac.size()) != 0) {
     return std::nullopt;
   }
 
@@ -425,7 +426,8 @@ std::optional<HandshakeResponder::Result> HandshakeResponder::handle_init(
 
   const auto hmac_payload = build_init_hmac_payload(init_ts, init_pub);
   const auto expected_mac = crypto::hmac_sha256(psk_, hmac_payload);
-  if (!std::equal(expected_mac.begin(), expected_mac.end(), provided_mac.begin())) {
+  // SECURITY: Use constant-time comparison to prevent timing side-channel attacks (CWE-208)
+  if (sodium_memcmp(expected_mac.data(), provided_mac.data(), expected_mac.size()) != 0) {
     sodium_memzero(handshake_key.data(), handshake_key.size());
     return std::nullopt;
   }
@@ -622,7 +624,8 @@ MultiClientHandshakeResponder::process_decrypted_init(
 
   const auto hmac_payload = build_init_hmac_payload(init_ts, init_pub);
   const auto expected_mac = crypto::hmac_sha256(psk, hmac_payload);
-  if (!std::equal(expected_mac.begin(), expected_mac.end(), provided_mac.begin())) {
+  // SECURITY: Use constant-time comparison to prevent timing side-channel attacks (CWE-208)
+  if (sodium_memcmp(expected_mac.data(), provided_mac.data(), expected_mac.size()) != 0) {
     return std::nullopt;
   }
 
@@ -874,7 +877,8 @@ std::optional<HandshakeSession> ZeroRttInitiator::consume_zero_rtt_response(
   hmac_verify_payload.insert(hmac_verify_payload.end(), anti_replay_nonce_.begin(), anti_replay_nonce_.end());
 
   const auto expected_mac = crypto::hmac_sha256(psk_, hmac_verify_payload);
-  if (!std::equal(expected_mac.begin(), expected_mac.end(), provided_mac.begin())) {
+  // SECURITY: Use constant-time comparison to prevent timing side-channel attacks (CWE-208)
+  if (sodium_memcmp(expected_mac.data(), provided_mac.data(), expected_mac.size()) != 0) {
     return std::nullopt;
   }
 
@@ -1045,7 +1049,8 @@ std::optional<ZeroRttResponder::Result> ZeroRttResponder::handle_zero_rtt_init(
   hmac_payload.insert(hmac_payload.end(), anti_replay_nonce.begin(), anti_replay_nonce.end());
 
   const auto expected_mac = crypto::hmac_sha256(psk_, hmac_payload);
-  if (!std::equal(expected_mac.begin(), expected_mac.end(), provided_mac.begin())) {
+  // SECURITY: Use constant-time comparison to prevent timing side-channel attacks (CWE-208)
+  if (sodium_memcmp(expected_mac.data(), provided_mac.data(), expected_mac.size()) != 0) {
     sodium_memzero(handshake_key.data(), handshake_key.size());
     return std::nullopt;
   }
