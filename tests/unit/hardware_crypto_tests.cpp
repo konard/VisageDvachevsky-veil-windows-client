@@ -357,21 +357,50 @@ TEST(HardwareCryptoTests, EncryptWithAlgorithmAuto) {
 // ============================================================================
 
 TEST(HardwareCryptoTests, HwSwCompatibilitySequenceObfuscation) {
-  // Both HW and SW implementations should produce round-trip compatible results
+  // CRITICAL INTEROPERABILITY TEST (Issue #226):
+  // HW and SW implementations MUST produce identical obfuscated values.
+  // This ensures cross-platform compatibility between systems with different
+  // CPU capabilities (e.g., cloud servers without AES-NI vs desktop clients with AES-NI).
   const auto key_vec = crypto::random_bytes(crypto::kAeadKeyLen);
   std::array<std::uint8_t, crypto::kAeadKeyLen> key{};
   std::copy(key_vec.begin(), key_vec.end(), key.begin());
 
-  for (std::uint64_t seq = 0; seq < 100; ++seq) {
-    // HW obfuscate -> HW deobfuscate
-    const auto hw_obf = crypto::obfuscate_sequence_hw(seq, key);
-    const auto hw_deobf = crypto::deobfuscate_sequence_hw(hw_obf, key);
-    EXPECT_EQ(seq, hw_deobf) << "HW round-trip failed for seq " << seq;
+  // Test vector of diverse sequence numbers
+  const std::vector<std::uint64_t> test_sequences = {
+      0,
+      1,
+      42,
+      255,
+      256,
+      65535,
+      65536,
+      0x1234567890ABCDEF,
+      std::numeric_limits<std::uint64_t>::max(),
+      std::numeric_limits<std::uint64_t>::max() - 1,
+      0x8000000000000000  // High bit set
+  };
 
-    // SW obfuscate -> SW deobfuscate (original implementation)
+  for (const auto seq : test_sequences) {
+    // HW and SW must produce IDENTICAL obfuscated values
+    const auto hw_obf = crypto::obfuscate_sequence_hw(seq, key);
     const auto sw_obf = crypto::obfuscate_sequence(seq, key);
+    EXPECT_EQ(hw_obf, sw_obf)
+        << "INTEROPERABILITY FAILURE: HW and SW produced different obfuscated values for seq "
+        << seq << " (hw=" << hw_obf << ", sw=" << sw_obf << ")";
+
+    // Both should round-trip correctly
+    const auto hw_deobf = crypto::deobfuscate_sequence_hw(hw_obf, key);
     const auto sw_deobf = crypto::deobfuscate_sequence(sw_obf, key);
+    EXPECT_EQ(seq, hw_deobf) << "HW round-trip failed for seq " << seq;
     EXPECT_EQ(seq, sw_deobf) << "SW round-trip failed for seq " << seq;
+
+    // Cross-compatibility: HW can deobfuscate SW output and vice versa
+    const auto hw_deobf_sw = crypto::deobfuscate_sequence_hw(sw_obf, key);
+    const auto sw_deobf_hw = crypto::deobfuscate_sequence(hw_obf, key);
+    EXPECT_EQ(seq, hw_deobf_sw)
+        << "Cross-compatibility failed: HW cannot deobfuscate SW output for seq " << seq;
+    EXPECT_EQ(seq, sw_deobf_hw)
+        << "Cross-compatibility failed: SW cannot deobfuscate HW output for seq " << seq;
   }
 }
 

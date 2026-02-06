@@ -333,12 +333,17 @@ std::size_t aead_decrypt_aes_gcm_to(std::span<const std::uint8_t, kAeadKeyLen> k
 
 std::uint64_t obfuscate_sequence_hw(std::uint64_t sequence,
                                      std::span<const std::uint8_t, kAeadKeyLen> obfuscation_key) {
-#if VEIL_HAS_AES_INTRINSICS
-  if (has_hardware_aes()) {
-    return obfuscate_sequence_aesni(sequence, obfuscation_key);
-  }
-#endif
-  // Fallback to software implementation
+  // INTEROPERABILITY FIX (Issue #226):
+  // Always use ChaCha20-based implementation regardless of hardware capabilities.
+  // The previous implementation used different algorithms (AES-NI vs ChaCha20) based
+  // on CPU features, which caused incompatibility between systems with different hardware.
+  // A client with AES-NI and a server without (or vice versa) would produce different
+  // obfuscated sequence numbers, breaking communication.
+  //
+  // Solution: Always use ChaCha20 for sequence obfuscation for cross-platform consistency.
+  // AES-NI is still used for AEAD encryption/decryption where it provides the most benefit.
+  // Sequence obfuscation is a small, infrequent operation, so the performance difference
+  // is negligible compared to ensuring interoperability.
   return obfuscate_sequence_sw(sequence, obfuscation_key);
 }
 
