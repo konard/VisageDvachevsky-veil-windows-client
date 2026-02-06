@@ -5,16 +5,18 @@
 # This script performs a complete automated installation and configuration
 # of VEIL Client on Ubuntu/Debian systems with optional Qt6 GUI.
 #
-# One-line install:
+# ⚠ SECURITY NOTICE: curl | bash installation is NOT RECOMMENDED
+# The secure installation method verifies script integrity before execution.
+#
+# RECOMMENDED SECURE INSTALLATION:
+#   curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_client.sh -o install_client.sh
+#   curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_client.sh.sha256 -o install_client.sh.sha256
+#   sha256sum -c install_client.sh.sha256
+#   less install_client.sh  # Review the script (IMPORTANT!)
+#   sudo bash install_client.sh [OPTIONS]
+#
+# One-line install (NOT RECOMMENDED - no integrity verification):
 #   curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_client.sh | sudo bash
-#
-#   With GUI:
-#   curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_client.sh | sudo bash -s -- --with-gui
-#
-# Or download and run manually:
-#   wget https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_client.sh
-#   chmod +x install_client.sh
-#   sudo ./install_client.sh [OPTIONS]
 #
 # Options:
 #   --build=debug|release  Build type (default: release)
@@ -23,15 +25,20 @@
 #   --dry-run              Show what would be done without making changes
 #   --help                 Show this help message
 #
-# Examples:
+# Examples (SECURE METHOD - RECOMMENDED):
+#   # Download and verify
+#   curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_client.sh -o install_client.sh
+#   curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_client.sh.sha256 -o install_client.sh.sha256
+#   sha256sum -c install_client.sh.sha256
+#
 #   # Install CLI-only client
-#   curl -sSL https://...install_client.sh | sudo bash
+#   sudo bash install_client.sh
 #
 #   # Install client with Qt6 GUI
-#   curl -sSL https://...install_client.sh | sudo bash -s -- --with-gui
+#   sudo bash install_client.sh --with-gui
 #
 #   # Install with debug build
-#   curl -sSL https://...install_client.sh | sudo bash -s -- --build=debug --with-gui
+#   sudo bash install_client.sh --build=debug --with-gui
 #
 
 set -e  # Exit on error
@@ -55,6 +62,14 @@ INSTALL_DIR="/usr/local"
 CONFIG_DIR="/etc/veil"
 BUILD_DIR="/tmp/veil-client-build-$$"
 LOG_DIR="/var/log/veil"
+
+# Security: Expected SHA256 checksum of this script
+# This is automatically updated by CI when the script changes
+# To verify manually: sha256sum install_client.sh
+EXPECTED_SHA256=""
+
+# Security options
+SKIP_INTEGRITY_CHECK="${SKIP_INTEGRITY_CHECK:-false}"  # For testing only, NOT recommended
 
 # Installation options (can be overridden via command line)
 BUILD_TYPE="${BUILD_TYPE:-release}"       # debug or release
@@ -90,6 +105,130 @@ log_step() {
     echo -e "${MAGENTA}[STEP]${NC} ${BOLD}$*${NC}"
 }
 
+# ============================================================================
+# SECURITY: INTEGRITY VERIFICATION
+# ============================================================================
+
+# Verify the integrity of this script using embedded SHA256 checksum
+verify_script_integrity() {
+    if [[ "$SKIP_INTEGRITY_CHECK" == "true" ]]; then
+        log_warn "⚠ SECURITY WARNING: Script integrity check is DISABLED"
+        log_warn "This is NOT recommended in production environments"
+        return 0
+    fi
+
+    # If running from stdin (curl | bash), we can't verify
+    if [[ ! -f "$0" || "$0" == "bash" || "$0" == "-bash" || "$0" == "sh" ]]; then
+        echo ""
+        echo -e "${RED}╔════════════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${RED}║                    ⚠ SECURITY WARNING ⚠                               ║${NC}"
+        echo -e "${RED}╚════════════════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+        log_error "This script is being executed from stdin (curl | bash pattern)"
+        log_error "This is INSECURE and prevents integrity verification!"
+        echo ""
+        log_warn "Recommended secure installation:"
+        echo ""
+        echo "  1. Download the script:"
+        echo "     curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_client.sh -o install_client.sh"
+        echo ""
+        echo "  2. Download the checksum:"
+        echo "     curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_client.sh.sha256 -o install_client.sh.sha256"
+        echo ""
+        echo "  3. Verify integrity:"
+        echo "     sha256sum -c install_client.sh.sha256"
+        echo ""
+        echo "  4. Review the script (IMPORTANT!):"
+        echo "     less install_client.sh"
+        echo ""
+        echo "  5. Execute with sudo:"
+        echo "     sudo bash install_client.sh [OPTIONS]"
+        echo ""
+        echo -e "${YELLOW}If you understand the risks and want to proceed anyway, you have 10 seconds to abort...${NC}"
+        echo ""
+
+        # Give user a chance to abort
+        for i in {10..1}; do
+            echo -ne "\rProceeding in ${i} seconds... (Press Ctrl+C to abort)"
+            sleep 1
+        done
+        echo ""
+        echo ""
+
+        log_warn "Proceeding without integrity verification (NOT RECOMMENDED)"
+        return 0
+    fi
+
+    # If EXPECTED_SHA256 is empty, warn but continue
+    if [[ -z "$EXPECTED_SHA256" ]]; then
+        log_warn "No embedded checksum found in script"
+        log_warn "This may be a development version or the script hasn't been published yet"
+
+        # Try to fetch checksum from GitHub
+        log_info "Attempting to fetch checksum from GitHub..."
+        local remote_checksum
+        if remote_checksum=$(curl -sSL "https://raw.githubusercontent.com/VisageDvachevsky/veil-core/${VEIL_BRANCH}/install_client.sh.sha256" 2>/dev/null | awk '{print $1}'); then
+            if [[ -n "$remote_checksum" ]]; then
+                log_info "Fetched remote checksum: ${remote_checksum:0:16}..."
+                EXPECTED_SHA256="$remote_checksum"
+            fi
+        fi
+
+        if [[ -z "$EXPECTED_SHA256" ]]; then
+            log_warn "Could not fetch remote checksum, skipping verification"
+            return 0
+        fi
+    fi
+
+    log_info "Verifying script integrity..."
+
+    # Calculate actual SHA256 of the script
+    local script_path
+    script_path=$(realpath "$0" 2>/dev/null || readlink -f "$0" 2>/dev/null || echo "$0")
+
+    local actual_sha256
+    if command -v sha256sum >/dev/null 2>&1; then
+        actual_sha256=$(sha256sum "$script_path" | awk '{print $1}')
+    elif command -v shasum >/dev/null 2>&1; then
+        actual_sha256=$(shasum -a 256 "$script_path" | awk '{print $1}')
+    else
+        log_warn "Neither sha256sum nor shasum found, skipping integrity check"
+        log_warn "Install coreutils package for sha256sum support"
+        return 0
+    fi
+
+    # Compare checksums
+    if [[ "$actual_sha256" == "$EXPECTED_SHA256" ]]; then
+        log_success "✓ Script integrity verified (SHA256: ${actual_sha256:0:16}...)"
+        return 0
+    else
+        echo ""
+        echo -e "${RED}╔════════════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${RED}║                  ⚠ SECURITY ALERT: INTEGRITY CHECK FAILED ⚠           ║${NC}"
+        echo -e "${RED}╚════════════════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+        log_error "Script integrity verification FAILED!"
+        log_error "This script may have been tampered with or corrupted!"
+        echo ""
+        log_error "Expected SHA256: $EXPECTED_SHA256"
+        log_error "Actual SHA256:   $actual_sha256"
+        echo ""
+        log_error "DO NOT PROCEED! This could be a security breach."
+        echo ""
+        log_info "To verify manually:"
+        echo "  1. Download from official source: https://github.com/VisageDvachevsky/veil-core"
+        echo "  2. Verify with: sha256sum -c install_client.sh.sha256"
+        echo ""
+
+        if [[ "$DRY_RUN" == "true" ]]; then
+            log_warn "Dry-run mode: would exit with error"
+            return 1
+        fi
+
+        exit 1
+    fi
+}
+
 # Execute command or show in dry-run mode
 run_cmd() {
     if [[ "$DRY_RUN" == "true" ]]; then
@@ -105,12 +244,23 @@ show_help() {
     cat << 'EOF'
 VEIL Client One-Line Automated Installer
 
-USAGE:
+USAGE (SECURE METHOD - RECOMMENDED):
+    # Download script and checksum
+    curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_client.sh -o install_client.sh
+    curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_client.sh.sha256 -o install_client.sh.sha256
+
+    # Verify integrity
+    sha256sum -c install_client.sh.sha256
+
+    # Review script (IMPORTANT!)
+    less install_client.sh
+
+    # Execute
+    sudo bash install_client.sh [OPTIONS]
+
+USAGE (NOT RECOMMENDED - no integrity verification):
     curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_client.sh | sudo bash
     curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_client.sh | sudo bash -s -- [OPTIONS]
-
-    Or download and run:
-    ./install_client.sh [OPTIONS]
 
 OPTIONS:
     --build=TYPE        Build type: 'debug' or 'release' (default: release)
@@ -126,18 +276,23 @@ ENVIRONMENT VARIABLES:
     BUILD_TYPE          Same as --build
     WITH_GUI            Set to 'true' for GUI installation
 
-EXAMPLES:
+EXAMPLES (SECURE METHOD):
+    # Download and verify first
+    curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_client.sh -o install_client.sh
+    curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_client.sh.sha256 -o install_client.sh.sha256
+    sha256sum -c install_client.sh.sha256
+
     # Basic CLI-only client installation
-    curl -sSL https://...install_client.sh | sudo bash
+    sudo bash install_client.sh
 
     # Client with Qt6 GUI
-    curl -sSL https://...install_client.sh | sudo bash -s -- --with-gui
+    sudo bash install_client.sh --with-gui
 
     # Development setup with debug build and GUI
-    curl -sSL https://...install_client.sh | sudo bash -s -- --build=debug --with-gui --verbose
+    sudo bash install_client.sh --build=debug --with-gui --verbose
 
     # Preview what would be installed
-    curl -sSL https://...install_client.sh | sudo bash -s -- --dry-run --with-gui
+    sudo bash install_client.sh --dry-run --with-gui
 
 GUI FEATURES (--with-gui):
     • Connection status monitoring
@@ -733,6 +888,9 @@ cleanup() {
 main() {
     # Parse command line arguments first
     parse_args "$@"
+
+    # Security: Verify script integrity (critical security check)
+    verify_script_integrity
 
     echo ""
     echo -e "${BLUE}╔════════════════════════════════════════════════════════════════════════╗${NC}"

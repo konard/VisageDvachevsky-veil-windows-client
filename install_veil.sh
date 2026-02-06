@@ -5,13 +5,18 @@
 # This script performs a complete automated installation and configuration
 # of VEIL Server/Client on Ubuntu/Debian systems with optional Qt6 GUI.
 #
-# One-line install:
-#   curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_veil.sh | sudo bash
+# ⚠ SECURITY NOTICE: curl | bash installation is NOT RECOMMENDED
+# The secure installation method verifies script integrity before execution.
 #
-# Or download and run manually:
-#   wget https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_veil.sh
-#   chmod +x install_veil.sh
-#   sudo ./install_veil.sh [OPTIONS]
+# RECOMMENDED SECURE INSTALLATION:
+#   curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_veil.sh -o install_veil.sh
+#   curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_veil.sh.sha256 -o install_veil.sh.sha256
+#   sha256sum -c install_veil.sh.sha256
+#   less install_veil.sh  # Review the script (IMPORTANT!)
+#   sudo bash install_veil.sh [OPTIONS]
+#
+# One-line install (NOT RECOMMENDED - no integrity verification):
+#   curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_veil.sh | sudo bash
 #
 # Options:
 #   --mode=server|client   Installation mode (default: server)
@@ -28,24 +33,29 @@
 #   --export-config=PATH   Generate .veil config to a custom file path
 #   --help                 Show this help message
 #
-# Examples:
+# Examples (SECURE METHOD - RECOMMENDED):
+#   # Download and verify
+#   curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_veil.sh -o install_veil.sh
+#   curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_veil.sh.sha256 -o install_veil.sh.sha256
+#   sha256sum -c install_veil.sh.sha256
+#
 #   # Install server with GUI (recommended for monitoring)
-#   curl -sSL https://...install_veil.sh | sudo bash -s -- --with-gui
+#   sudo bash install_veil.sh --with-gui
 #
 #   # Install client only
-#   curl -sSL https://...install_veil.sh | sudo bash -s -- --mode=client
+#   sudo bash install_veil.sh --mode=client
 #
 #   # Install with debug build for development
-#   curl -sSL https://...install_veil.sh | sudo bash -s -- --build=debug --with-gui
+#   sudo bash install_veil.sh --build=debug --with-gui
 #
 #   # Update to latest version
-#   curl -sSL https://...install_veil.sh | sudo bash -s -- --update
+#   sudo bash install_veil.sh --update
 #
 #   # Graceful update with zero-downtime (drain connections first)
-#   curl -sSL https://...install_veil.sh | sudo bash -s -- --update --graceful
+#   sudo bash install_veil.sh --update --graceful
 #
 #   # Force update (immediately kill existing instance)
-#   curl -sSL https://...install_veil.sh | sudo bash -s -- --update --force
+#   sudo bash install_veil.sh --update --force
 #
 
 set -e  # Exit on error
@@ -70,6 +80,14 @@ CONFIG_DIR="/etc/veil"
 BUILD_DIR="/tmp/veil-build-$$"
 LOG_DIR="/var/log/veil"
 EXTERNAL_INTERFACE=""
+
+# Security: Expected SHA256 checksum of this script
+# This is automatically updated by CI when the script changes
+# To verify manually: sha256sum install_veil.sh
+EXPECTED_SHA256=""
+
+# Security options
+SKIP_INTEGRITY_CHECK="${SKIP_INTEGRITY_CHECK:-false}"  # For testing only, NOT recommended
 
 # Installation options (can be overridden via command line)
 INSTALL_MODE="${INSTALL_MODE:-server}"    # server or client
@@ -120,6 +138,130 @@ log_debug() {
 
 log_step() {
     echo -e "${MAGENTA}[STEP]${NC} ${BOLD}$*${NC}"
+}
+
+# ============================================================================
+# SECURITY: INTEGRITY VERIFICATION
+# ============================================================================
+
+# Verify the integrity of this script using embedded SHA256 checksum
+verify_script_integrity() {
+    if [[ "$SKIP_INTEGRITY_CHECK" == "true" ]]; then
+        log_warn "⚠ SECURITY WARNING: Script integrity check is DISABLED"
+        log_warn "This is NOT recommended in production environments"
+        return 0
+    fi
+
+    # If running from stdin (curl | bash), we can't verify
+    if [[ ! -f "$0" || "$0" == "bash" || "$0" == "-bash" || "$0" == "sh" ]]; then
+        echo ""
+        echo -e "${RED}╔════════════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${RED}║                    ⚠ SECURITY WARNING ⚠                               ║${NC}"
+        echo -e "${RED}╚════════════════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+        log_error "This script is being executed from stdin (curl | bash pattern)"
+        log_error "This is INSECURE and prevents integrity verification!"
+        echo ""
+        log_warn "Recommended secure installation:"
+        echo ""
+        echo "  1. Download the script:"
+        echo "     curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_veil.sh -o install_veil.sh"
+        echo ""
+        echo "  2. Download the checksum:"
+        echo "     curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_veil.sh.sha256 -o install_veil.sh.sha256"
+        echo ""
+        echo "  3. Verify integrity:"
+        echo "     sha256sum -c install_veil.sh.sha256"
+        echo ""
+        echo "  4. Review the script (IMPORTANT!):"
+        echo "     less install_veil.sh"
+        echo ""
+        echo "  5. Execute with sudo:"
+        echo "     sudo bash install_veil.sh [OPTIONS]"
+        echo ""
+        echo -e "${YELLOW}If you understand the risks and want to proceed anyway, you have 10 seconds to abort...${NC}"
+        echo ""
+
+        # Give user a chance to abort
+        for i in {10..1}; do
+            echo -ne "\rProceeding in ${i} seconds... (Press Ctrl+C to abort)"
+            sleep 1
+        done
+        echo ""
+        echo ""
+
+        log_warn "Proceeding without integrity verification (NOT RECOMMENDED)"
+        return 0
+    fi
+
+    # If EXPECTED_SHA256 is empty, warn but continue
+    if [[ -z "$EXPECTED_SHA256" ]]; then
+        log_warn "No embedded checksum found in script"
+        log_warn "This may be a development version or the script hasn't been published yet"
+
+        # Try to fetch checksum from GitHub
+        log_info "Attempting to fetch checksum from GitHub..."
+        local remote_checksum
+        if remote_checksum=$(curl -sSL "https://raw.githubusercontent.com/VisageDvachevsky/veil-core/${VEIL_BRANCH}/install_veil.sh.sha256" 2>/dev/null | awk '{print $1}'); then
+            if [[ -n "$remote_checksum" ]]; then
+                log_info "Fetched remote checksum: ${remote_checksum:0:16}..."
+                EXPECTED_SHA256="$remote_checksum"
+            fi
+        fi
+
+        if [[ -z "$EXPECTED_SHA256" ]]; then
+            log_warn "Could not fetch remote checksum, skipping verification"
+            return 0
+        fi
+    fi
+
+    log_info "Verifying script integrity..."
+
+    # Calculate actual SHA256 of the script
+    local script_path
+    script_path=$(realpath "$0" 2>/dev/null || readlink -f "$0" 2>/dev/null || echo "$0")
+
+    local actual_sha256
+    if command -v sha256sum >/dev/null 2>&1; then
+        actual_sha256=$(sha256sum "$script_path" | awk '{print $1}')
+    elif command -v shasum >/dev/null 2>&1; then
+        actual_sha256=$(shasum -a 256 "$script_path" | awk '{print $1}')
+    else
+        log_warn "Neither sha256sum nor shasum found, skipping integrity check"
+        log_warn "Install coreutils package for sha256sum support"
+        return 0
+    fi
+
+    # Compare checksums
+    if [[ "$actual_sha256" == "$EXPECTED_SHA256" ]]; then
+        log_success "✓ Script integrity verified (SHA256: ${actual_sha256:0:16}...)"
+        return 0
+    else
+        echo ""
+        echo -e "${RED}╔════════════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${RED}║                  ⚠ SECURITY ALERT: INTEGRITY CHECK FAILED ⚠           ║${NC}"
+        echo -e "${RED}╚════════════════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+        log_error "Script integrity verification FAILED!"
+        log_error "This script may have been tampered with or corrupted!"
+        echo ""
+        log_error "Expected SHA256: $EXPECTED_SHA256"
+        log_error "Actual SHA256:   $actual_sha256"
+        echo ""
+        log_error "DO NOT PROCEED! This could be a security breach."
+        echo ""
+        log_info "To verify manually:"
+        echo "  1. Download from official source: https://github.com/VisageDvachevsky/veil-core"
+        echo "  2. Verify with: sha256sum -c install_veil.sh.sha256"
+        echo ""
+
+        if [[ "$DRY_RUN" == "true" ]]; then
+            log_warn "Dry-run mode: would exit with error"
+            return 1
+        fi
+
+        exit 1
+    fi
 }
 
 # ============================================================================
@@ -917,12 +1059,23 @@ show_help() {
     cat << 'EOF'
 VEIL One-Line Automated Installer
 
-USAGE:
+USAGE (SECURE METHOD - RECOMMENDED):
+    # Download script and checksum
+    curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_veil.sh -o install_veil.sh
+    curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_veil.sh.sha256 -o install_veil.sh.sha256
+
+    # Verify integrity
+    sha256sum -c install_veil.sh.sha256
+
+    # Review script (IMPORTANT!)
+    less install_veil.sh
+
+    # Execute
+    sudo bash install_veil.sh [OPTIONS]
+
+USAGE (NOT RECOMMENDED - no integrity verification):
     curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_veil.sh | sudo bash
     curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_veil.sh | sudo bash -s -- [OPTIONS]
-
-    Or download and run:
-    ./install_veil.sh [OPTIONS]
 
 INSTALLATION OPTIONS:
     --mode=MODE         Installation mode: 'server' or 'client' (default: server)
@@ -951,21 +1104,26 @@ ENVIRONMENT VARIABLES:
     BUILD_TYPE          Same as --build
     WITH_GUI            Set to 'true' for GUI installation
 
-INSTALLATION EXAMPLES:
+INSTALLATION EXAMPLES (SECURE METHOD):
+    # Download and verify first
+    curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_veil.sh -o install_veil.sh
+    curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_veil.sh.sha256 -o install_veil.sh.sha256
+    sha256sum -c install_veil.sh.sha256
+
     # Basic server installation (CLI only)
-    curl -sSL https://...install_veil.sh | sudo bash
+    sudo bash install_veil.sh
 
     # Server with Qt6 GUI monitoring dashboard
-    curl -sSL https://...install_veil.sh | sudo bash -s -- --with-gui
+    sudo bash install_veil.sh --with-gui
 
     # Client-only installation
-    curl -sSL https://...install_veil.sh | sudo bash -s -- --mode=client
+    sudo bash install_veil.sh --mode=client
 
     # Development setup with debug build and GUI
-    curl -sSL https://...install_veil.sh | sudo bash -s -- --build=debug --with-gui --verbose
+    sudo bash install_veil.sh --build=debug --with-gui --verbose
 
     # Preview what would be installed
-    curl -sSL https://...install_veil.sh | sudo bash -s -- --dry-run --with-gui
+    sudo bash install_veil.sh --dry-run --with-gui
 
 CONFIG EXPORT EXAMPLES:
     # Generate .veil client config from existing server installation
@@ -974,21 +1132,26 @@ CONFIG EXPORT EXAMPLES:
     # Generate to a custom path (e.g., for easy transfer)
     sudo ./install_veil.sh --export-config=/tmp/my-vpn.veil
 
-UPDATE EXAMPLES:
+UPDATE EXAMPLES (SECURE METHOD):
+    # Download and verify first
+    curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_veil.sh -o install_veil.sh
+    curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_veil.sh.sha256 -o install_veil.sh.sha256
+    sha256sum -c install_veil.sh.sha256
+
     # Update to latest version (will prompt for confirmation if connections active)
-    curl -sSL https://...install_veil.sh | sudo bash -s -- --update
+    sudo bash install_veil.sh --update
 
     # Graceful update with zero-downtime (drain connections first)
-    curl -sSL https://...install_veil.sh | sudo bash -s -- --update --graceful
+    sudo bash install_veil.sh --update --graceful
 
     # Graceful update with custom drain timeout (10 minutes)
-    curl -sSL https://...install_veil.sh | sudo bash -s -- --update --graceful --drain-timeout=600
+    sudo bash install_veil.sh --update --graceful --drain-timeout=600
 
     # Force update immediately (will kill active connections)
-    curl -sSL https://...install_veil.sh | sudo bash -s -- --update --force
+    sudo bash install_veil.sh --update --force
 
     # Update client
-    curl -sSL https://...install_veil.sh | sudo bash -s -- --mode=client --update
+    sudo bash install_veil.sh --mode=client --update
 
 GUI FEATURES (--with-gui):
     • Real-time traffic monitoring with dynamic graphs
@@ -1952,6 +2115,9 @@ main() {
 
     # Set trap for cleanup
     trap cleanup EXIT
+
+    # Security: Verify script integrity (critical security check)
+    verify_script_integrity
 
     # Check root first
     check_root

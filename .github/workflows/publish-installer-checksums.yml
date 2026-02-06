@@ -1,0 +1,45 @@
+name: Publish Installer Checksums
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'install_veil.sh'
+      - 'install_client.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate-checksums:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate SHA256 checksums
+        run: |
+          # Generate checksums for installer scripts
+          sha256sum install_veil.sh > install_veil.sh.sha256
+          sha256sum install_client.sh > install_client.sh.sha256
+
+          echo "Generated checksums:"
+          cat install_veil.sh.sha256
+          cat install_client.sh.sha256
+
+      - name: Commit and push checksums
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          git add install_veil.sh.sha256 install_client.sh.sha256
+
+          # Only commit if there are changes
+          if git diff --staged --quiet; then
+            echo "No checksum changes to commit"
+          else
+            git commit -m "chore: update installer checksums [skip ci]"
+            git push
+          fi
