@@ -92,23 +92,47 @@ void ReplayWindow::clear_bit(std::size_t index) {
   bits_[word] &= ~(std::uint64_t(1) << bit);
 }
 
-void ReplayWindow::unmark(std::uint64_t sequence) {
+bool ReplayWindow::unmark(std::uint64_t sequence) {
   if (!initialized_) {
-    return;
+    return false;
   }
 
   // Can only unmark sequences <= highest_
   if (sequence > highest_) {
-    return;
+    return false;
   }
 
   const std::uint64_t diff = highest_ - sequence;
   if (diff >= window_size_) {
-    return;
+    return false;
+  }
+
+  // Issue #233: Track failure count to prevent DoS via repeated unmark()
+  // If a sequence repeatedly fails decryption, an attacker could send the same
+  // malformed packet over and over, causing mark->unmark->mark cycles that consume CPU.
+  // We limit retries per sequence to prevent this attack.
+  auto it = failure_counts_.find(sequence);
+  if (it != failure_counts_.end()) {
+    // Sequence has failed before - check if it exceeded retry limit
+    if (it->second >= MAX_UNMARK_RETRIES) {
+      // Blacklisted: exceeded maximum retries, permanently reject
+      return false;
+    }
+    // Increment failure count
+    ++it->second;
+  } else {
+    // First failure for this sequence
+    failure_counts_[sequence] = 1;
+
+    // Prevent memory exhaustion: if tracking map grows too large, clean up old entries
+    if (failure_counts_.size() > MAX_FAILURE_TRACKING_SIZE) {
+      cleanup_failure_tracking();
+    }
   }
 
   const std::size_t index = static_cast<std::size_t>(diff);
   clear_bit(index);
+  return true;
 }
 
 void ReplayWindow::mask_tail() {
@@ -118,6 +142,29 @@ void ReplayWindow::mask_tail() {
   }
   const std::uint64_t mask = (std::uint64_t(1) << remainder) - 1;
   bits_.back() &= mask;
+}
+
+void ReplayWindow::cleanup_failure_tracking() {
+  // Issue #233: Remove sequences that are now outside the replay window
+  // This prevents unbounded memory growth while keeping relevant failure tracking.
+  // Strategy: Remove sequences that are more than window_size_ behind highest_.
+  // This is safe because such sequences would be rejected by mark_and_check anyway.
+
+  if (!initialized_ || failure_counts_.empty()) {
+    return;
+  }
+
+  // Calculate the minimum sequence number still within the window
+  const std::uint64_t min_valid_seq = highest_ > window_size_ ? highest_ - window_size_ : 0;
+
+  // Remove entries for sequences outside the window
+  for (auto it = failure_counts_.begin(); it != failure_counts_.end();) {
+    if (it->first < min_valid_seq) {
+      it = failure_counts_.erase(it);
+    } else {
+      ++it;
+    }
+  }
 }
 
 }  // namespace veil::session

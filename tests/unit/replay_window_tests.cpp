@@ -38,7 +38,8 @@ TEST(ReplayWindowTests, UnmarkAllowsRetransmission) {
   EXPECT_FALSE(window.mark_and_check(100));
 
   // Unmark (simulating decryption failure)
-  window.unmark(100);
+  // Issue #233: unmark() now returns true on success, false on blacklist
+  EXPECT_TRUE(window.unmark(100));
 
   // Should now be accepted again
   EXPECT_TRUE(window.mark_and_check(100));
@@ -63,8 +64,151 @@ TEST(ReplayWindowTests, UnmarkWithWindowAdvancement) {
   EXPECT_FALSE(window.mark_and_check(100));
 
   // Unmark and verify retransmission works
-  window.unmark(100);
+  EXPECT_TRUE(window.unmark(100));
   EXPECT_TRUE(window.mark_and_check(100));
+}
+
+// Issue #233: Test that unmark has a retry limit to prevent DoS
+TEST(ReplayWindowTests, UnmarkRetryLimitPreventsDos) {
+  session::ReplayWindow window(64);
+
+  // Mark sequence 100
+  EXPECT_TRUE(window.mark_and_check(100));
+
+  // First unmark - should succeed (failure count = 1)
+  EXPECT_TRUE(window.unmark(100));
+  EXPECT_TRUE(window.mark_and_check(100));
+
+  // Second unmark - should succeed (failure count = 2)
+  EXPECT_TRUE(window.unmark(100));
+  EXPECT_TRUE(window.mark_and_check(100));
+
+  // Third unmark - should succeed (failure count = 3)
+  EXPECT_TRUE(window.unmark(100));
+  EXPECT_TRUE(window.mark_and_check(100));
+
+  // Fourth unmark - should FAIL (failure count would exceed MAX_UNMARK_RETRIES=3)
+  // Sequence is now blacklisted
+  EXPECT_FALSE(window.unmark(100));
+
+  // Even after blacklist, the bit should still be set from the last mark_and_check
+  // So attempting to mark_and_check again should fail (already marked)
+  EXPECT_FALSE(window.mark_and_check(100));
+}
+
+// Issue #233: Test DoS scenario with repeated attack packets
+TEST(ReplayWindowTests, DosAttackMitigationWithRepeatedPackets) {
+  session::ReplayWindow window(1024);
+
+  const std::uint64_t attack_seq = 500;
+
+  // Simulate DoS attack: attacker sends same malformed packet repeatedly
+  // Each packet: mark -> fail decryption -> unmark -> repeat
+
+  // First 3 attempts should allow unmark (legitimate retransmission scenario)
+  for (int attempt = 1; attempt <= 3; ++attempt) {
+    EXPECT_TRUE(window.mark_and_check(attack_seq)) << "Attempt " << attempt << " mark failed";
+    EXPECT_TRUE(window.unmark(attack_seq)) << "Attempt " << attempt << " unmark failed";
+  }
+
+  // 4th attempt: mark succeeds, but unmark should fail (blacklisted)
+  EXPECT_TRUE(window.mark_and_check(attack_seq));
+  EXPECT_FALSE(window.unmark(attack_seq)) << "Should blacklist after 3 retries";
+
+  // Further attempts to unmark should continue to fail
+  EXPECT_FALSE(window.unmark(attack_seq));
+  EXPECT_FALSE(window.unmark(attack_seq));
+
+  // The sequence is still marked (not unmarked), so mark_and_check fails
+  EXPECT_FALSE(window.mark_and_check(attack_seq));
+}
+
+// Issue #233: Test that failure tracking cleans up old sequences
+TEST(ReplayWindowTests, FailureTrackingCleanupPreventsMemoryLeak) {
+  session::ReplayWindow window(64);
+
+  // Fill window with sequences, each failing once
+  for (std::uint64_t seq = 100; seq < 200; ++seq) {
+    EXPECT_TRUE(window.mark_and_check(seq));
+    EXPECT_TRUE(window.unmark(seq));  // Failure count = 1
+  }
+
+  // Advance window far beyond initial sequences (200 sequences away)
+  // This should trigger cleanup of old failure tracking entries
+  EXPECT_TRUE(window.mark_and_check(400));
+
+  // Now sequences 100-335 are outside the window (400 - 64 = 336)
+  // Their failure counts should have been cleaned up
+
+  // Verify that sequence 100 (now outside window) cannot be unmarked
+  // because it's outside the window range, not because of failure count
+  EXPECT_FALSE(window.mark_and_check(100));  // Too old, outside window
+
+  // Verify sequences just within window (e.g., 350) still work normally
+  EXPECT_TRUE(window.mark_and_check(350));
+  EXPECT_TRUE(window.unmark(350));  // Should succeed (was already tracked, count = 1)
+  EXPECT_TRUE(window.mark_and_check(350));  // Should succeed after unmark
+}
+
+// Issue #233: Test mixed legitimate and attack traffic
+TEST(ReplayWindowTests, MixedLegitimateAndAttackTraffic) {
+  session::ReplayWindow window(128);
+
+  // Legitimate traffic: sequences 1000-1010
+  for (std::uint64_t seq = 1000; seq <= 1010; ++seq) {
+    EXPECT_TRUE(window.mark_and_check(seq));
+  }
+
+  // Attacker tries to exploit sequence 1005 (DoS attempt)
+  // First mark_and_check will fail (already marked), but unmark it first
+  EXPECT_FALSE(window.mark_and_check(1005));  // Already marked
+
+  // Attacker causes 3 decryption failures
+  for (int i = 0; i < 3; ++i) {
+    EXPECT_TRUE(window.unmark(1005));
+    EXPECT_TRUE(window.mark_and_check(1005));
+  }
+
+  // 4th failure attempt - unmark should fail
+  EXPECT_FALSE(window.unmark(1005));
+
+  // Meanwhile, other legitimate sequences should work normally
+  EXPECT_TRUE(window.mark_and_check(1011));
+  EXPECT_TRUE(window.mark_and_check(1012));
+
+  // Even a single legitimate retransmission should work
+  EXPECT_TRUE(window.unmark(1011));
+  EXPECT_TRUE(window.mark_and_check(1011));
+}
+
+// Issue #233: Test unmark return value semantics
+TEST(ReplayWindowTests, UnmarkReturnValueSemantics) {
+  session::ReplayWindow window(64);
+
+  // unmark on uninitialized window returns false
+  EXPECT_FALSE(window.unmark(100));
+
+  // Initialize window
+  EXPECT_TRUE(window.mark_and_check(100));
+
+  // unmark for sequence > highest returns false
+  EXPECT_FALSE(window.unmark(200));
+
+  // unmark for sequence outside window returns false
+  EXPECT_TRUE(window.mark_and_check(200));  // highest = 200
+  EXPECT_FALSE(window.unmark(100));  // 200 - 100 = 100 > window_size(64)
+
+  // Valid unmark returns true
+  EXPECT_TRUE(window.mark_and_check(150));
+  EXPECT_TRUE(window.unmark(150));
+
+  // After blacklist, unmark returns false
+  for (int i = 0; i < 3; ++i) {
+    window.mark_and_check(160);
+    window.unmark(160);
+  }
+  window.mark_and_check(160);
+  EXPECT_FALSE(window.unmark(160));  // Blacklisted
 }
 
 TEST(SessionRotatorTests, RotatesAfterThresholds) {

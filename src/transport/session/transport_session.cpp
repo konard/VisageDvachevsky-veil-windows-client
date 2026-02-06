@@ -184,8 +184,12 @@ std::optional<std::vector<mux::MuxFrame>> TransportSession::decrypt_packet(
     // If decryption fails (e.g., due to wrong session keys after session rotation),
     // we should allow the server to retransmit this packet rather than permanently
     // rejecting it as a replay.
-    replay_window_.unmark(sequence);
-    LOG_DEBUG("  Unmarked sequence {} in replay window to allow retransmission", sequence);
+    // Issue #233: unmark() now returns false if the sequence exceeded retry limit (DoS protection)
+    if (!replay_window_.unmark(sequence)) {
+      LOG_DEBUG("  Sequence {} exceeded retry limit, blacklisted to prevent DoS", sequence);
+    } else {
+      LOG_DEBUG("  Unmarked sequence {} in replay window to allow retransmission", sequence);
+    }
 
     ++stats_.packets_dropped_decrypt;
     return std::nullopt;
@@ -629,7 +633,10 @@ std::optional<std::pair<mux::MuxFrameView, std::size_t>> TransportSession::decry
   const std::size_t max_plaintext_size = crypto::aead_plaintext_size(ciphertext_body.size());
   if (decrypt_buffer.size() < max_plaintext_size) {
     LOG_DEBUG("Zero-copy: Decrypt buffer too small: {} < {}", decrypt_buffer.size(), max_plaintext_size);
-    replay_window_.unmark(sequence);
+    // Issue #233: unmark() now returns false if sequence exceeded retry limit
+    if (!replay_window_.unmark(sequence)) {
+      LOG_DEBUG("Zero-copy: Sequence {} blacklisted (exceeded retry limit)", sequence);
+    }
     ++stats_.packets_dropped_decrypt;
     return std::nullopt;
   }
@@ -640,7 +647,10 @@ std::optional<std::pair<mux::MuxFrameView, std::size_t>> TransportSession::decry
 
   if (plaintext_size == 0) {
     LOG_DEBUG("Zero-copy: Decryption failed: sequence={}", sequence);
-    replay_window_.unmark(sequence);
+    // Issue #233: unmark() now returns false if sequence exceeded retry limit
+    if (!replay_window_.unmark(sequence)) {
+      LOG_DEBUG("Zero-copy: Sequence {} blacklisted (exceeded retry limit)", sequence);
+    }
     ++stats_.packets_dropped_decrypt;
     return std::nullopt;
   }
