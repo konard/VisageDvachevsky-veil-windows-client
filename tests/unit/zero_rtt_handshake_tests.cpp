@@ -359,4 +359,216 @@ TEST(ZeroRttHandshakeTests, TicketIssuedAfterHandshakeContainsCorrectKeys) {
   EXPECT_EQ(payload->recv_key, resp->session.keys.recv_key);
 }
 
+// =============================================================================
+// 0-RTT Nonce Reuse Prevention Tests (Issue #221)
+// =============================================================================
+
+TEST(ZeroRttHandshakeTests, ResumedSessionHasFreshNonces) {
+  auto now = std::chrono::system_clock::now();
+  auto now_fn = [&]() { return now; };
+
+  // Step 1: Do a normal 1-RTT handshake to get session keys
+  handshake::HandshakeInitiator initiator(make_psk(), std::chrono::milliseconds(1000), now_fn);
+  handshake::HandshakeResponder responder(make_psk(), std::chrono::milliseconds(1000),
+                                          make_bucket(), now_fn);
+
+  const auto init_bytes = initiator.create_init();
+  auto resp = responder.handle_init(init_bytes);
+  ASSERT_TRUE(resp.has_value());
+
+  auto session = initiator.consume_response(resp->response);
+  ASSERT_TRUE(session.has_value());
+
+  // Step 2: Server issues a session ticket
+  auto ticket_manager = std::make_shared<handshake::SessionTicketManager>(
+      std::chrono::milliseconds(60000), now_fn);
+  auto ticket = ticket_manager->issue_ticket(session->keys);
+
+  // Step 3: Client reconnects with 0-RTT
+  handshake::ZeroRttInitiator zero_rtt_initiator(make_psk(), ticket, now_fn);
+  handshake::ZeroRttResponder zero_rtt_responder(make_psk(), ticket_manager,
+                                                  std::chrono::milliseconds(1000),
+                                                  make_bucket(), now_fn);
+
+  auto zero_rtt_init = zero_rtt_initiator.create_zero_rtt_init();
+  auto zero_rtt_result = zero_rtt_responder.handle_zero_rtt_init(zero_rtt_init);
+  ASSERT_TRUE(zero_rtt_result.has_value());
+  EXPECT_TRUE(zero_rtt_result->accepted);
+
+  auto zero_rtt_session = zero_rtt_initiator.consume_zero_rtt_response(zero_rtt_result->response);
+  ASSERT_TRUE(zero_rtt_session.has_value());
+
+  // Keys should be preserved (same encryption keys)
+  EXPECT_EQ(zero_rtt_session->keys.send_key, session->keys.send_key);
+  EXPECT_EQ(zero_rtt_session->keys.recv_key, session->keys.recv_key);
+
+  // CRITICAL (Issue #221): Nonces must be DIFFERENT from the original session
+  // to prevent nonce reuse in AEAD, which would break encryption security.
+  EXPECT_NE(zero_rtt_session->keys.send_nonce, session->keys.send_nonce)
+      << "Resumed session must use fresh send_nonce to prevent AEAD nonce reuse";
+  EXPECT_NE(zero_rtt_session->keys.recv_nonce, session->keys.recv_nonce)
+      << "Resumed session must use fresh recv_nonce to prevent AEAD nonce reuse";
+}
+
+TEST(ZeroRttHandshakeTests, ClientAndServerHaveMatchingFreshNonces) {
+  auto now = std::chrono::system_clock::now();
+  auto now_fn = [&]() { return now; };
+
+  // Complete a 1-RTT handshake
+  handshake::HandshakeInitiator initiator(make_psk(), std::chrono::milliseconds(1000), now_fn);
+  handshake::HandshakeResponder responder(make_psk(), std::chrono::milliseconds(1000),
+                                          make_bucket(), now_fn);
+
+  const auto init_bytes = initiator.create_init();
+  auto resp = responder.handle_init(init_bytes);
+  ASSERT_TRUE(resp.has_value());
+
+  auto session = initiator.consume_response(resp->response);
+  ASSERT_TRUE(session.has_value());
+
+  // Issue ticket and do 0-RTT
+  auto ticket_manager = std::make_shared<handshake::SessionTicketManager>(
+      std::chrono::milliseconds(60000), now_fn);
+  auto ticket = ticket_manager->issue_ticket(session->keys);
+
+  handshake::ZeroRttInitiator zero_rtt_initiator(make_psk(), ticket, now_fn);
+  handshake::ZeroRttResponder zero_rtt_responder(make_psk(), ticket_manager,
+                                                  std::chrono::milliseconds(1000),
+                                                  make_bucket(), now_fn);
+
+  auto zero_rtt_init = zero_rtt_initiator.create_zero_rtt_init();
+  auto zero_rtt_result = zero_rtt_responder.handle_zero_rtt_init(zero_rtt_init);
+  ASSERT_TRUE(zero_rtt_result.has_value());
+  ASSERT_TRUE(zero_rtt_result->accepted);
+
+  auto client_session = zero_rtt_initiator.consume_zero_rtt_response(zero_rtt_result->response);
+  ASSERT_TRUE(client_session.has_value());
+
+  const auto& server_session = zero_rtt_result->session;
+
+  // Client and server must agree on the fresh nonces for communication to work
+  EXPECT_EQ(client_session->keys.send_nonce, server_session.keys.send_nonce)
+      << "Client and server must derive identical send_nonce";
+  EXPECT_EQ(client_session->keys.recv_nonce, server_session.keys.recv_nonce)
+      << "Client and server must derive identical recv_nonce";
+}
+
+TEST(ZeroRttHandshakeTests, TwoResumptionsProduceDifferentNonces) {
+  auto now = std::chrono::system_clock::now();
+  auto now_fn = [&]() { return now; };
+
+  // Complete a 1-RTT handshake
+  handshake::HandshakeInitiator initiator(make_psk(), std::chrono::milliseconds(1000), now_fn);
+  handshake::HandshakeResponder responder(make_psk(), std::chrono::milliseconds(1000),
+                                          make_bucket(), now_fn);
+
+  const auto init_bytes = initiator.create_init();
+  auto resp = responder.handle_init(init_bytes);
+  ASSERT_TRUE(resp.has_value());
+
+  auto session = initiator.consume_response(resp->response);
+  ASSERT_TRUE(session.has_value());
+
+  auto ticket_manager = std::make_shared<handshake::SessionTicketManager>(
+      std::chrono::milliseconds(60000), now_fn);
+  auto ticket = ticket_manager->issue_ticket(session->keys);
+
+  // First 0-RTT resumption
+  handshake::ZeroRttInitiator initiator1(make_psk(), ticket, now_fn);
+  handshake::ZeroRttResponder responder1(make_psk(), ticket_manager,
+                                          std::chrono::milliseconds(1000),
+                                          make_bucket(), now_fn);
+
+  auto init1 = initiator1.create_zero_rtt_init();
+  auto result1 = responder1.handle_zero_rtt_init(init1);
+  ASSERT_TRUE(result1.has_value());
+  ASSERT_TRUE(result1->accepted);
+
+  auto session1 = initiator1.consume_zero_rtt_response(result1->response);
+  ASSERT_TRUE(session1.has_value());
+
+  // Second 0-RTT resumption (new ticket from a new handshake to avoid anti-replay)
+  handshake::HandshakeInitiator initiator2a(make_psk(), std::chrono::milliseconds(1000), now_fn);
+  handshake::HandshakeResponder responder2a(make_psk(), std::chrono::milliseconds(1000),
+                                            make_bucket(), now_fn);
+
+  const auto init2a = initiator2a.create_init();
+  auto resp2a = responder2a.handle_init(init2a);
+  ASSERT_TRUE(resp2a.has_value());
+  auto session2a = initiator2a.consume_response(resp2a->response);
+  ASSERT_TRUE(session2a.has_value());
+
+  auto ticket2 = ticket_manager->issue_ticket(session2a->keys);
+
+  handshake::ZeroRttInitiator initiator2(make_psk(), ticket2, now_fn);
+  handshake::ZeroRttResponder responder2(make_psk(), ticket_manager,
+                                          std::chrono::milliseconds(1000),
+                                          make_bucket(), now_fn);
+
+  auto init2 = initiator2.create_zero_rtt_init();
+  auto result2 = responder2.handle_zero_rtt_init(init2);
+  ASSERT_TRUE(result2.has_value());
+  ASSERT_TRUE(result2->accepted);
+
+  auto session2 = initiator2.consume_zero_rtt_response(result2->response);
+  ASSERT_TRUE(session2.has_value());
+
+  // Different session_ids produce different nonces, even with the same base keys
+  // (This is virtually guaranteed since session_id is random, but we verify it)
+  if (session1->session_id != session2->session_id) {
+    EXPECT_NE(session1->keys.send_nonce, session2->keys.send_nonce)
+        << "Different resumptions must produce different nonces";
+    EXPECT_NE(session1->keys.recv_nonce, session2->keys.recv_nonce)
+        << "Different resumptions must produce different nonces";
+  }
+}
+
+// =============================================================================
+// derive_resumed_nonces Unit Tests (Issue #221)
+// =============================================================================
+
+TEST(ZeroRttHandshakeTests, DeriveResumedNoncesProducesDifferentNonces) {
+  std::array<std::uint8_t, crypto::kNonceLen> send_nonce{};
+  std::array<std::uint8_t, crypto::kNonceLen> recv_nonce{};
+  send_nonce.fill(0x11);
+  recv_nonce.fill(0x22);
+
+  auto result = crypto::derive_resumed_nonces(send_nonce, recv_nonce, 12345);
+
+  // Fresh nonces must differ from the originals
+  EXPECT_NE(result.send_nonce, send_nonce);
+  EXPECT_NE(result.recv_nonce, recv_nonce);
+
+  // send and recv nonces should differ from each other
+  EXPECT_NE(result.send_nonce, result.recv_nonce);
+}
+
+TEST(ZeroRttHandshakeTests, DeriveResumedNoncesIsDeterministic) {
+  std::array<std::uint8_t, crypto::kNonceLen> send_nonce{};
+  std::array<std::uint8_t, crypto::kNonceLen> recv_nonce{};
+  send_nonce.fill(0x11);
+  recv_nonce.fill(0x22);
+
+  auto result1 = crypto::derive_resumed_nonces(send_nonce, recv_nonce, 12345);
+  auto result2 = crypto::derive_resumed_nonces(send_nonce, recv_nonce, 12345);
+
+  // Same inputs must produce same outputs (client/server agreement)
+  EXPECT_EQ(result1.send_nonce, result2.send_nonce);
+  EXPECT_EQ(result1.recv_nonce, result2.recv_nonce);
+}
+
+TEST(ZeroRttHandshakeTests, DeriveResumedNoncesDiffersWithSessionId) {
+  std::array<std::uint8_t, crypto::kNonceLen> send_nonce{};
+  std::array<std::uint8_t, crypto::kNonceLen> recv_nonce{};
+  send_nonce.fill(0x11);
+  recv_nonce.fill(0x22);
+
+  auto result1 = crypto::derive_resumed_nonces(send_nonce, recv_nonce, 100);
+  auto result2 = crypto::derive_resumed_nonces(send_nonce, recv_nonce, 200);
+
+  // Different session_ids must produce different nonces
+  EXPECT_NE(result1.send_nonce, result2.send_nonce);
+  EXPECT_NE(result1.recv_nonce, result2.recv_nonce);
+}
+
 }  // namespace veil::tests

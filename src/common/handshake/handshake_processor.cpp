@@ -893,12 +893,25 @@ std::optional<HandshakeSession> ZeroRttInitiator::consume_zero_rtt_response(
     return std::nullopt;
   }
 
-  // 0-RTT accepted: use cached session keys from the ticket
+  // 0-RTT accepted: use cached session keys with fresh nonces (Issue #221).
+  // Derive fresh nonces from the cached nonces + session_id to prevent
+  // nonce reuse across original and resumed sessions. Both client and server
+  // compute the same nonces deterministically via HKDF.
+  auto fresh_nonces = crypto::derive_resumed_nonces(
+      ticket_.cached_keys.send_nonce, ticket_.cached_keys.recv_nonce, session_id);
+
+  crypto::SessionKeys resumed_keys{
+      .send_key = ticket_.cached_keys.send_key,
+      .recv_key = ticket_.cached_keys.recv_key,
+      .send_nonce = fresh_nonces.send_nonce,
+      .recv_nonce = fresh_nonces.recv_nonce,
+  };
+
   // The ephemeral keys are not used for key derivation in 0-RTT
   // (that's the trade-off for reduced latency)
   HandshakeSession session{
       .session_id = session_id,
-      .keys = ticket_.cached_keys,
+      .keys = resumed_keys,
       .initiator_ephemeral = ephemeral_.public_key,
       .responder_ephemeral = {},  // No responder ephemeral in 0-RTT
       .client_id = ticket_.client_id,
@@ -1120,14 +1133,18 @@ std::optional<ZeroRttResponder::Result> ZeroRttResponder::handle_zero_rtt_init(
   // Ticket valid: accept 0-RTT
   const auto session_id = veil::crypto::random_uint64();
 
-  // Reconstruct session keys from ticket payload
-  // Note: The ticket stores keys from server's perspective (sent as responder),
-  // so we use them directly
+  // Derive fresh nonces to prevent nonce reuse across sessions (Issue #221).
+  // The cached nonces from the ticket would collide with the original session's
+  // nonces when the packet counter resets to 0. Using HKDF with the new
+  // session_id as domain separation produces unique nonces for each resumption.
+  auto fresh_nonces = crypto::derive_resumed_nonces(
+      ticket_payload->send_nonce, ticket_payload->recv_nonce, session_id);
+
   crypto::SessionKeys session_keys{
       .send_key = ticket_payload->send_key,
       .recv_key = ticket_payload->recv_key,
-      .send_nonce = ticket_payload->send_nonce,
-      .recv_nonce = ticket_payload->recv_nonce,
+      .send_nonce = fresh_nonces.send_nonce,
+      .recv_nonce = fresh_nonces.recv_nonce,
   };
 
   // Build accept HMAC payload
