@@ -15,7 +15,7 @@ namespace veil::gui {
 
 UpdateChecker::UpdateChecker(QObject* parent)
     : QObject(parent),
-      networkManager_(std::make_unique<QNetworkAccessManager>(this)) {
+      networkManager_(std::make_unique<QNetworkAccessManager>()) {
   connect(networkManager_.get(), &QNetworkAccessManager::finished,
           this, &UpdateChecker::onNetworkReply);
 
