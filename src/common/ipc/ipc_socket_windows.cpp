@@ -51,6 +51,19 @@ std::error_code last_error() {
   return std::error_code(static_cast<int>(GetLastError()), std::system_category());
 }
 
+// Creates a security descriptor that allows only authenticated users to access the pipe
+// This prevents unauthenticated or unprivileged processes from connecting
+// Returns: pointer to security descriptor that must be freed with LocalFree()
+PSECURITY_DESCRIPTOR create_pipe_security_descriptor() {
+  PSECURITY_DESCRIPTOR pSD = nullptr;
+  if (!ConvertStringSecurityDescriptorToSecurityDescriptorA(
+          "D:(A;;GA;;;AU)",  // Allow all access to authenticated users only
+          SDDL_REVISION_1, &pSD, nullptr)) {
+    return nullptr;
+  }
+  return pSD;
+}
+
 }  // namespace
 
 // ============================================================================
@@ -84,10 +97,8 @@ bool IpcServer::start(std::error_code& ec) {
   sa.bInheritHandle = FALSE;
 
   // Create a security descriptor that allows local authenticated users
-  PSECURITY_DESCRIPTOR pSD = nullptr;
-  if (!ConvertStringSecurityDescriptorToSecurityDescriptorA(
-          "D:(A;;GA;;;AU)",  // Allow all access to authenticated users
-          SDDL_REVISION_1, &pSD, nullptr)) {
+  PSECURITY_DESCRIPTOR pSD = create_pipe_security_descriptor();
+  if (!pSD) {
     ec = last_error();
     LOG_ERROR("Failed to create security descriptor: {}", ec.message());
     return false;
@@ -220,11 +231,12 @@ void IpcServer::accept_connection(std::error_code& ec) {
     impl_->clients.push_back(impl_->pipe);
     LOG_DEBUG("Client connected to IPC server");
 
-    // Create a new pipe instance for the next client
+    // Create a new pipe instance for the next client with proper security
     SECURITY_ATTRIBUTES sa;
     sa.nLength = sizeof(SECURITY_ATTRIBUTES);
     sa.bInheritHandle = FALSE;
-    sa.lpSecurityDescriptor = nullptr;
+    PSECURITY_DESCRIPTOR pSD = create_pipe_security_descriptor();
+    sa.lpSecurityDescriptor = pSD;
 
     impl_->pipe = CreateNamedPipeA(
         socket_path_.c_str(),
@@ -235,6 +247,11 @@ void IpcServer::accept_connection(std::error_code& ec) {
         kPipeBufferSize,
         kDefaultTimeout,
         &sa);
+
+    // Free the security descriptor after pipe creation
+    if (pSD) {
+      LocalFree(pSD);
+    }
   } else if (error == ERROR_IO_PENDING) {
     // Check if connection completed
     DWORD wait_result = WaitForSingleObject(overlap.hEvent, 0);
@@ -242,11 +259,12 @@ void IpcServer::accept_connection(std::error_code& ec) {
       impl_->clients.push_back(impl_->pipe);
       LOG_DEBUG("Client connected to IPC server (async)");
 
-      // Create a new pipe instance
+      // Create a new pipe instance with proper security
       SECURITY_ATTRIBUTES sa;
       sa.nLength = sizeof(SECURITY_ATTRIBUTES);
       sa.bInheritHandle = FALSE;
-      sa.lpSecurityDescriptor = nullptr;
+      PSECURITY_DESCRIPTOR pSD = create_pipe_security_descriptor();
+      sa.lpSecurityDescriptor = pSD;
 
       impl_->pipe = CreateNamedPipeA(
           socket_path_.c_str(),
@@ -257,6 +275,11 @@ void IpcServer::accept_connection(std::error_code& ec) {
           kPipeBufferSize,
           kDefaultTimeout,
           &sa);
+
+      // Free the security descriptor after pipe creation
+      if (pSD) {
+        LocalFree(pSD);
+      }
     }
     CancelIo(impl_->pipe);
   }
