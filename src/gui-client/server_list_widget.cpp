@@ -11,6 +11,7 @@
 #include <QTcpSocket>
 #include <QTimer>
 #include <QElapsedTimer>
+#include <memory>
 
 #include "common/gui/theme.h"
 
@@ -680,11 +681,11 @@ void ServerListWidget::pingServerAsync(const QString& serverId) {
     if (widget != nullptr && widget->serverId() == serverId) {
       // Simple TCP connect latency test
       auto* socket = new QTcpSocket(this);
-      QElapsedTimer timer;
-      timer.start();
+      auto timer = std::make_shared<QElapsedTimer>();
+      timer->start();
 
-      connect(socket, &QTcpSocket::connected, [this, &timer, serverId, widget, socket]() {
-        int latency = static_cast<int>(timer.elapsed());
+      connect(socket, &QTcpSocket::connected, [this, timer, serverId, widget, socket]() {
+        int latency = static_cast<int>(timer->elapsed());
         serverManager_->updateLatency(serverId, latency);
         auto updatedServer = serverManager_->getServer(serverId);
         if (updatedServer.has_value()) {
