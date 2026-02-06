@@ -11,6 +11,7 @@
 #include <QTcpSocket>
 #include <QTimer>
 #include <QElapsedTimer>
+#include <QPointer>
 
 #include "common/gui/theme.h"
 
@@ -680,36 +681,40 @@ void ServerListWidget::pingServerAsync(const QString& serverId) {
     if (widget != nullptr && widget->serverId() == serverId) {
       // Simple TCP connect latency test
       auto* socket = new QTcpSocket(this);
+      auto socketGuard = QPointer<QTcpSocket>(socket);
       QElapsedTimer timer;
       timer.start();
 
-      connect(socket, &QTcpSocket::connected, [this, &timer, serverId, widget, socket]() {
+      connect(socket, &QTcpSocket::connected, [this, &timer, serverId, widget, socketGuard]() {
+        if (!socketGuard) return;
         int latency = static_cast<int>(timer.elapsed());
         serverManager_->updateLatency(serverId, latency);
         auto updatedServer = serverManager_->getServer(serverId);
         if (updatedServer.has_value()) {
           widget->updateServer(*updatedServer);
         }
-        socket->disconnectFromHost();
-        socket->deleteLater();
+        socketGuard->disconnectFromHost();
+        socketGuard->deleteLater();
       });
 
       connect(socket, QOverload<QAbstractSocket::SocketError>::of(&QAbstractSocket::errorOccurred),
-              [this, serverId, widget, socket](QAbstractSocket::SocketError) {
+              [this, serverId, widget, socketGuard](QAbstractSocket::SocketError) {
+        if (!socketGuard) return;
         serverManager_->updateLatency(serverId, -1);
         auto updatedServer = serverManager_->getServer(serverId);
         if (updatedServer.has_value()) {
           widget->updateServer(*updatedServer);
         }
-        socket->deleteLater();
+        socketGuard->deleteLater();
       });
 
       // Set timeout
-      QTimer::singleShot(5000, socket, [socket]() {
-        if (socket->state() == QAbstractSocket::ConnectingState ||
-            socket->state() == QAbstractSocket::HostLookupState) {
-          socket->abort();
-          socket->deleteLater();
+      QTimer::singleShot(5000, this, [socketGuard]() {
+        if (!socketGuard) return;
+        if (socketGuard->state() == QAbstractSocket::ConnectingState ||
+            socketGuard->state() == QAbstractSocket::HostLookupState) {
+          socketGuard->abort();
+          // Don't call deleteLater() here — the error handler will do it
         }
       });
 
