@@ -18,7 +18,10 @@
 #include <windows.h>
 #include <wininet.h>
 #include <shellapi.h>
+#include <wintrust.h>
+#include <softpub.h>
 #pragma comment(lib, "wininet.lib")
+#pragma comment(lib, "wintrust.lib")
 #else
 #include <curl/curl.h>
 #endif
@@ -399,6 +402,96 @@ static bool verify_sha256(const std::string& file_path,
 }
 
 // ============================================================================
+// Authenticode Signature Verification (Windows)
+// ============================================================================
+
+#ifdef _WIN32
+
+// Verify Authenticode signature of an executable file
+// Returns true if signature is valid and trusted
+static bool verify_authenticode_signature(const std::string& file_path,
+                                          std::string& error) {
+  LOG_DEBUG("Verifying Authenticode signature: {}", file_path);
+
+  // Convert to wide string for Windows API
+  std::wstring wide_path(file_path.begin(), file_path.end());
+
+  // Initialize WINTRUST_FILE_INFO structure
+  WINTRUST_FILE_INFO file_info = {};
+  file_info.cbStruct = sizeof(WINTRUST_FILE_INFO);
+  file_info.pcwszFilePath = wide_path.c_str();
+  file_info.hFile = nullptr;
+  file_info.pgKnownSubject = nullptr;
+
+  // Initialize WINTRUST_DATA structure
+  WINTRUST_DATA trust_data = {};
+  trust_data.cbStruct = sizeof(WINTRUST_DATA);
+  trust_data.dwUIChoice = WTD_UI_NONE;             // No UI
+  trust_data.fdwRevocationChecks = WTD_REVOKE_WHOLECHAIN;  // Check entire chain
+  trust_data.dwUnionChoice = WTD_CHOICE_FILE;
+  trust_data.pFile = &file_info;
+  trust_data.dwStateAction = WTD_STATEACTION_VERIFY;
+  trust_data.dwProvFlags = WTD_SAFER_FLAG;         // Use safer validation
+  trust_data.hWVTStateData = nullptr;
+
+  // WINTRUST_ACTION_GENERIC_VERIFY_V2 GUID
+  GUID action_id = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+
+  // Verify the signature
+  LONG result = WinVerifyTrust(nullptr, &action_id, &trust_data);
+
+  // Clean up state data
+  trust_data.dwStateAction = WTD_STATEACTION_CLOSE;
+  WinVerifyTrust(nullptr, &action_id, &trust_data);
+
+  // Check result
+  switch (result) {
+    case ERROR_SUCCESS:
+      LOG_INFO("Authenticode signature verified successfully: {}", file_path);
+      return true;
+
+    case TRUST_E_NOSIGNATURE: {
+      DWORD last_error = GetLastError();
+      if (last_error == TRUST_E_NOSIGNATURE ||
+          last_error == TRUST_E_SUBJECT_FORM_UNKNOWN ||
+          last_error == TRUST_E_PROVIDER_UNKNOWN) {
+        error = "File is not signed (no Authenticode signature found)";
+      } else {
+        error = "Signature verification failed: TRUST_E_NOSIGNATURE (0x" +
+                std::to_string(last_error) + ")";
+      }
+      break;
+    }
+
+    case TRUST_E_EXPLICIT_DISTRUST:
+      error = "Signature is present but explicitly distrusted by the user or administrator";
+      break;
+
+    case TRUST_E_SUBJECT_NOT_TRUSTED:
+      error = "Signature is present but not trusted (certificate chain validation failed)";
+      break;
+
+    case CRYPT_E_SECURITY_SETTINGS:
+      error = "Security settings prevent signature verification (may need administrator privileges)";
+      break;
+
+    case TRUST_E_BAD_DIGEST:
+      error = "Signature is present but file has been tampered with (hash mismatch)";
+      break;
+
+    default:
+      error = "Signature verification failed with code: 0x" +
+              std::to_string(static_cast<unsigned long>(result));
+      break;
+  }
+
+  LOG_ERROR("Authenticode verification failed: {}", error);
+  return false;
+}
+
+#endif  // _WIN32
+
+// ============================================================================
 // AutoUpdater Implementation
 // ============================================================================
 
@@ -610,6 +703,19 @@ void AutoUpdater::download_update(const ReleaseInfo& release,
         }
       }
 
+#ifdef _WIN32
+      // Verify Authenticode signature on Windows
+      if (success) {
+        // NOLINTNEXTLINE(bugprone-lambda-function-name)
+        LOG_INFO("Verifying Authenticode signature...");
+        if (!verify_authenticode_signature(download_path, error)) {
+          // NOLINTNEXTLINE(bugprone-lambda-function-name)
+          LOG_ERROR("Authenticode signature verification failed: {}", error);
+          success = false;
+        }
+      }
+#endif
+
       if (complete_callback) {
         if (success) {
           complete_callback(true, download_path);
@@ -634,6 +740,13 @@ bool AutoUpdater::install_update(
     [[maybe_unused]] const std::string& installer_path,
     std::string& error) {
 #ifdef _WIN32
+  // Verify signature before installation as final safety check
+  LOG_INFO("Verifying installer signature before execution: {}", installer_path);
+  if (!verify_authenticode_signature(installer_path, error)) {
+    LOG_ERROR("Refusing to install unsigned/untrusted executable: {}", error);
+    return false;
+  }
+
   // Use ShellExecute to run the installer with elevation
   SHELLEXECUTEINFOA sei = {};
   sei.cbSize = sizeof(sei);

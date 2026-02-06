@@ -12,6 +12,7 @@
 #include <QTimer>
 #include <QElapsedTimer>
 #include <QPointer>
+#include <memory>
 
 #include "common/gui/theme.h"
 
