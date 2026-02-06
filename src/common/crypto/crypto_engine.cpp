@@ -185,6 +185,46 @@ std::array<std::uint8_t, kNonceLen> derive_nonce(
   return nonce;
 }
 
+ResumedNonces derive_resumed_nonces(
+    std::span<const std::uint8_t, kNonceLen> old_send_nonce,
+    std::span<const std::uint8_t, kNonceLen> old_recv_nonce,
+    std::uint64_t session_id) {
+  ensure_sodium_ready();
+
+  // Build IKM from the old nonces concatenated
+  std::array<std::uint8_t, 2 * kNonceLen> ikm{};
+  std::copy(old_send_nonce.begin(), old_send_nonce.end(), ikm.begin());
+  std::copy(old_recv_nonce.begin(), old_recv_nonce.end(), ikm.begin() + kNonceLen);
+
+  // Build info string with session_id for domain separation
+  constexpr const char* label = "veil-0rtt-nonce-refresh-v1";
+  const auto label_len = std::strlen(label);
+
+  std::vector<std::uint8_t> info;
+  info.reserve(label_len + 8);
+  info.insert(info.end(), label, label + label_len);
+  for (int i = 7; i >= 0; --i) {
+    info.push_back(static_cast<std::uint8_t>((session_id >> (8 * i)) & 0xFF));
+  }
+
+  // HKDF extract + expand to derive 2 fresh nonces
+  auto prk = hkdf_extract({}, ikm);
+  auto material = hkdf_expand(prk, info, 2 * kNonceLen);
+
+  // SECURITY: Clear intermediate values
+  sodium_memzero(prk.data(), prk.size());
+  sodium_memzero(ikm.data(), ikm.size());
+
+  ResumedNonces result;
+  std::copy_n(material.begin(), kNonceLen, result.send_nonce.begin());
+  std::copy_n(material.begin() + kNonceLen, kNonceLen, result.recv_nonce.begin());
+
+  // SECURITY: Clear expanded material
+  sodium_memzero(material.data(), material.size());
+
+  return result;
+}
+
 std::array<std::uint8_t, kAeadKeyLen> derive_sequence_obfuscation_key(
     std::span<const std::uint8_t, kAeadKeyLen> send_key,
     std::span<const std::uint8_t, kNonceLen> send_nonce) {

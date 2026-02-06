@@ -48,6 +48,20 @@ SessionKeys derive_session_keys(std::span<const std::uint8_t, kSharedSecretSize>
 std::array<std::uint8_t, kNonceLen> derive_nonce(
     std::span<const std::uint8_t, kNonceLen> base_nonce, std::uint64_t counter);
 
+// Derive fresh nonces for 0-RTT session resumption (Issue #221).
+// Uses HKDF to produce new nonces from the cached nonces + session_id,
+// preventing nonce reuse across original and resumed sessions.
+// Both client and server call this with the same inputs to compute
+// identical nonces without changing the wire protocol.
+struct ResumedNonces {
+  std::array<std::uint8_t, kNonceLen> send_nonce{};
+  std::array<std::uint8_t, kNonceLen> recv_nonce{};
+};
+ResumedNonces derive_resumed_nonces(
+    std::span<const std::uint8_t, kNonceLen> old_send_nonce,
+    std::span<const std::uint8_t, kNonceLen> old_recv_nonce,
+    std::uint64_t session_id);
+
 // Derive a key for sequence number obfuscation from session keys.
 // This creates a deterministic but unique key per session for DPI resistance.
 std::array<std::uint8_t, kAeadKeyLen> derive_sequence_obfuscation_key(
