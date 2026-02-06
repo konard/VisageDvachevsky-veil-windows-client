@@ -21,14 +21,30 @@ A secure, high-performance UDP-based VPN with cryptographic handshakes, encrypte
 
 ## Quick Installation
 
-### Client (One-Line Installer)
+### ⚠ Security Notice
+
+The `curl | sudo bash` installation pattern is **NOT RECOMMENDED** as it provides no integrity verification. We strongly recommend using the secure installation method below.
+
+### Client Installation (Recommended Secure Method)
 
 ```bash
-# CLI-only client (with interactive setup wizard)
-curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_client.sh | sudo bash
+# Download installer script
+curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_client.sh -o install_client.sh
 
-# Client with Qt6 GUI
-curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_client.sh | sudo bash -s -- --with-gui
+# Download checksum
+curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_client.sh.sha256 -o install_client.sh.sha256
+
+# Verify integrity
+sha256sum -c install_client.sh.sha256
+
+# Review the script (IMPORTANT!)
+less install_client.sh
+
+# Install CLI-only client (with interactive setup wizard)
+sudo bash install_client.sh
+
+# Or install client with Qt6 GUI
+sudo bash install_client.sh --with-gui
 ```
 
 The installer includes an **interactive setup wizard** that guides you through server configuration and key file setup.
@@ -39,15 +55,43 @@ Run the wizard anytime after installation:
 sudo /usr/local/share/veil/setup-wizard.sh
 ```
 
-### Server (One-Line Installer)
+### Server Installation (Recommended Secure Method)
 
 ```bash
-# CLI-only server
-curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_veil.sh | sudo bash
+# Download installer script
+curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_veil.sh -o install_veil.sh
 
-# Server with Qt6 GUI monitoring dashboard
-curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_veil.sh | sudo bash -s -- --with-gui
+# Download checksum
+curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_veil.sh.sha256 -o install_veil.sh.sha256
+
+# Verify integrity
+sha256sum -c install_veil.sh.sha256
+
+# Review the script (IMPORTANT!)
+less install_veil.sh
+
+# Install CLI-only server
+sudo bash install_veil.sh
+
+# Or install server with Qt6 GUI monitoring dashboard
+sudo bash install_veil.sh --with-gui
 ```
+
+<details>
+<summary><strong>Alternative: One-Line Installation (NOT RECOMMENDED)</strong></summary>
+
+⚠️ **Warning:** This method skips integrity verification and is vulnerable to man-in-the-middle attacks.
+
+```bash
+# Client
+curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_client.sh | sudo bash
+
+# Server
+curl -sSL https://raw.githubusercontent.com/VisageDvachevsky/veil-core/main/install_veil.sh | sudo bash
+```
+
+The scripts will display a security warning and give you 10 seconds to abort before proceeding without integrity verification.
+</details>
 
 ## Building from Source
 
