@@ -58,7 +58,7 @@ class CollapsibleSection : public QWidget {
 
   QPushButton* toggleButton_;
   QFrame* contentContainer_;
-  QWidget* contentWidget_;
+  QWidget* contentWidget_{nullptr};
   QVBoxLayout* contentLayout_;
   QPropertyAnimation* animation_;
   bool collapsed_{false};

@@ -113,8 +113,8 @@ class SetupWizard : public QWidget {
   QPushButton* testConnectionButton_;
   QLabel* testResultLabel_;
   QLabel* configSummaryLabel_;
-  QCheckBox* createDesktopShortcutCheck_;
-  QCheckBox* createStartMenuShortcutCheck_;
+  QCheckBox* createDesktopShortcutCheck_{nullptr};
+  QCheckBox* createStartMenuShortcutCheck_{nullptr};
 
   // Active connection test socket (guarded to prevent use-after-free)
   QPointer<QTcpSocket> activeTestSocket_;
