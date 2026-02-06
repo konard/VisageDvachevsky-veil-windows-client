@@ -4,6 +4,7 @@
 #include <QVBoxLayout>
 #include <QTcpSocket>
 #include <QElapsedTimer>
+#include <memory>
 
 #include "common/gui/theme.h"
 
@@ -222,12 +223,12 @@ void ServerSelectorWidget::onRefreshLatency() {
 
   // Perform async ping
   auto* socket = new QTcpSocket(this);
-  QElapsedTimer timer;
-  timer.start();
+  auto timer = std::make_shared<QElapsedTimer>();
+  timer->start();
 
   QString serverId = server->id;
-  connect(socket, &QTcpSocket::connected, [this, &timer, serverId, socket]() {
-    int latency = static_cast<int>(timer.elapsed());
+  connect(socket, &QTcpSocket::connected, [this, timer, serverId, socket]() {
+    int latency = static_cast<int>(timer->elapsed());
     serverManager_->updateLatency(serverId, latency);
     updateLatencyDisplay();
     socket->disconnectFromHost();
