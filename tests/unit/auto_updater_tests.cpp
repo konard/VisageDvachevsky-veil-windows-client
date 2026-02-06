@@ -1,6 +1,11 @@
 #include <gtest/gtest.h>
 
+#include <fstream>
 #include <nlohmann/json.hpp>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include "common/updater/auto_updater.h"
 
@@ -551,5 +556,54 @@ TEST(AutoUpdaterTests, DestructorAfterConfigChange) {
   }
   SUCCEED();
 }
+
+// ============================================================================
+// Signature Verification Tests (Windows-specific)
+// ============================================================================
+
+#ifdef _WIN32
+TEST(AutoUpdaterTests, InstallUpdateRejectsNonexistentFile) {
+  updater::AutoUpdater updater;
+  std::string error;
+
+  // Try to install a file that doesn't exist
+  // Should fail signature verification before attempting to run
+  bool result = updater.install_update("C:\\nonexistent\\fake-installer.exe", error);
+
+  EXPECT_FALSE(result);
+  EXPECT_FALSE(error.empty());
+  // Should indicate signature verification failed
+  EXPECT_TRUE(error.find("signature") != std::string::npos ||
+              error.find("verify") != std::string::npos);
+}
+
+TEST(AutoUpdaterTests, InstallUpdateRejectsUnsignedFile) {
+  updater::AutoUpdater updater;
+  std::string error;
+
+  // Create a temporary unsigned file
+  std::string temp_path;
+  char temp_dir[MAX_PATH];
+  GetTempPathA(MAX_PATH, temp_dir);
+  temp_path = std::string(temp_dir) + "unsigned-test.exe";
+
+  // Create a minimal file (not a valid executable, but good enough for this test)
+  std::ofstream test_file(temp_path, std::ios::binary);
+  test_file << "MZ\x90\x00";  // Minimal DOS header
+  test_file.close();
+
+  // Try to install - should fail signature verification
+  bool result = updater.install_update(temp_path, error);
+
+  // Clean up
+  DeleteFileA(temp_path.c_str());
+
+  EXPECT_FALSE(result);
+  EXPECT_FALSE(error.empty());
+  // Should indicate no signature
+  EXPECT_TRUE(error.find("not signed") != std::string::npos ||
+              error.find("signature") != std::string::npos);
+}
+#endif
 
 }  // namespace veil::tests
