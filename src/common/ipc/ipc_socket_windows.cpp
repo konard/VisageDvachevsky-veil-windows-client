@@ -75,6 +75,10 @@ struct IpcServerImpl {
   std::vector<HANDLE> clients;
   std::map<int, std::string> receive_buffers;  // fd -> receive buffer (persistent across poll() calls)
   std::vector<OVERLAPPED> overlapped_ops;
+
+  // Persistent connection acceptance state
+  OVERLAPPED accept_overlap{};
+  bool accept_pending{false};
 };
 
 IpcServer::IpcServer(std::string socket_path)
@@ -124,6 +128,17 @@ bool IpcServer::start(std::error_code& ec) {
     return false;
   }
 
+  // Initialize persistent OVERLAPPED structure for accepting connections
+  impl_->accept_overlap = {};
+  impl_->accept_overlap.hEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
+  if (impl_->accept_overlap.hEvent == nullptr) {
+    ec = last_error();
+    LOG_ERROR("Failed to create accept event: {}", ec.message());
+    CloseHandle(impl_->pipe);
+    impl_->pipe = INVALID_HANDLE_VALUE;
+    return false;
+  }
+
   running_ = true;
   LOG_INFO("IPC server started on {}", socket_path_);
   return true;
@@ -135,6 +150,18 @@ void IpcServer::stop() {
   }
 
   running_ = false;
+
+  // Cancel any pending accept operation
+  if (impl_->accept_pending && impl_->pipe != INVALID_HANDLE_VALUE) {
+    CancelIo(impl_->pipe);
+    impl_->accept_pending = false;
+  }
+
+  // Close accept event handle
+  if (impl_->accept_overlap.hEvent != nullptr) {
+    CloseHandle(impl_->accept_overlap.hEvent);
+    impl_->accept_overlap.hEvent = nullptr;
+  }
 
   // Close all client connections
   for (auto& client : impl_->clients) {
@@ -219,16 +246,59 @@ void IpcServer::poll(std::error_code& ec) {
 }
 
 void IpcServer::accept_connection(std::error_code& ec) {
-  // Check if there's a pending connection
-  OVERLAPPED overlap = {};
-  overlap.hEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
+  // If we have a pending connection, check if it completed
+  if (impl_->accept_pending) {
+    DWORD wait_result = WaitForSingleObject(impl_->accept_overlap.hEvent, 0);
+    if (wait_result == WAIT_OBJECT_0) {
+      // Connection completed - move pipe to clients and create new one
+      impl_->clients.push_back(impl_->pipe);
+      impl_->accept_pending = false;
 
-  BOOL connected = ConnectNamedPipe(impl_->pipe, &overlap);
+      LOG_DEBUG("Client connected to IPC server");
+
+      // Create a new pipe instance for the next client with proper security
+      SECURITY_ATTRIBUTES sa;
+      sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+      sa.bInheritHandle = FALSE;
+      PSECURITY_DESCRIPTOR pSD = create_pipe_security_descriptor();
+      sa.lpSecurityDescriptor = pSD;
+
+      impl_->pipe = CreateNamedPipeA(
+          socket_path_.c_str(),
+          PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+          PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+          kMaxPendingConnections,
+          kPipeBufferSize,
+          kPipeBufferSize,
+          kDefaultTimeout,
+          &sa);
+
+      // Free the security descriptor after pipe creation
+      if (pSD) {
+        LocalFree(pSD);
+      }
+
+      if (impl_->pipe == INVALID_HANDLE_VALUE) {
+        ec = last_error();
+        LOG_ERROR("Failed to create new pipe instance: {}", ec.message());
+        return;
+      }
+
+      // Reset the event for the next accept operation
+      ResetEvent(impl_->accept_overlap.hEvent);
+    }
+    // Still pending, nothing to do
+    return;
+  }
+
+  // No pending connection, initiate a new accept operation
+  BOOL connected = ConnectNamedPipe(impl_->pipe, &impl_->accept_overlap);
   DWORD error = GetLastError();
 
   if (connected || error == ERROR_PIPE_CONNECTED) {
-    // Client connected immediately
+    // Client connected immediately (synchronous)
     impl_->clients.push_back(impl_->pipe);
+
     LOG_DEBUG("Client connected to IPC server");
 
     // Create a new pipe instance for the next client with proper security
@@ -252,39 +322,23 @@ void IpcServer::accept_connection(std::error_code& ec) {
     if (pSD) {
       LocalFree(pSD);
     }
-  } else if (error == ERROR_IO_PENDING) {
-    // Check if connection completed
-    DWORD wait_result = WaitForSingleObject(overlap.hEvent, 0);
-    if (wait_result == WAIT_OBJECT_0) {
-      impl_->clients.push_back(impl_->pipe);
-      LOG_DEBUG("Client connected to IPC server (async)");
 
-      // Create a new pipe instance with proper security
-      SECURITY_ATTRIBUTES sa;
-      sa.nLength = sizeof(SECURITY_ATTRIBUTES);
-      sa.bInheritHandle = FALSE;
-      PSECURITY_DESCRIPTOR pSD = create_pipe_security_descriptor();
-      sa.lpSecurityDescriptor = pSD;
-
-      impl_->pipe = CreateNamedPipeA(
-          socket_path_.c_str(),
-          PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-          PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
-          kMaxPendingConnections,
-          kPipeBufferSize,
-          kPipeBufferSize,
-          kDefaultTimeout,
-          &sa);
-
-      // Free the security descriptor after pipe creation
-      if (pSD) {
-        LocalFree(pSD);
-      }
+    if (impl_->pipe == INVALID_HANDLE_VALUE) {
+      ec = last_error();
+      LOG_ERROR("Failed to create new pipe instance: {}", ec.message());
+      return;
     }
-    CancelIo(impl_->pipe);
-  }
 
-  CloseHandle(overlap.hEvent);
+    // Reset the event for the next accept operation
+    ResetEvent(impl_->accept_overlap.hEvent);
+  } else if (error == ERROR_IO_PENDING) {
+    // Connection is now pending asynchronously
+    impl_->accept_pending = true;
+  } else {
+    // Some other error occurred
+    ec = std::error_code(static_cast<int>(error), std::system_category());
+    LOG_ERROR("ConnectNamedPipe failed: {}", ec.message());
+  }
 }
 
 void IpcServer::handle_client_data(ClientConnection& conn, std::error_code& ec) {
