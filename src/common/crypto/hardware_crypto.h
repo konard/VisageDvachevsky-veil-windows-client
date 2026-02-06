@@ -15,17 +15,20 @@ namespace veil::crypto {
 // Hardware-Accelerated Sequence Obfuscation
 // ============================================================================
 
-// Obfuscate sequence number using AES-NI when available.
-// Falls back to ChaCha20-based obfuscation when AES-NI is not available.
-// This provides ~10x speedup on systems with AES-NI support.
+// Obfuscate sequence number for cross-platform interoperability.
+// Always uses ChaCha20-based 1-round Feistel network to ensure consistent results
+// across all hardware platforms (Issue #226).
 //
-// The obfuscation uses a single AES block encryption as a pseudorandom function.
-// This is cryptographically secure when the key is secret and produces
-// indistinguishable-from-random output for DPI resistance.
+// Previously, this function used AES-NI when available and ChaCha20 as fallback,
+// but these algorithms produced different outputs, breaking communication between
+// systems with different CPU capabilities. Now uses ChaCha20 consistently for
+// guaranteed interoperability while maintaining excellent performance.
+//
+// The obfuscation produces indistinguishable-from-random output for DPI resistance.
 std::uint64_t obfuscate_sequence_hw(std::uint64_t sequence,
                                      std::span<const std::uint8_t, kAeadKeyLen> obfuscation_key);
 
-// Deobfuscate sequence number using AES-NI when available.
+// Deobfuscate sequence number.
 // The obfuscation is designed to be symmetric (XOR-based), so this function
 // simply calls obfuscate_sequence_hw internally.
 std::uint64_t deobfuscate_sequence_hw(std::uint64_t obfuscated_sequence,
