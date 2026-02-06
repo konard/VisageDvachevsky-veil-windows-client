@@ -1534,9 +1534,6 @@ void SettingsWidget::saveSettings() {
     }
   )").arg(colors::dark::kBackgroundSecondary, colors::dark::kTextSecondary));
 
-  // Process events to update UI immediately
-  QApplication::processEvents();
-
   // Save settings to QSettings
   QSettings settings("VEIL", "VPN Client");
 
