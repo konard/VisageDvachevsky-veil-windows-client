@@ -1016,7 +1016,7 @@ void SetupWizard::onTestConnection() {
       testConnectionButton_->setEnabled(true);
       testConnectionButton_->setText(tr("Test Connection"));
       activeTestSocket_ = nullptr;
-      socketGuard->deleteLater();
+      // Don't call deleteLater() here — the error handler will do it
     }
   });
 }

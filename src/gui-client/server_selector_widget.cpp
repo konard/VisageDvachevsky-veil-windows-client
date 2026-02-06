@@ -4,6 +4,7 @@
 #include <QVBoxLayout>
 #include <QTcpSocket>
 #include <QElapsedTimer>
+#include <QPointer>
 #include <memory>
 
 #include "common/gui/theme.h"
@@ -223,31 +224,35 @@ void ServerSelectorWidget::onRefreshLatency() {
 
   // Perform async ping
   auto* socket = new QTcpSocket(this);
-  auto timer = std::make_shared<QElapsedTimer>();
-  timer->start();
+  auto socketGuard = QPointer<QTcpSocket>(socket);
+  QElapsedTimer timer;
+  timer.start();
 
   QString serverId = server->id;
-  connect(socket, &QTcpSocket::connected, [this, timer, serverId, socket]() {
-    int latency = static_cast<int>(timer->elapsed());
+  connect(socket, &QTcpSocket::connected, [this, &timer, serverId, socketGuard]() {
+    if (!socketGuard) return;
+    int latency = static_cast<int>(timer.elapsed());
     serverManager_->updateLatency(serverId, latency);
     updateLatencyDisplay();
-    socket->disconnectFromHost();
-    socket->deleteLater();
+    socketGuard->disconnectFromHost();
+    socketGuard->deleteLater();
   });
 
   connect(socket, QOverload<QAbstractSocket::SocketError>::of(&QAbstractSocket::errorOccurred),
-          [this, serverId, socket](QAbstractSocket::SocketError) {
+          [this, serverId, socketGuard](QAbstractSocket::SocketError) {
+    if (!socketGuard) return;
     serverManager_->updateLatency(serverId, -1);
     updateLatencyDisplay();
-    socket->deleteLater();
+    socketGuard->deleteLater();
   });
 
   // Timeout after 5 seconds
-  QTimer::singleShot(5000, socket, [socket]() {
-    if (socket->state() == QAbstractSocket::ConnectingState ||
-        socket->state() == QAbstractSocket::HostLookupState) {
-      socket->abort();
-      socket->deleteLater();
+  QTimer::singleShot(5000, this, [socketGuard]() {
+    if (!socketGuard) return;
+    if (socketGuard->state() == QAbstractSocket::ConnectingState ||
+        socketGuard->state() == QAbstractSocket::HostLookupState) {
+      socketGuard->abort();
+      // Don't call deleteLater() here — the error handler will do it
     }
   });
 
