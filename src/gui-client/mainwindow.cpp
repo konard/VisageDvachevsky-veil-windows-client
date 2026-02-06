@@ -196,10 +196,10 @@ MainWindow::MainWindow(QWidget* parent)
   dataUsageWidget_ = new DataUsageWidget(usageTracker_, this);
 
   qDebug().noquote() << "MainWindow: Creating IpcClientManager...";
-  ipcManager_ = std::make_unique<IpcClientManager>(this);
+  ipcManager_ = std::make_unique<IpcClientManager>();
 
   qDebug().noquote() << "MainWindow: Creating UpdateChecker...";
-  updateChecker_ = std::make_unique<UpdateChecker>(this);
+  updateChecker_ = std::make_unique<UpdateChecker>();
 
   qDebug() << "MainWindow: All widgets created, initializing GUI components...";
 
