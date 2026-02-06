@@ -1700,14 +1700,12 @@ bool MainWindow::ensureServiceRunning() {
             qDebug() << "ensureServiceRunning: Elevation succeeded, service installation requested";
 
             progress->setLabelText(tr("Verifying service installation..."));
-            QApplication::processEvents();  // Update UI
 
             // Verify installation succeeded
             if (ServiceManager::is_installed()) {
               qDebug() << "ensureServiceRunning: Service installation verified, attempting to start...";
 
               progress->setLabelText(tr("Starting VEIL service..."));
-              QApplication::processEvents();  // Update UI
 
               // Initiate service start (non-blocking) - the caller will wait for IPC readiness
               std::string error;
@@ -1778,7 +1776,6 @@ bool MainWindow::ensureServiceRunning() {
           statusBar()->showMessage(tr("VEIL service installed successfully"), 3000);
 
           progress->setLabelText(tr("Starting VEIL service..."));
-          QApplication::processEvents();  // Update UI
 
           // Initiate service start (non-blocking) - the caller will wait for IPC readiness
           if (ServiceManager::start(error)) {
